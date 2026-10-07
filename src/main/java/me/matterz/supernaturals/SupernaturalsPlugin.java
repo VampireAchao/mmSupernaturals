@@ -19,7 +19,6 @@
 
 package me.matterz.supernaturals;
 
-import static com.sk89q.worldguard.bukkit.BukkitUtil.toVector;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -78,11 +77,12 @@ import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import com.sk89q.worldedit.Vector;
+import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.bukkit.WorldGuardPlugin;
-import com.sk89q.worldguard.protection.ApplicableRegionSet;
-import com.sk89q.worldguard.protection.flags.DefaultFlag;
-import com.sk89q.worldguard.protection.managers.RegionManager;
+import com.sk89q.worldguard.protection.flags.Flags;
+import com.sk89q.worldguard.protection.flags.StateFlag;
+import com.sk89q.worldguard.protection.regions.RegionQuery;
 
 public class SupernaturalsPlugin extends JavaPlugin {
 	public static SupernaturalsPlugin instance;
@@ -391,37 +391,30 @@ public class SupernaturalsPlugin extends JavaPlugin {
 		return player.hasPermission(permissions);
 	}
 
-	private WorldGuardPlugin getWorldGuard() {
+	private boolean isWorldGuardPresent() {
 		Plugin plugin = getServer().getPluginManager().getPlugin("WorldGuard");
+		return plugin != null && plugin.isEnabled();
+	}
 
-		// WorldGuard may not be loaded
-		if (plugin == null || !(plugin instanceof WorldGuardPlugin)) {
-			return null; // Maybe you want throw an exception instead
-		}
-
-		return (WorldGuardPlugin) plugin;
+	private boolean testFlag(Player player, StateFlag flag) {
+		RegionQuery query = WorldGuard.getInstance().getPlatform()
+				.getRegionContainer().createQuery();
+		return query.testState(BukkitAdapter.adapt(player.getLocation()),
+				WorldGuardPlugin.inst().wrapPlayer(player), flag);
 	}
 
 	public boolean getPvP(Player player) {
-		WorldGuardPlugin worldGuard = SupernaturalsPlugin.instance.getWorldGuard();
-		if (worldGuard == null) {
+		if (!isWorldGuardPresent()) {
 			return true;
 		}
-		Vector pt = toVector(player.getLocation());
-		RegionManager regionManager = worldGuard.getRegionManager(player.getWorld());
-		ApplicableRegionSet set = regionManager.getApplicableRegions(pt);
-		return set.allows(DefaultFlag.PVP);
+		return testFlag(player, Flags.PVP);
 	}
 
 	public boolean getSpawn(Player player) {
-		WorldGuardPlugin worldGuard = SupernaturalsPlugin.instance.getWorldGuard();
-		if (worldGuard == null) {
+		if (!isWorldGuardPresent()) {
 			return true;
 		}
-		Vector pt = toVector(player.getLocation());
-		RegionManager regionManager = worldGuard.getRegionManager(player.getWorld());
-		ApplicableRegionSet set = regionManager.getApplicableRegions(pt);
-		return set.allows(DefaultFlag.MOB_SPAWNING);
+		return testFlag(player, Flags.MOB_SPAWNING);
 	}
 
 	// -------------------------------------------- //

@@ -2,6 +2,7 @@ name: mmSupernaturals
 main: me.matterz.supernaturals.SupernaturalsPlugin
 version: ${project.version}
 api-version: "1.21"
+softdepend: [WorldGuard]
 author: Matterz, edited by mmiillkkaa
 commands:
   sn:
