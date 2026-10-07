@@ -1,0 +1,6 @@
+target/
+run/*
+!run/README.md
+.idea/*
+!.idea/runConfigurations/
+*.iml

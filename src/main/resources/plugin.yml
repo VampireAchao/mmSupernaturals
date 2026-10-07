@@ -1,6 +1,7 @@
 name: mmSupernaturals
 main: me.matterz.supernaturals.SupernaturalsPlugin
-version: 1.4.1
+version: ${project.version}
+api-version: "1.21"
 author: Matterz, edited by mmiillkkaa
 commands:
   sn:
