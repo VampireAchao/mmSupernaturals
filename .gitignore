@@ -1,6 +1,20 @@
 target/
-run/*
-!run/README.md
 .idea/*
 !.idea/runConfigurations/
 *.iml
+# local dev server (see TESTING.md)
+/paper.jar
+/plugins/
+/world*/
+/logs/
+/cache/
+/libraries/
+/versions/
+/config/
+/eula.txt
+/server.properties
+/bukkit.yml
+/spigot.yml
+/*.json
+/*.yml
+!/pom.xml

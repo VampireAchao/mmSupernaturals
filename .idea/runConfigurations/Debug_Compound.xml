@@ -1,7 +1,0 @@
-<component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Debug (restart server + attach)" type="CompoundRunConfigurationType">
-    <toRun name="Debug Server" type="MavenRunConfiguration" />
-    <toRun name="Attach Debugger" type="Remote" />
-    <method v="2" />
-  </configuration>
-</component>
