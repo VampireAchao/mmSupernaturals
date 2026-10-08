@@ -815,11 +815,12 @@ public class SNConfigHandler {
 			}
 
 			if (wereWolfbaneQuantities.size() == 0) {
-				wereWolfbaneQuantities.add(10);
-				wereWolfbaneQuantities.add(10);
-				wereWolfbaneQuantities.add(10);
-				wereWolfbaneQuantities.add(10);
-				wereWolfbaneQuantities.add(1);
+				// 必须与 Were.Wolfbane.Materials 逐位对应：前 4 种（蒲公英、虞美人、
+				// 红/棕蘑菇）各 10，其余（各种花 + 最后那个碗）各 1。
+				// 长度不一致时 loadValues 会对每个越界下标抛一次 IndexOutOfBounds 并打堆栈。
+				for (int i = 0; i < wereWolfbaneMaterialsString.size(); i++) {
+					wereWolfbaneQuantities.add(i < 4 ? 10 : 1);
+				}
 				config.set("Were.Wolfbane.Quantities", wereWolfbaneQuantities);
 			}
 
@@ -1268,13 +1269,10 @@ public class SNConfigHandler {
 
 		for (int i = 0; i < wereWolfbaneMaterialsString.size(); i++) {
 			Material material = Material.getMaterial(wereWolfbaneMaterialsString.get(i));
-			int quantity = 1;
-			try {
-				quantity = wereWolfbaneQuantities.get(i);
-			} catch (Exception e) {
-				e.printStackTrace();
-				SupernaturalsPlugin.log("Invalid Wolfbane Quantities!");
-			}
+			// 数量表比材料表短时按 1 补，不要抛异常打堆栈 ——
+			// 老服务器的 config.yml 里可能还留着上一次生成的短表，删除重建才能修，
+			// 这里直接容忍，避免每次启动刷一屏 IndexOutOfBoundsException。
+			int quantity = (i < wereWolfbaneQuantities.size()) ? wereWolfbaneQuantities.get(i) : 1;
 			wereWolfbaneRecipe.materialQuantities.put(material, quantity);
 		}
 
