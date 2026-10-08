@@ -35,9 +35,10 @@ import me.matterz.supernaturals.util.SNTaskTimer;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
-import org.bukkit.entity.Creature;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Wolf;
 import org.bukkit.util.Vector;
@@ -310,31 +311,26 @@ public class SuperNManager {
 		// Untarget the player.
 		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
 		for (LivingEntity entity : player.getWorld().getLivingEntities()) {
-			if (!(entity instanceof Creature)) {
+			// Mob (not Creature) so that hostile mobs without the Creature interface
+			// (Ghast, Phantom, EnderDragon, ...) are untargeted as well.
+			if (!(entity instanceof Mob)) {
 				continue;
 			}
 
-			if (snplayer.isVampire()
-					&& SNConfigHandler.vampireTruce.contains(EntityUtil.entityTypeFromEntity(entity))) {
-				Creature creature = (Creature) entity;
-				LivingEntity target = creature.getTarget();
-				if (target != null && creature.getTarget().equals(player)) {
-					creature.setTarget(null);
-				}
-			} else if (snplayer.isGhoul()
-					&& SNConfigHandler.ghoulTruce.contains(EntityUtil.entityTypeFromEntity(entity))) {
-				Creature creature = (Creature) entity;
-				LivingEntity target = creature.getTarget();
-				if (target != null && creature.getTarget().equals(player)) {
-					creature.setTarget(null);
-				}
-			} else if (snplayer.isWere() && SNConfigHandler.wolfTruce
-					&& entity instanceof Wolf) {
-				Creature creature = (Creature) entity;
-				LivingEntity target = creature.getTarget();
-				if (target != null && creature.getTarget().equals(player)) {
-					creature.setTarget(null);
-				}
+			EntityType type = EntityUtil.entityTypeFromEntity(entity);
+
+			boolean sharesTruce = (snplayer.isVampire() && SNConfigHandler.vampireTruce.contains(type))
+					|| (snplayer.isGhoul() && SNConfigHandler.ghoulTruce.contains(type))
+					|| (snplayer.isWere() && SNConfigHandler.wolfTruce && entity instanceof Wolf);
+
+			if (!sharesTruce) {
+				continue;
+			}
+
+			Mob mob = (Mob) entity;
+			LivingEntity target = mob.getTarget();
+			if (target != null && target.equals(player)) {
+				mob.setTarget(null);
 			}
 		}
 	}

@@ -19,20 +19,27 @@
 
 package me.matterz.supernaturals.util;
 
-import org.bukkit.entity.Creature;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 
 public class EntityUtil {
 
+	/**
+	 * Resolves the Bukkit type of an entity.
+	 * <p>
+	 * This used to guess the type from the CraftBukkit class name, which only worked for
+	 * {@code Creature}s and silently returned {@code null} for hostile mobs that are not
+	 * creatures (Ghast, Phantom, EnderDragon, ...). Those mobs could therefore never match
+	 * the truce lists, so a vampire with an intact truce still got attacked by them.
+	 *
+	 * @param entity the entity to inspect, may be {@code null}
+	 * @return the entity type, or {@code null} when there is no entity
+	 */
 	public static EntityType entityTypeFromEntity(Entity entity) {
-		if (!(entity instanceof Creature)) {
+		if (entity == null) {
 			return null;
 		}
 
-		String name = entity.getClass().getSimpleName();
-		name = name.substring(5); // Remove "Craft"
-
-		return EntityType.fromName(name);
+		return entity.getType();
 	}
 }
