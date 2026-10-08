@@ -10,11 +10,10 @@
   <name>mmSupernaturals</name>
 
   <properties>
-    <java.version>21</java.version>
-    <maven.compiler.release>21</maven.compiler.release>
+    <java.version>25</java.version>
+    <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <paper.version>1.21.4-R0.1-SNAPSHOT</paper.version>
-    <mockbukkit.version>4.45.0</mockbukkit.version>
+    <mockbukkit.version>4.117.0</mockbukkit.version>
     <junit.version>5.11.4</junit.version>
   </properties>
 
@@ -50,7 +49,7 @@
     </dependency>
     <dependency>
       <groupId>org.mockbukkit.mockbukkit</groupId>
-      <artifactId>mockbukkit-v1.21</artifactId>
+      <artifactId>mockbukkit-v26.2</artifactId>
       <version>${mockbukkit.version}</version>
       <scope>test</scope>
     </dependency>
@@ -75,8 +74,10 @@
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.4.2</version>
         <configuration>
-          <!-- package straight into the dev server's plugins folder -->
-          <outputDirectory>${session.executionRootDirectory}/plugins/</outputDirectory>
+          <!-- 产物按 Minecraft 版本区分：mmSupernaturals-mc26.2.jar / -mc26.3.jar，
+               并直接投到本地开发服务端的 plugins 目录 -->
+          <classifier>${build.classifier}</classifier>
+          <outputDirectory>${session.executionRootDirectory}/server/plugins/</outputDirectory>
         </configuration>
       </plugin>
       <plugin>
@@ -86,5 +87,38 @@
       </plugin>
     </plugins>
   </build>
+
+  <!--
+    双版本构建：26.2 与 26.3 的 Paper API 并不相同，所以各用各的 API 编译。
+    产物用 classifier 区分，互不覆盖；clean 只清理 target/，不会删掉已产出的 jar。
+
+      默认档（26.3）: mvn clean package
+      兼容 26.2 档  : mvn clean package -Pmc26.2
+  -->
+  <profiles>
+    <profile>
+      <id>mc26.3</id>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+      <properties>
+        <paper.version>26.3.build.159-beta</paper.version>
+        <plugin.api.version>26.3</plugin.api.version>
+        <build.classifier>mc26.3</build.classifier>
+        <!-- MockBukkit 目前没有 26.3（最新只到 mockbukkit-v26.2），其内置注册表数据是按 26.2 打包的，
+             用于 26.3 会抛 InternalDataLoadException: MockBukkit / MC version mismatch。
+             因此 26.3 档只保证编译通过，功能验证由 26.2 档的单元测试 + 真实 Paper 26.3 服务端承担。 -->
+        <skipTests>true</skipTests>
+      </properties>
+    </profile>
+    <profile>
+      <id>mc26.2</id>
+      <properties>
+        <paper.version>26.2.build.132-stable</paper.version>
+        <plugin.api.version>26.2</plugin.api.version>
+        <build.classifier>mc26.2</build.classifier>
+      </properties>
+    </profile>
+  </profiles>
 
 </project>
