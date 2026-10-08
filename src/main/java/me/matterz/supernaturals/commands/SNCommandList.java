@@ -94,7 +94,7 @@ public class SNCommandList extends SNCommand {
 			messages.add("EnderBorns: " + ChatColor.WHITE
 					+ TextUtil.implode(enderborns, ", "));
 			messagesSpanish.add("*** " + ChatColor.WHITE
-					+ "Seres Místicos conectados: " + ChatColor.RED + "***");
+					+ "Seres MÃ­sticos conectados: " + ChatColor.RED + "***");
 			messagesSpanish.add("Vampiros: " + ChatColor.WHITE
 					+ TextUtil.implode(vampires, ", "));
 			messagesSpanish.add("Hombres Lobos: " + ChatColor.WHITE
@@ -178,7 +178,7 @@ public class SNCommandList extends SNCommand {
 				+ TextUtil.implode(enderborns, ", "));
 		messages.add("Angels: " + ChatColor.WHITE + TextUtil.implode(angels, ", "));
 		messagesSpanish.add("*** " + ChatColor.WHITE
-				+ "Seres Místicos conectados: " + ChatColor.RED + "***");
+				+ "Seres MÃ­sticos conectados: " + ChatColor.RED + "***");
 		messagesSpanish.add("Vampiros: " + ChatColor.WHITE
 				+ TextUtil.implode(vampires, ", "));
 		messagesSpanish.add("Hombres Lobos: " + ChatColor.WHITE

@@ -376,13 +376,13 @@ public class HunterManager extends HumanManager {
 			if (door.isTopHalf()) {
 				newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() - 1, loc.getBlockZ());
 				newBlock = newLoc.getBlock();
-				block.setTypeIdAndData(71, (byte) (block.getData() + 4), false);
-				newBlock.setTypeIdAndData(71, (byte) (newBlock.getData() + 4), false);
+				setDoorOpen(block, true);
+				setDoorOpen(newBlock, true);
 			} else {
 				newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() + 1, loc.getBlockZ());
 				newBlock = newLoc.getBlock();
-				block.setTypeIdAndData(71, (byte) (block.getData() + 4), false);
-				newBlock.setTypeIdAndData(71, (byte) (newBlock.getData() + 4), false);
+				setDoorOpen(block, true);
+				setDoorOpen(newBlock, true);
 			}
 
 			addDoorLocation(loc);
@@ -416,17 +416,31 @@ public class HunterManager extends HumanManager {
 		if (door.isTopHalf()) {
 			newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() - 1, loc.getBlockZ());
 			newBlock = newLoc.getBlock();
-			block.setTypeIdAndData(71, (byte) (block.getData() - 4), false);
-			newBlock.setTypeIdAndData(71, (byte) (newBlock.getData() - 4), false);
+			setDoorOpen(block, false);
+			setDoorOpen(newBlock, false);
 		} else {
 			newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() + 1, loc.getBlockZ());
 			newBlock = newLoc.getBlock();
-			block.setTypeIdAndData(71, (byte) (block.getData() - 4), false);
-			newBlock.setTypeIdAndData(71, (byte) (newBlock.getData() - 4), false);
+			setDoorOpen(block, false);
+			setDoorOpen(newBlock, false);
 		}
 
 		removeDoorLocation(loc);
 		removeDoorLocation(newLoc);
+	}
+
+	/**
+	 * 1.21 起 Block#setTypeIdAndData(int, byte, boolean) 已被移除。
+	 * 旧代码通过 (data ± 4) 直接翻转铁门方块数据里的 open 位，
+	 * 这里用 BlockData API 表达同样的语义（只切换 open 状态，不动其他属性）。
+	 */
+	private static void setDoorOpen(Block block, boolean open) {
+		org.bukkit.block.data.BlockData data = block.getBlockData();
+		if (data instanceof org.bukkit.block.data.type.Door) {
+			org.bukkit.block.data.type.Door doorData = (org.bukkit.block.data.type.Door) data;
+			doorData.setOpen(open);
+			block.setBlockData(doorData, false);
+		}
 	}
 
 	// -------------------------------------------- //

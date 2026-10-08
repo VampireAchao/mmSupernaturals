@@ -47,9 +47,9 @@ public class SNCommandHelp extends SNCommand {
 		helpMessagesSpanish.add("/sn Power " + ChatColor.WHITE
 				+ "- Indica tus Poderes actuales.");
 		helpMessagesSpanish.add("/sn List " + ChatColor.WHITE
-				+ "- Lista de Seres Místicos conectados.");
+				+ "- Lista de Seres MÃ­sticos conectados.");
 		helpMessagesSpanish.add("/sn Classes " + ChatColor.WHITE
-				+ "- Lista de Seres Místicos disponibles.");
+				+ "- Lista de Seres MÃ­sticos disponibles.");
 		helpMessagesSpanish.add("/sn KillList " + ChatColor.WHITE
 				+ "- Lista de objetivos para Cazadores de Brujas.");
 		helpMessages.add("*** " + ChatColor.WHITE + "Supernatural Help "

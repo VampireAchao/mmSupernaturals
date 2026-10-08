@@ -397,7 +397,7 @@ public class PriestManager extends HumanManager {
 				SuperNManager.sendMessage(snvictim, "You were healed by "
 						+ ChatColor.WHITE + snplayer.getName() + ChatColor.RED
 						+ "!");
-				int health = victim.getHealth()
+				double health = victim.getHealth()
 						+ SNConfigHandler.priestHealAmount;
 				if (health > 20) {
 					health = 20;

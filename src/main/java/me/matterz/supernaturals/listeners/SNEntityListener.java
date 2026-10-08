@@ -90,7 +90,7 @@ public class SNEntityListener implements Listener {
 								continue;
 							}
 						}
-						lEntity.damage(SNConfigHandler.demonFireballDamage, fireball.getShooter());
+						lEntity.damage(SNConfigHandler.demonFireballDamage, (Entity) fireball.getShooter());
 						lEntity.setFireTicks(200);
 					}
 				}

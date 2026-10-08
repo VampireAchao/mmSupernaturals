@@ -47,7 +47,7 @@ public class SNBlockListener implements Listener {
 	@EventHandler(priority = EventPriority.LOW)
 	public void onBlockBreak(BlockBreakEvent event) {
 		Block eventBlock = event.getBlock();
-		if (eventBlock.getType().equals(Material.WEB)) {
+		if (eventBlock.getType().equals(Material.COBWEB)) {
 			for (Block block : plugin.getDemonManager().getWebs().keySet()) {
 				if (block.equals(eventBlock)) {
 					event.setCancelled(true);
@@ -75,8 +75,8 @@ public class SNBlockListener implements Listener {
 				if (!SupernaturalsPlugin.hasPermissions(player, permissions)) {
 					SuperNManager.sendMessage(SuperNManager.get(player), "You do not have permission to create WitchHunter signs");
 					event.setCancelled(true);
-					event.getBlock().setTypeId(0);
-					player.getWorld().dropItem(player.getLocation(), new ItemStack(Material.SIGN, 1));
+					event.getBlock().setType(Material.AIR);
+					player.getWorld().dropItem(player.getLocation(), new ItemStack(Material.OAK_SIGN, 1));
 				}
 				return;
 			}

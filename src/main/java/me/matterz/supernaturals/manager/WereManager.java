@@ -311,7 +311,7 @@ public class WereManager extends ClassManager {
 					}
 				}
 				if (i <= 4) {
-					Wolf wolf = (Wolf) player.getWorld().spawnCreature(player.getLocation(), EntityType.WOLF);
+					Wolf wolf = (Wolf) player.getWorld().spawnEntity(player.getLocation(), EntityType.WOLF);
 					wolf.setTamed(true);
 					wolf.setOwner(player);
 					wolf.setHealth(20);

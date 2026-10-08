@@ -141,16 +141,16 @@ public class DemonManager extends ClassManager {
 			int pLocY = player.getLocation().getBlockZ();
 			Biome pBiome = player.getWorld().getBiome(pLocX, pLocY);
 			if (snplayer.isDemon()) {
-				if (pBiome == Biome.TAIGA || pBiome == Biome.TUNDRA
+				if (pBiome == Biome.TAIGA || pBiome == Biome.SNOWY_TAIGA
 						|| pBiome == Biome.FROZEN_OCEAN
 						|| pBiome == Biome.FROZEN_RIVER
-						|| pBiome == Biome.ICE_DESERT
-						|| pBiome == Biome.ICE_MOUNTAINS
-						|| pBiome == Biome.ICE_PLAINS) {
+						|| pBiome == Biome.SNOWY_PLAINS
+						|| pBiome == Biome.SNOWY_SLOPES
+						|| pBiome == Biome.SNOWY_PLAINS) {
 					if (SNConfigHandler.debugMode) {
 						SupernaturalsPlugin.log("Demon drowned.  Checking inventory...");
 					}
-					if (player.getInventory().contains(Material.SNOW_BALL, SNConfigHandler.demonSnowballAmount)) {
+					if (player.getInventory().contains(Material.SNOWBALL, SNConfigHandler.demonSnowballAmount)) {
 						SuperNManager.sendMessage(snplayer, "Your icy death has cooled the infernal fires raging within your body.");
 						SuperNManager.cure(snplayer);
 						if (SNConfigHandler.debugMode) {
@@ -333,7 +333,7 @@ public class DemonManager extends ClassManager {
 			return;
 		}
 
-		int health = player.getHealth();
+		double health = player.getHealth();
 		health += SNConfigHandler.demonHealing;
 		if (health > 20) {
 			health = 20;
@@ -430,8 +430,8 @@ public class DemonManager extends ClassManager {
 				for (int z = loc.getBlockZ() - 1; z < loc.getBlockZ() + 2; z++) {
 					Location newLoc = new Location(block.getWorld(), x, y, z);
 					Block newBlock = newLoc.getBlock();
-					if (newBlock.getTypeId() == 0) {
-						newBlock.setType(Material.WEB);
+					if (newBlock.getType() == Material.AIR) {
+						newBlock.setType(Material.COBWEB);
 						webMap.put(newBlock, loc);
 					}
 				}

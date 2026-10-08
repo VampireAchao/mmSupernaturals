@@ -442,7 +442,6 @@ public class VampireManager extends ClassManager {
 		if (player.getWorld().getEnvironment().equals(Environment.NETHER)
 				|| SuperNManager.worldTimeIsNight(player)
 				|| isUnderRoof(player)
-				|| material.equals(Material.STATIONARY_WATER)
 				|| material.equals(Material.WATER) || playerWorld.hasStorm()
 				|| hasHelmet(player)) {
 			return false;

@@ -84,7 +84,7 @@ public class AngelManager extends ClassManager {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		if (action.equals(Action.LEFT_CLICK_AIR)
 				|| action.equals(Action.LEFT_CLICK_BLOCK)) {
-			if (itemInHandMaterial.equals(Material.YELLOW_FLOWER)) {
+			if (itemInHandMaterial.equals(Material.DANDELION)) {
 				if (snplayer.getPower() > SNConfigHandler.angelJumpPowerCost) {
 					jump(player, SNConfigHandler.angelJumpDeltaSpeed);
 				} else {
@@ -96,18 +96,18 @@ public class AngelManager extends ClassManager {
 		if (action.equals(Action.LEFT_CLICK_BLOCK)) {
 			Block targetBlock = player.getTargetBlock(null, 20);
 			Location targetBlockLocation = targetBlock.getLocation();
-			if (itemInHandMaterial.equals(Material.RAW_BEEF)
+			if (itemInHandMaterial.equals(Material.BEEF)
 					|| itemInHandMaterial.equals(Material.BONE)
-					|| itemInHandMaterial.equals(Material.PORK)) {
+					|| itemInHandMaterial.equals(Material.PORKCHOP)) {
 				if (snplayer.getPower() > SNConfigHandler.angelSummonPowerCost) {
-					if (itemInHandMaterial.equals(Material.RAW_BEEF)) {
-						player.getWorld().spawnCreature(targetBlockLocation, EntityType.COW);
+					if (itemInHandMaterial.equals(Material.BEEF)) {
+						player.getWorld().spawnEntity(targetBlockLocation, EntityType.COW);
 						event.setCancelled(true);
 						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned cow.");
 						return true;
 					}
 					if (itemInHandMaterial.equals(Material.BONE)) {
-						Wolf spawnedWolf = (Wolf) player.getWorld().spawnCreature(targetBlockLocation, EntityType.WOLF);
+						Wolf spawnedWolf = (Wolf) player.getWorld().spawnEntity(targetBlockLocation, EntityType.WOLF);
 						spawnedWolf.setTamed(true);
 						spawnedWolf.setOwner(player);
 						spawnedWolf.setHealth(20);
@@ -115,8 +115,8 @@ public class AngelManager extends ClassManager {
 						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned wolf.");
 						return true;
 					}
-					if (itemInHandMaterial.equals(Material.PORK)) {
-						player.getWorld().spawnCreature(targetBlockLocation, EntityType.PIG);
+					if (itemInHandMaterial.equals(Material.PORKCHOP)) {
+						player.getWorld().spawnEntity(targetBlockLocation, EntityType.PIG);
 						event.setCancelled(true);
 						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned pig.");
 						return true;
@@ -167,28 +167,28 @@ public class AngelManager extends ClassManager {
 
 		if (helmet != null) {
 			if (helmet.getType().equals(Material.DIAMOND_HELMET)
-					|| helmet.getType().equals(Material.GOLD_HELMET)) {
+					|| helmet.getType().equals(Material.GOLDEN_HELMET)) {
 				inv.setHelmet(null);
 				dropItem(player, helmet);
 			}
 		}
 		if (chest != null) {
 			if (chest.getType().equals(Material.DIAMOND_CHESTPLATE)
-					|| chest.getType().equals(Material.GOLD_CHESTPLATE)) {
+					|| chest.getType().equals(Material.GOLDEN_CHESTPLATE)) {
 				inv.setChestplate(null);
 				dropItem(player, chest);
 			}
 		}
 		if (leggings != null) {
 			if (leggings.getType().equals(Material.DIAMOND_LEGGINGS)
-					|| leggings.getType().equals(Material.GOLD_LEGGINGS)) {
+					|| leggings.getType().equals(Material.GOLDEN_LEGGINGS)) {
 				inv.setLeggings(null);
 				dropItem(player, leggings);
 			}
 		}
 		if (boots != null) {
 			if (boots.getType().equals(Material.DIAMOND_BOOTS)
-					|| boots.getType().equals(Material.GOLD_BOOTS)) {
+					|| boots.getType().equals(Material.GOLDEN_BOOTS)) {
 				inv.setBoots(null);
 				dropItem(player, boots);
 			}
@@ -210,7 +210,7 @@ public class AngelManager extends ClassManager {
 
 		Material material = player.getLocation().getBlock().getType();
 
-		if (material == Material.STATIONARY_WATER || material == Material.WATER) {
+		if (material == Material.WATER) {
 			SuperNManager.alterPower(snplayer, SNConfigHandler.angelSwimPowerGain, "Swimming in water");
 		}
 	}

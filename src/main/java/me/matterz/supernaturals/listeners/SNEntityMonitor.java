@@ -38,6 +38,7 @@ import org.bukkit.entity.Monster;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Wolf;
+import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -140,7 +141,10 @@ public class SNEntityMonitor implements Listener {
 			if (((EntityDamageByEntityEvent) e).getDamager() instanceof LivingEntity) {
 				lDamager = (LivingEntity) ((EntityDamageByEntityEvent) e).getDamager();
 			} else if (((EntityDamageByEntityEvent) e).getDamager() instanceof Projectile) {
-				lDamager = ((Projectile) ((EntityDamageByEntityEvent) e).getDamager()).getShooter();
+				ProjectileSource shooter = ((Projectile) ((EntityDamageByEntityEvent) e).getDamager()).getShooter();
+				if (shooter instanceof LivingEntity) {
+					lDamager = (LivingEntity) shooter;
+				}
 			}
 		}
 

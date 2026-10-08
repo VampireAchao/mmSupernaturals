@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.util.Recipes;
@@ -238,7 +239,7 @@ public class SNConfigHandler {
 	private static List<String> wereArmorString = new ArrayList<String>();
 
 	public static Map<Material, Double> materialOpacity = new HashMap<Material, Double>();
-	public static HashSet<Byte> transparent = new HashSet<Byte>();
+	public static Set<Material> transparent = new HashSet<Material>();
 
 	public static Recipes vampireAltarInfectRecipe = new Recipes();
 	public static Recipes vampireAltarCureRecipe = new Recipes();
@@ -247,34 +248,31 @@ public class SNConfigHandler {
 
 	static {
 		materialOpacity.put(Material.AIR, 0D);
-		materialOpacity.put(Material.SAPLING, 0.3D);
-		materialOpacity.put(Material.LEAVES, 0.3D);
+		materialOpacity.put(Material.OAK_SAPLING, 0.3D);
+		materialOpacity.put(Material.OAK_LEAVES, 0.3D);
 		materialOpacity.put(Material.GLASS, 0.5D);
-		materialOpacity.put(Material.YELLOW_FLOWER, 0.1D);
-		materialOpacity.put(Material.RED_ROSE, 0.1D);
+		materialOpacity.put(Material.DANDELION, 0.1D);
+		materialOpacity.put(Material.POPPY, 0.1D);
 		materialOpacity.put(Material.BROWN_MUSHROOM, 0.1D);
 		materialOpacity.put(Material.RED_MUSHROOM, 0.1D);
 		materialOpacity.put(Material.TORCH, 0.1D);
 		materialOpacity.put(Material.FIRE, 0D);
-		materialOpacity.put(Material.MOB_SPAWNER, 0.3D);
+		materialOpacity.put(Material.SPAWNER, 0.3D);
 		materialOpacity.put(Material.REDSTONE_WIRE, 0D);
-		materialOpacity.put(Material.CROPS, 0.2D);
-		materialOpacity.put(Material.SIGN, 0.1D);
-		materialOpacity.put(Material.SIGN_POST, 0.2D);
+		materialOpacity.put(Material.WHEAT, 0.2D);
+		materialOpacity.put(Material.OAK_WALL_SIGN, 0.1D);
+		materialOpacity.put(Material.OAK_SIGN, 0.2D);
 		materialOpacity.put(Material.LEVER, 0.1D);
-		materialOpacity.put(Material.STONE_PLATE, 0D);
-		materialOpacity.put(Material.WOOD_PLATE, 0D);
-		materialOpacity.put(Material.REDSTONE_TORCH_OFF, 0.1D);
-		materialOpacity.put(Material.REDSTONE_TORCH_ON, 0.1D);
+		materialOpacity.put(Material.STONE_PRESSURE_PLATE, 0D);
+		materialOpacity.put(Material.OAK_PRESSURE_PLATE, 0D);
+		materialOpacity.put(Material.REDSTONE_TORCH, 0.1D);
 		materialOpacity.put(Material.STONE_BUTTON, 0D);
-		materialOpacity.put(Material.SUGAR_CANE_BLOCK, 0.3D);
-		materialOpacity.put(Material.FENCE, 0.2D);
-		materialOpacity.put(Material.DIODE_BLOCK_OFF, 0D);
-		materialOpacity.put(Material.DIODE_BLOCK_ON, 0D);
+		materialOpacity.put(Material.SUGAR_CANE, 0.3D);
+		materialOpacity.put(Material.OAK_FENCE, 0.2D);
+		materialOpacity.put(Material.REPEATER, 0D);
 
-		transparent.add((byte) Material.WATER.getId());
-		transparent.add((byte) Material.STATIONARY_WATER.getId());
-		transparent.add((byte) Material.AIR.getId());
+		transparent.add(Material.WATER);
+		transparent.add(Material.AIR);
 	}
 
 	public SNConfigHandler(SupernaturalsPlugin instance) {
@@ -302,7 +300,7 @@ public class SNConfigHandler {
 			config.set("Supernatural.Truce.BreakTime", 120000);
 			config.set("Supernatural.SpreadChance", 0.35);
 
-			config.set("Vampire.Materials.Jump", "RED_ROSE");
+			config.set("Vampire.Materials.Jump", "POPPY");
 
 			config.set("Vampire.Power.Start", 10000);
 			config.set("Vampire.Kill.SpreadCurse", true);
@@ -323,9 +321,9 @@ public class SNConfigHandler {
 			config.set("Vampire.Power.HealingCost", 60);
 			config.set("Vampire.Power.DrowningCost", 90);
 			config.set("Vampire.Power.TeleportCost", 9000);
-			config.set("Vampire.TeleportMarker.Material", "RED_ROSE");
+			config.set("Vampire.TeleportMarker.Material", "POPPY");
 			config.set("Vampire.Spell.Material", "BOOK");
-			config.set("Vampire.Burn.HelmetProtection", "GOLD_HELMET");
+			config.set("Vampire.Burn.HelmetProtection", "GOLDEN_HELMET");
 			config.set("Vampire.GainHunger.Player", 3);
 			config.set("Vampire.GainHunger.Mob", 2);
 
@@ -373,7 +371,7 @@ public class SNConfigHandler {
 			config.set("Ghoul.DamageFactor.AttackBonus", 2);
 			config.set("Ghoul.WaterDamage", 4);
 			config.set("Ghoul.Time.HealthGained", 0.1);
-			config.set("Ghoul.Summon.Material", "PORK");
+			config.set("Ghoul.Summon.Material", "PORKCHOP");
 			config.set("Ghoul.UnholyBond.Material", "BONE");
 			config.set("Ghoul.Power.Summon", 1000);
 			config.set("Ghoul.Power.UnholyBond", 50);
@@ -391,7 +389,7 @@ public class SNConfigHandler {
 			config.set("Were.DamageFactor.Fall", 0.5);
 			config.set("Were.DamageFactor.AttackBonus", 5);
 			config.set("Were.Time.HealthGained", 0.2);
-			config.set("Were.Material.Summon", "PORK");
+			config.set("Were.Material.Summon", "PORKCHOP");
 			config.set("Were.Power.Summon", 2000);
 			config.set("Were.WolfTruce", true);
 			config.set("Were.Material.Dash", "FEATHER");
@@ -461,11 +459,11 @@ public class SNConfigHandler {
 
 			if (woodMaterialsString.size() == 0) {
 				woodMaterialsString.add("STICK");
-				woodMaterialsString.add("WOOD_AXE");
-				woodMaterialsString.add("WOOD_HOE");
-				woodMaterialsString.add("WOOD_PICKAXE");
-				woodMaterialsString.add("WOOD_SPADE");
-				woodMaterialsString.add("WOOD_SWORD");
+				woodMaterialsString.add("WOODEN_AXE");
+				woodMaterialsString.add("WOODEN_HOE");
+				woodMaterialsString.add("WOODEN_PICKAXE");
+				woodMaterialsString.add("WOODEN_SHOVEL");
+				woodMaterialsString.add("WOODEN_SWORD");
 				woodMaterialsString.add("BOW");
 				config.set("Material.Wooden", woodMaterialsString);
 			}
@@ -473,16 +471,45 @@ public class SNConfigHandler {
 			if (foodMaterialsString.size() == 0) {
 				foodMaterialsString.add("APPLE");
 				foodMaterialsString.add("BREAD");
-				foodMaterialsString.add("COOKED_FISH");
-				foodMaterialsString.add("GRILLED_PORK");
+				foodMaterialsString.add("COOKED_COD");
+				foodMaterialsString.add("COOKED_PORKCHOP");
 				foodMaterialsString.add("GOLDEN_APPLE");
-				foodMaterialsString.add("MUSHROOM_SOUP");
-				foodMaterialsString.add("RAW_FISH");
-				foodMaterialsString.add("PORK");
+				foodMaterialsString.add("MUSHROOM_STEW");
+				foodMaterialsString.add("COD");
+				foodMaterialsString.add("PORKCHOP");
 				foodMaterialsString.add("CAKE");
 				foodMaterialsString.add("COOKIE");
-				foodMaterialsString.add("COOKED_STEAK");
+				foodMaterialsString.add("COOKED_BEEF");
 				foodMaterialsString.add("COOKED_CHICKEN");
+				// 补齐至现代 MC 全部可食用物品（isEdible 全集）
+				foodMaterialsString.add("BAKED_POTATO");
+				foodMaterialsString.add("BEEF");
+				foodMaterialsString.add("BEETROOT");
+				foodMaterialsString.add("BEETROOT_SOUP");
+				foodMaterialsString.add("CARROT");
+				foodMaterialsString.add("CHICKEN");
+				foodMaterialsString.add("CHORUS_FRUIT");
+				foodMaterialsString.add("COOKED_MUTTON");
+				foodMaterialsString.add("COOKED_RABBIT");
+				foodMaterialsString.add("COOKED_SALMON");
+				foodMaterialsString.add("DRIED_KELP");
+				foodMaterialsString.add("ENCHANTED_GOLDEN_APPLE");
+				foodMaterialsString.add("GLOW_BERRIES");
+				foodMaterialsString.add("GOLDEN_CARROT");
+				foodMaterialsString.add("HONEY_BOTTLE");
+				foodMaterialsString.add("MELON_SLICE");
+				foodMaterialsString.add("MUTTON");
+				foodMaterialsString.add("POISONOUS_POTATO");
+				foodMaterialsString.add("POTATO");
+				foodMaterialsString.add("PUFFERFISH");
+				foodMaterialsString.add("PUMPKIN_PIE");
+				foodMaterialsString.add("RABBIT");
+				foodMaterialsString.add("RABBIT_STEW");
+				foodMaterialsString.add("SALMON");
+				foodMaterialsString.add("SPIDER_EYE");
+				foodMaterialsString.add("SUSPICIOUS_STEW");
+				foodMaterialsString.add("SWEET_BERRIES");
+				foodMaterialsString.add("TROPICAL_FISH");
 				foodMaterialsString.add("ROTTEN_FLESH");
 				config.set("Material.Food", foodMaterialsString);
 			}
@@ -492,33 +519,74 @@ public class SNConfigHandler {
 				enderWeaponsString.add("DIAMOND_PICKAXE");
 				enderWeaponsString.add("DIAMOND_AXE");
 				enderWeaponsString.add("DIAMOND_HOE");
-				enderWeaponsString.add("DIAMOND_SPADE");
+				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
+				enderWeaponsString.add("COPPER_SWORD");
+				enderWeaponsString.add("COPPER_PICKAXE");
+				enderWeaponsString.add("COPPER_SHOVEL");
+				enderWeaponsString.add("COPPER_AXE");
+				enderWeaponsString.add("COPPER_HOE");
+				enderWeaponsString.add("NETHERITE_SWORD");
+				enderWeaponsString.add("NETHERITE_PICKAXE");
+				enderWeaponsString.add("NETHERITE_SHOVEL");
+				enderWeaponsString.add("NETHERITE_AXE");
+				enderWeaponsString.add("NETHERITE_HOE");
+				enderWeaponsString.add("DIAMOND_SHOVEL");
 				config.set("EnderBorn.Weapon.Restrictions", enderWeaponsString);
 			}
 
 			if (burnableBlocksString.size() == 0) {
-				burnableBlocksString.add("GRASS");
-				burnableBlocksString.add("LEAVES");
+				burnableBlocksString.add("GRASS_BLOCK");
+				burnableBlocksString.add("OAK_LEAVES");
 				burnableBlocksString.add("AIR");
-				burnableBlocksString.add("SEEDS");
-				burnableBlocksString.add("WOOD");
+				burnableBlocksString.add("WHEAT_SEEDS");
+				burnableBlocksString.add("OAK_LOG");
 				burnableBlocksString.add("BOOKSHELF");
 				config.set("BurnableBlocks", burnableBlocksString);
 			}
 
+				// Bukkit 的 Monster 接口即"会主动攻击玩家的敌对生物"全集
 			if (vampireTruceString.size() == 0) {
+				vampireTruceString.add("BLAZE");
+				vampireTruceString.add("BOGGED");
+				vampireTruceString.add("BREEZE");
+				vampireTruceString.add("CAVE_SPIDER");
+				vampireTruceString.add("CREAKING");
 				vampireTruceString.add("CREEPER");
-				vampireTruceString.add("SKELETON");
-				vampireTruceString.add("ZOMBIE");
+				vampireTruceString.add("DROWNED");
+				vampireTruceString.add("ELDER_GUARDIAN");
 				vampireTruceString.add("ENDERMAN");
+				vampireTruceString.add("ENDERMITE");
+				vampireTruceString.add("EVOKER");
+				vampireTruceString.add("GIANT");
+				vampireTruceString.add("GUARDIAN");
+				vampireTruceString.add("HUSK");
+				vampireTruceString.add("ILLUSIONER");
+				vampireTruceString.add("PARCHED");
+				vampireTruceString.add("PIGLIN");
+				vampireTruceString.add("PIGLIN_BRUTE");
+				vampireTruceString.add("PILLAGER");
+				vampireTruceString.add("RAVAGER");
+				vampireTruceString.add("SILVERFISH");
+				vampireTruceString.add("SKELETON");
 				vampireTruceString.add("SPIDER");
+				vampireTruceString.add("STRAY");
+				vampireTruceString.add("VEX");
+				vampireTruceString.add("VINDICATOR");
+				vampireTruceString.add("WARDEN");
+				vampireTruceString.add("WITCH");
+				vampireTruceString.add("WITHER");
+				vampireTruceString.add("WITHER_SKELETON");
+				vampireTruceString.add("ZOGLIN");
+				vampireTruceString.add("ZOMBIE");
+				vampireTruceString.add("ZOMBIE_VILLAGER");
+				vampireTruceString.add("ZOMBIFIED_PIGLIN");
 				config.set("Vampire.Truce.Creatures", vampireTruceString);
 			}
 
 			if (vampireAltarInfectMaterialsString.size() == 0) {
-				vampireAltarInfectMaterialsString.add("MUSHROOM_SOUP");
+				vampireAltarInfectMaterialsString.add("MUSHROOM_STEW");
 				vampireAltarInfectMaterialsString.add("BONE");
-				vampireAltarInfectMaterialsString.add("SULPHUR");
+				vampireAltarInfectMaterialsString.add("GUNPOWDER");
 				vampireAltarInfectMaterialsString.add("REDSTONE");
 				config.set("Vampire.Altar.Infect.Recipe.Materials", vampireAltarInfectMaterialsString);
 			}
@@ -574,9 +642,9 @@ public class SNConfigHandler {
 
 			if (priestDonationMaterialsString.size() == 0) {
 				priestDonationMaterialsString.add("APPLE");
-				priestDonationMaterialsString.add("RAW_FISH");
-				priestDonationMaterialsString.add("COOKED_FISH");
-				priestDonationMaterialsString.add("GRILLED_PORK");
+				priestDonationMaterialsString.add("COD");
+				priestDonationMaterialsString.add("COOKED_COD");
+				priestDonationMaterialsString.add("COOKED_PORKCHOP");
 				priestDonationMaterialsString.add("BREAD");
 				config.set("Priest.Church.Donation.Materials", priestDonationMaterialsString);
 			}
@@ -593,30 +661,41 @@ public class SNConfigHandler {
 			if (ghoulWeaponsString.size() == 0) {
 				ghoulWeaponsString.add("BOW");
 				ghoulWeaponsString.add("STICK");
-				ghoulWeaponsString.add("WOOD_SWORD");
-				ghoulWeaponsString.add("WOOD_PICKAXE");
-				ghoulWeaponsString.add("WOOD_SPADE");
-				ghoulWeaponsString.add("WOOD_AXE");
-				ghoulWeaponsString.add("WOOD_HOE");
+				ghoulWeaponsString.add("WOODEN_SWORD");
+				ghoulWeaponsString.add("WOODEN_PICKAXE");
+				ghoulWeaponsString.add("WOODEN_SHOVEL");
+				ghoulWeaponsString.add("WOODEN_AXE");
+				ghoulWeaponsString.add("WOODEN_HOE");
 				ghoulWeaponsString.add("STONE_SWORD");
 				ghoulWeaponsString.add("STONE_PICKAXE");
-				ghoulWeaponsString.add("STONE_SPADE");
+				ghoulWeaponsString.add("STONE_SHOVEL");
 				ghoulWeaponsString.add("STONE_AXE");
 				ghoulWeaponsString.add("STONE_HOE");
 				ghoulWeaponsString.add("IRON_SWORD");
 				ghoulWeaponsString.add("IRON_PICKAXE");
-				ghoulWeaponsString.add("IRON_SPADE");
+				ghoulWeaponsString.add("IRON_SHOVEL");
 				ghoulWeaponsString.add("IRON_AXE");
 				ghoulWeaponsString.add("IRON_HOE");
-				ghoulWeaponsString.add("GOLD_SWORD");
-				ghoulWeaponsString.add("GOLD_PICKAXE");
-				ghoulWeaponsString.add("GOLD_SPADE");
-				ghoulWeaponsString.add("GOLD_AXE");
-				ghoulWeaponsString.add("GOLD_HOE");
+				ghoulWeaponsString.add("GOLDEN_SWORD");
+				ghoulWeaponsString.add("GOLDEN_PICKAXE");
+				ghoulWeaponsString.add("GOLDEN_SHOVEL");
+				ghoulWeaponsString.add("GOLDEN_AXE");
+				ghoulWeaponsString.add("GOLDEN_HOE");
 				ghoulWeaponsString.add("DIAMOND_SWORD");
 				ghoulWeaponsString.add("DIAMOND_PICKAXE");
-				ghoulWeaponsString.add("DIAMOND_SPADE");
+				ghoulWeaponsString.add("DIAMOND_SHOVEL");
 				ghoulWeaponsString.add("DIAMOND_AXE");
+				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
+				ghoulWeaponsString.add("COPPER_SWORD");
+				ghoulWeaponsString.add("COPPER_PICKAXE");
+				ghoulWeaponsString.add("COPPER_SHOVEL");
+				ghoulWeaponsString.add("COPPER_AXE");
+				ghoulWeaponsString.add("COPPER_HOE");
+				ghoulWeaponsString.add("NETHERITE_SWORD");
+				ghoulWeaponsString.add("NETHERITE_PICKAXE");
+				ghoulWeaponsString.add("NETHERITE_SHOVEL");
+				ghoulWeaponsString.add("NETHERITE_AXE");
+				ghoulWeaponsString.add("NETHERITE_HOE");
 				ghoulWeaponsString.add("DIAMOND_HOE");
 				config.set("Ghoul.Weapon.Restrictions", ghoulWeaponsString);
 			}
@@ -627,30 +706,41 @@ public class SNConfigHandler {
 			}
 
 			if (hunterWeaponsString.size() == 0) {
-				hunterWeaponsString.add("WOOD_SWORD");
-				hunterWeaponsString.add("WOOD_PICKAXE");
-				hunterWeaponsString.add("WOOD_SPADE");
-				hunterWeaponsString.add("WOOD_AXE");
-				hunterWeaponsString.add("WOOD_HOE");
+				hunterWeaponsString.add("WOODEN_SWORD");
+				hunterWeaponsString.add("WOODEN_PICKAXE");
+				hunterWeaponsString.add("WOODEN_SHOVEL");
+				hunterWeaponsString.add("WOODEN_AXE");
+				hunterWeaponsString.add("WOODEN_HOE");
 				hunterWeaponsString.add("STONE_SWORD");
 				hunterWeaponsString.add("STONE_PICKAXE");
-				hunterWeaponsString.add("STONE_SPADE");
+				hunterWeaponsString.add("STONE_SHOVEL");
 				hunterWeaponsString.add("STONE_AXE");
 				hunterWeaponsString.add("STONE_HOE");
 				hunterWeaponsString.add("IRON_SWORD");
 				hunterWeaponsString.add("IRON_PICKAXE");
-				hunterWeaponsString.add("IRON_SPADE");
+				hunterWeaponsString.add("IRON_SHOVEL");
 				hunterWeaponsString.add("IRON_AXE");
 				hunterWeaponsString.add("IRON_HOE");
-				hunterWeaponsString.add("GOLD_SWORD");
-				hunterWeaponsString.add("GOLD_PICKAXE");
-				hunterWeaponsString.add("GOLD_SPADE");
-				hunterWeaponsString.add("GOLD_AXE");
-				hunterWeaponsString.add("GOLD_HOE");
+				hunterWeaponsString.add("GOLDEN_SWORD");
+				hunterWeaponsString.add("GOLDEN_PICKAXE");
+				hunterWeaponsString.add("GOLDEN_SHOVEL");
+				hunterWeaponsString.add("GOLDEN_AXE");
+				hunterWeaponsString.add("GOLDEN_HOE");
 				hunterWeaponsString.add("DIAMOND_SWORD");
 				hunterWeaponsString.add("DIAMOND_PICKAXE");
-				hunterWeaponsString.add("DIAMOND_SPADE");
+				hunterWeaponsString.add("DIAMOND_SHOVEL");
 				hunterWeaponsString.add("DIAMOND_AXE");
+				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
+				hunterWeaponsString.add("COPPER_SWORD");
+				hunterWeaponsString.add("COPPER_PICKAXE");
+				hunterWeaponsString.add("COPPER_SHOVEL");
+				hunterWeaponsString.add("COPPER_AXE");
+				hunterWeaponsString.add("COPPER_HOE");
+				hunterWeaponsString.add("NETHERITE_SWORD");
+				hunterWeaponsString.add("NETHERITE_PICKAXE");
+				hunterWeaponsString.add("NETHERITE_SHOVEL");
+				hunterWeaponsString.add("NETHERITE_AXE");
+				hunterWeaponsString.add("NETHERITE_HOE");
 				hunterWeaponsString.add("DIAMOND_HOE");
 				config.set("WitchHunter.Weapon.Restrictions", hunterWeaponsString);
 			}
@@ -668,54 +758,84 @@ public class SNConfigHandler {
 			if (wereWeaponsString.size() == 0) {
 				wereWeaponsString.add("BOW");
 				wereWeaponsString.add("STICK");
-				wereWeaponsString.add("WOOD_SWORD");
-				wereWeaponsString.add("WOOD_PICKAXE");
-				wereWeaponsString.add("WOOD_SPADE");
-				wereWeaponsString.add("WOOD_AXE");
-				wereWeaponsString.add("WOOD_HOE");
+				wereWeaponsString.add("WOODEN_SWORD");
+				wereWeaponsString.add("WOODEN_PICKAXE");
+				wereWeaponsString.add("WOODEN_SHOVEL");
+				wereWeaponsString.add("WOODEN_AXE");
+				wereWeaponsString.add("WOODEN_HOE");
 				wereWeaponsString.add("STONE_SWORD");
 				wereWeaponsString.add("STONE_PICKAXE");
-				wereWeaponsString.add("STONE_SPADE");
+				wereWeaponsString.add("STONE_SHOVEL");
 				wereWeaponsString.add("STONE_AXE");
 				wereWeaponsString.add("STONE_HOE");
 				wereWeaponsString.add("IRON_SWORD");
 				wereWeaponsString.add("IRON_PICKAXE");
-				wereWeaponsString.add("IRON_SPADE");
+				wereWeaponsString.add("IRON_SHOVEL");
 				wereWeaponsString.add("IRON_AXE");
 				wereWeaponsString.add("IRON_HOE");
-				wereWeaponsString.add("GOLD_SWORD");
-				wereWeaponsString.add("GOLD_PICKAXE");
-				wereWeaponsString.add("GOLD_SPADE");
-				wereWeaponsString.add("GOLD_AXE");
-				wereWeaponsString.add("GOLD_HOE");
+				wereWeaponsString.add("GOLDEN_SWORD");
+				wereWeaponsString.add("GOLDEN_PICKAXE");
+				wereWeaponsString.add("GOLDEN_SHOVEL");
+				wereWeaponsString.add("GOLDEN_AXE");
+				wereWeaponsString.add("GOLDEN_HOE");
 				wereWeaponsString.add("DIAMOND_SWORD");
 				wereWeaponsString.add("DIAMOND_PICKAXE");
-				wereWeaponsString.add("DIAMOND_SPADE");
+				wereWeaponsString.add("DIAMOND_SHOVEL");
 				wereWeaponsString.add("DIAMOND_AXE");
+				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
+				wereWeaponsString.add("COPPER_SWORD");
+				wereWeaponsString.add("COPPER_PICKAXE");
+				wereWeaponsString.add("COPPER_SHOVEL");
+				wereWeaponsString.add("COPPER_AXE");
+				wereWeaponsString.add("COPPER_HOE");
+				wereWeaponsString.add("NETHERITE_SWORD");
+				wereWeaponsString.add("NETHERITE_PICKAXE");
+				wereWeaponsString.add("NETHERITE_SHOVEL");
+				wereWeaponsString.add("NETHERITE_AXE");
+				wereWeaponsString.add("NETHERITE_HOE");
 				wereWeaponsString.add("DIAMOND_HOE");
 				config.set("Were.Weapon.Restrictions", wereWeaponsString);
 			}
 
 			if (ghoulWeaponImmunityString.size() == 0) {
+				// 补齐下界合金剑
+				ghoulWeaponImmunityString.add("NETHERITE_SWORD");
 				ghoulWeaponImmunityString.add("DIAMOND_SWORD");
 				config.set("Ghoul.Immunity", ghoulWeaponImmunityString);
 			}
 
+				// 僵尸家族（含巨型僵尸）
 			if (ghoulTruceString.size() == 0) {
-				ghoulTruceString.add("CREEPER");
-				ghoulTruceString.add("SKELETON");
 				ghoulTruceString.add("ZOMBIE");
-				ghoulTruceString.add("PIG_ZOMBIE");
+				ghoulTruceString.add("ZOMBIE_VILLAGER");
+				ghoulTruceString.add("DROWNED");
+				ghoulTruceString.add("HUSK");
+				ghoulTruceString.add("ZOMBIFIED_PIGLIN");
 				ghoulTruceString.add("GIANT");
-				ghoulTruceString.add("ENDERMAN");
 				config.set("Ghoul.Truce.Creatures", ghoulTruceString);
 			}
 
 			if (wereWolfbaneMaterialsString.size() == 0) {
-				wereWolfbaneMaterialsString.add("YELLOW_FLOWER");
-				wereWolfbaneMaterialsString.add("RED_ROSE");
+				wereWolfbaneMaterialsString.add("DANDELION");
+				wereWolfbaneMaterialsString.add("POPPY");
 				wereWolfbaneMaterialsString.add("RED_MUSHROOM");
 				wereWolfbaneMaterialsString.add("BROWN_MUSHROOM");
+				// 补齐官方 small_flowers 标签内全部花
+				wereWolfbaneMaterialsString.add("ALLIUM");
+				wereWolfbaneMaterialsString.add("AZURE_BLUET");
+				wereWolfbaneMaterialsString.add("BLUE_ORCHID");
+				wereWolfbaneMaterialsString.add("CLOSED_EYEBLOSSOM");
+				wereWolfbaneMaterialsString.add("CORNFLOWER");
+				wereWolfbaneMaterialsString.add("GOLDEN_DANDELION");
+				wereWolfbaneMaterialsString.add("LILY_OF_THE_VALLEY");
+				wereWolfbaneMaterialsString.add("OPEN_EYEBLOSSOM");
+				wereWolfbaneMaterialsString.add("ORANGE_TULIP");
+				wereWolfbaneMaterialsString.add("OXEYE_DAISY");
+				wereWolfbaneMaterialsString.add("PINK_TULIP");
+				wereWolfbaneMaterialsString.add("RED_TULIP");
+				wereWolfbaneMaterialsString.add("TORCHFLOWER");
+				wereWolfbaneMaterialsString.add("WHITE_TULIP");
+				wereWolfbaneMaterialsString.add("WITHER_ROSE");
 				wereWolfbaneMaterialsString.add("BOWL");
 				config.set("Were.Wolfbane.Materials", wereWolfbaneMaterialsString);
 			}
@@ -748,10 +868,10 @@ public class SNConfigHandler {
 				ghoulArmorString.add("IRON_CHESTPLATE");
 				ghoulArmorString.add("IRON_LEGGINGS");
 				ghoulArmorString.add("IRON_BOOTS");
-				ghoulArmorString.add("GOLD_HELMET");
-				ghoulArmorString.add("GOLD_CHESTPLATE");
-				ghoulArmorString.add("GOLD_LEGGINGS");
-				ghoulArmorString.add("GOLD_BOOTS");
+				ghoulArmorString.add("GOLDEN_HELMET");
+				ghoulArmorString.add("GOLDEN_CHESTPLATE");
+				ghoulArmorString.add("GOLDEN_LEGGINGS");
+				ghoulArmorString.add("GOLDEN_BOOTS");
 				ghoulArmorString.add("DIAMOND_HELMET");
 				ghoulArmorString.add("DIAMOND_CHESTPLATE");
 				ghoulArmorString.add("DIAMOND_LEGGINGS");
@@ -759,6 +879,16 @@ public class SNConfigHandler {
 				ghoulArmorString.add("CHAINMAIL_HELMET");
 				ghoulArmorString.add("CHAINMAIL_CHESTPLATE");
 				ghoulArmorString.add("CHAINMAIL_LEGGINGS");
+				// 补齐下界合金 / 铜制 / 海龟壳
+				ghoulArmorString.add("COPPER_HELMET");
+				ghoulArmorString.add("COPPER_CHESTPLATE");
+				ghoulArmorString.add("COPPER_LEGGINGS");
+				ghoulArmorString.add("COPPER_BOOTS");
+				ghoulArmorString.add("NETHERITE_HELMET");
+				ghoulArmorString.add("NETHERITE_CHESTPLATE");
+				ghoulArmorString.add("NETHERITE_LEGGINGS");
+				ghoulArmorString.add("NETHERITE_BOOTS");
+				ghoulArmorString.add("TURTLE_HELMET");
 				ghoulArmorString.add("CHAINMAIL_BOOTS");
 				config.set("Ghoul.Armor", ghoulArmorString);
 			}
@@ -783,10 +913,10 @@ public class SNConfigHandler {
 				vampireArmorString.add("IRON_CHESTPLATE");
 				vampireArmorString.add("IRON_LEGGINGS");
 				vampireArmorString.add("IRON_BOOTS");
-				vampireArmorString.add("GOLD_HELMET");
-				vampireArmorString.add("GOLD_CHESTPLATE");
-				vampireArmorString.add("GOLD_LEGGINGS");
-				vampireArmorString.add("GOLD_BOOTS");
+				vampireArmorString.add("GOLDEN_HELMET");
+				vampireArmorString.add("GOLDEN_CHESTPLATE");
+				vampireArmorString.add("GOLDEN_LEGGINGS");
+				vampireArmorString.add("GOLDEN_BOOTS");
 				vampireArmorString.add("DIAMOND_HELMET");
 				vampireArmorString.add("DIAMOND_CHESTPLATE");
 				vampireArmorString.add("DIAMOND_LEGGINGS");
@@ -794,6 +924,16 @@ public class SNConfigHandler {
 				vampireArmorString.add("CHAINMAIL_HELMET");
 				vampireArmorString.add("CHAINMAIL_CHESTPLATE");
 				vampireArmorString.add("CHAINMAIL_LEGGINGS");
+				// 补齐下界合金 / 铜制 / 海龟壳
+				vampireArmorString.add("COPPER_HELMET");
+				vampireArmorString.add("COPPER_CHESTPLATE");
+				vampireArmorString.add("COPPER_LEGGINGS");
+				vampireArmorString.add("COPPER_BOOTS");
+				vampireArmorString.add("NETHERITE_HELMET");
+				vampireArmorString.add("NETHERITE_CHESTPLATE");
+				vampireArmorString.add("NETHERITE_LEGGINGS");
+				vampireArmorString.add("NETHERITE_BOOTS");
+				vampireArmorString.add("TURTLE_HELMET");
 				vampireArmorString.add("CHAINMAIL_BOOTS");
 				config.set("Vampire.Armor", vampireArmorString);
 			}
@@ -808,10 +948,10 @@ public class SNConfigHandler {
 				wereArmorString.add("IRON_CHESTPLATE");
 				wereArmorString.add("IRON_LEGGINGS");
 				wereArmorString.add("IRON_BOOTS");
-				wereArmorString.add("GOLD_HELMET");
-				wereArmorString.add("GOLD_CHESTPLATE");
-				wereArmorString.add("GOLD_LEGGINGS");
-				wereArmorString.add("GOLD_BOOTS");
+				wereArmorString.add("GOLDEN_HELMET");
+				wereArmorString.add("GOLDEN_CHESTPLATE");
+				wereArmorString.add("GOLDEN_LEGGINGS");
+				wereArmorString.add("GOLDEN_BOOTS");
 				wereArmorString.add("DIAMOND_HELMET");
 				wereArmorString.add("DIAMOND_CHESTPLATE");
 				wereArmorString.add("DIAMOND_LEGGINGS");
@@ -819,6 +959,16 @@ public class SNConfigHandler {
 				wereArmorString.add("CHAINMAIL_HELMET");
 				wereArmorString.add("CHAINMAIL_CHESTPLATE");
 				wereArmorString.add("CHAINMAIL_LEGGINGS");
+				// 补齐下界合金 / 铜制 / 海龟壳
+				wereArmorString.add("COPPER_HELMET");
+				wereArmorString.add("COPPER_CHESTPLATE");
+				wereArmorString.add("COPPER_LEGGINGS");
+				wereArmorString.add("COPPER_BOOTS");
+				wereArmorString.add("NETHERITE_HELMET");
+				wereArmorString.add("NETHERITE_CHESTPLATE");
+				wereArmorString.add("NETHERITE_LEGGINGS");
+				wereArmorString.add("NETHERITE_BOOTS");
+				wereArmorString.add("TURTLE_HELMET");
 				wereArmorString.add("CHAINMAIL_BOOTS");
 				config.set("Were.Armor", wereArmorString);
 			}
@@ -848,7 +998,7 @@ public class SNConfigHandler {
 		woodMaterialsString = config.getStringList("Material.Wooden");
 		foodMaterialsString = config.getStringList("Material.Food");
 
-		jumpMaterial = config.getString("Vampire.Materials.Jump", "RED_ROSE");
+		jumpMaterial = config.getString("Vampire.Materials.Jump", "POPPY");
 
 		vampirePowerStart = config.getInt("Vampire.Power.Start", 10000);
 		vampireKillSpreadCurse = config.getBoolean("Vampire.Kill.SpreadCurse", true);
@@ -869,10 +1019,10 @@ public class SNConfigHandler {
 		vampireHealthCost = config.getDouble("Vampire.Power.HealingCost", 60);
 		vampireDrowningCost = config.getInt("Vampire.Power.DrowningCost", 90);
 		vampireTeleportCost = config.getInt("Vampire.Power.TeleportCost", 9000);
-		vampireTeleportMaterial = config.getString("Vampire.TeleportMarker.Material", "RED_ROSE");
+		vampireTeleportMaterial = config.getString("Vampire.TeleportMarker.Material", "POPPY");
 		vampireTruceString = config.getStringList("Vampire.Truce.Creatures");
 		vampireMaterial = config.getString("Vampire.Spell.Material", "BOOK");
-		vampireHelmet = config.getString("Vampire.Burn.HelmetProtection", "GOLD_HELMET");
+		vampireHelmet = config.getString("Vampire.Burn.HelmetProtection", "GOLDEN_HELMET");
 		vampireWeaponsString = config.getStringList("Vampire.Weapon.Restrictions");
 		vampireArmorString = config.getStringList("Vampire.Armor");
 		vampireHungerRegainPlayer = config.getInt("Vampire.GainHunger.Player");
@@ -935,7 +1085,7 @@ public class SNConfigHandler {
 		ghoulDamageFactor = config.getDouble("Ghoul.DamageFactor.AttackBonus", 2);
 		ghoulDamageWater = config.getInt("Ghoul.WaterDamage", 4);
 		ghoulHealthGained = config.getDouble("Ghoul.Time.HealthGained", 0.1);
-		ghoulMaterial = config.getString("Ghoul.Summon.Material", "PORK");
+		ghoulMaterial = config.getString("Ghoul.Summon.Material", "PORKCHOP");
 		ghoulBondMaterial = config.getString("Ghoul.UnholyBond.Material", "BONE");
 		ghoulPowerSummonCost = config.getInt("Ghoul.Power.Summon", 1000);
 		ghoulPowerBond = config.getInt("Ghoul.Power.UnholyBond", 50);
@@ -955,7 +1105,7 @@ public class SNConfigHandler {
 		wereDamageFall = config.getDouble("Were.DamageFactor.Fall", 0.5);
 		wereDamageFactor = config.getDouble("Were.DamageFactor.AttackBonus", 5);
 		wereHealthGained = config.getDouble("Were.Time.HealthGained", 0.2);
-		wolfMaterial = config.getString("Were.Material.Summon", "PORK");
+		wolfMaterial = config.getString("Were.Material.Summon", "PORKCHOP");
 		werePowerSummonCost = config.getInt("Were.Power.Summon", 2000);
 		wolfTruce = config.getBoolean("Were.WolfTruce", true);
 		dashMaterial = config.getString("Were.Material.Dash", "FEATHER");

@@ -62,7 +62,7 @@ public class SNCommandClasses extends SNCommand {
 				+ "A possessed human with strange powers.");
 		classMessages.add("Angel: " + ChatColor.WHITE + "A Human with a free spirit.");
 		spanishClassMessages.add("*** " + ChatColor.WHITE
-				+ "Clases de Seres Místicos " + ChatColor.RED + "***");
+				+ "Clases de Seres MÃ­sticos " + ChatColor.RED + "***");
 		spanishClassMessages.add("Humano: " + ChatColor.WHITE
 				+ "- De carne y hueso, solo sirven para destruir el mundo.");
 		spanishClassMessages.add("Sacerdote: " + ChatColor.WHITE
@@ -76,9 +76,9 @@ public class SNCommandClasses extends SNCommand {
 		spanishClassMessages.add("Cazador de Brujas: " + ChatColor.WHITE
 				+ "- Experto con arcos y sigiloso.");
 		spanishClassMessages.add("Demonio: " + ChatColor.WHITE
-				+ "- Tiene una extraña union con el infierno.");
+				+ "- Tiene una extraÃ±a union con el infierno.");
 		spanishClassMessages.add("EnderBorn: " + ChatColor.WHITE
-				+ "- Un ser humano poseído por poderes extraños.");
+				+ "- Un ser humano poseÃ­do por poderes extraÃ±os.");
 	}
 
 	@Override

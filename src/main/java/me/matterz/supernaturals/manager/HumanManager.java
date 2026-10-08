@@ -30,6 +30,7 @@ import org.bukkit.entity.PigZombie;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Wolf;
+import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
@@ -100,7 +101,10 @@ public class HumanManager extends ClassManager {
 			if (((EntityDamageByEntityEvent) e).getDamager() instanceof LivingEntity) {
 				lDamager = (LivingEntity) ((EntityDamageByEntityEvent) e).getDamager();
 			} else if (((EntityDamageByEntityEvent) e).getDamager() instanceof Projectile) {
-				lDamager = ((Projectile) ((EntityDamageByEntityEvent) e).getDamager()).getShooter();
+				ProjectileSource shooter = ((Projectile) ((EntityDamageByEntityEvent) e).getDamager()).getShooter();
+				if (shooter instanceof LivingEntity) {
+					lDamager = (LivingEntity) shooter;
+				}
 			}
 		}
 

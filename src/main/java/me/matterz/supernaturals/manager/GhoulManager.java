@@ -216,8 +216,8 @@ public class GhoulManager extends ClassManager {
 
 		Material material = player.getLocation().getBlock().getType();
 
-		if (material == Material.STATIONARY_WATER || material == Material.WATER) {
-			int health = player.getHealth() - SNConfigHandler.ghoulDamageWater;
+		if (material == Material.WATER) {
+			double health = player.getHealth() - SNConfigHandler.ghoulDamageWater;
 			if (health < 0) {
 				health = 0;
 			}
@@ -410,7 +410,7 @@ public class GhoulManager extends ClassManager {
 			return false;
 		}
 		if (snplayer.getPower() > SNConfigHandler.ghoulPowerSummonCost) {
-			player.getWorld().spawnCreature(player.getLocation(), EntityType.ZOMBIE);
+			player.getWorld().spawnEntity(player.getLocation(), EntityType.ZOMBIE);
 			SuperNManager.alterPower(snplayer, -SNConfigHandler.ghoulPowerSummonCost, "Summoning a Zombie!");
 			if (SNConfigHandler.debugMode) {
 				SupernaturalsPlugin.log(snplayer.getName()

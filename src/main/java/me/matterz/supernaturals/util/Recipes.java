@@ -38,7 +38,7 @@ public class Recipes {
 	public void removeFromPlayer(Player player) {
 		Inventory inventory = player.getInventory();
 		for (Material material : materialQuantities.keySet()) {
-			inventory.removeItem(new ItemStack(material.getId(), materialQuantities.get(material)));
+			inventory.removeItem(new ItemStack(material, materialQuantities.get(material)));
 		}
 		player.updateInventory();
 	}

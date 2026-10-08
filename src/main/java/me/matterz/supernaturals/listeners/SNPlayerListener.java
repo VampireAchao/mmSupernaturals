@@ -107,7 +107,7 @@ public class SNPlayerListener implements Listener {
 				return;
 			}
 
-			if (block.getType().equals(Material.IRON_DOOR_BLOCK)) {
+			if (block.getType().equals(Material.IRON_DOOR)) {
 				if (SNConfigHandler.debugMode) {
 					SupernaturalsPlugin.log(snplayer.getName()
 							+ " activated an Iron Door.");
@@ -117,8 +117,8 @@ public class SNPlayerListener implements Listener {
 						for (int z = blockLoc.getBlockZ() - 2; z < blockLoc.getBlockZ() + 3; z++) {
 							Location newLoc = new Location(block.getWorld(), x, y, z);
 							Block newBlock = newLoc.getBlock();
-							if (newBlock.getType().equals(Material.SIGN)
-									|| newBlock.getType().equals(Material.WALL_SIGN)) {
+							if (newBlock.getType().equals(Material.OAK_SIGN)
+									|| newBlock.getType().equals(Material.OAK_WALL_SIGN)) {
 								if (SNConfigHandler.debugMode) {
 									SupernaturalsPlugin.log(snplayer.getName()
 											+ " found a sign.");
