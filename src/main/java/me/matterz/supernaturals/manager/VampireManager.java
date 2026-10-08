@@ -405,7 +405,28 @@ public class VampireManager extends ClassManager {
 
 	public boolean combustAdvanceTime(Player player, long milliseconds) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
-		if (!standsInSunlight(player)) {
+		boolean inSunlight = standsInSunlight(player);
+
+		if (SNConfigHandler.debugMode) {
+			Block feet = player.getLocation().getBlock();
+			Block eye = player.getEyeLocation().getBlock();
+			SupernaturalsPlugin.log("[combust] " + player.getName()
+					+ " sunlight=" + inSunlight
+					+ " | night=" + SuperNManager.worldTimeIsNight(player)
+					+ " roof=" + isUnderRoof(player)
+					+ " eyeSky=" + eye.getLightFromSky() + " eyeBlock=" + eye.getType()
+					+ " feet=" + feet.getType()
+					+ " storm=" + player.getWorld().hasStorm()
+					+ " helmet=" + hasHelmet(player)
+					+ " perm=" + SupernaturalsPlugin.hasPermissions(player, permissions)
+					+ " cfgSunlight=" + SNConfigHandler.vampireBurnInSunlight
+					+ " cfgFireTicks=" + SNConfigHandler.vampireCombustFireTicks
+					+ " fireTicksBefore=" + player.getFireTicks()
+					+ " loc=" + player.getLocation().getBlockX() + "," + player.getLocation().getBlockY()
+					+ "," + player.getLocation().getBlockZ());
+		}
+
+		if (!inSunlight) {
 			return false;
 		}
 
@@ -426,6 +447,11 @@ public class VampireManager extends ClassManager {
 
 		player.setFireTicks(ticksTillNext
 				+ SNConfigHandler.vampireCombustFireTicks);
+
+		if (SNConfigHandler.debugMode) {
+			SupernaturalsPlugin.log("[combust] " + player.getName()
+					+ " -> SET ON FIRE, fireTicksAfter=" + player.getFireTicks());
+		}
 		return true;
 	}
 
