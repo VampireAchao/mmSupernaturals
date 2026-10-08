@@ -1,0 +1,9 @@
+target/
+.idea/*
+!.idea/runConfigurations/
+*.iml
+# local dev server (see TESTING.md) — jar, world, plugins, logs all live in server/
+/server/
+/*.json
+/*.yml
+!/pom.xml
