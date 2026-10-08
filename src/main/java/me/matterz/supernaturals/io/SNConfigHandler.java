@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import me.matterz.supernaturals.SupernaturalsPlugin;
@@ -238,7 +237,6 @@ public class SNConfigHandler {
 	private static List<String> vampireArmorString = new ArrayList<String>();
 	private static List<String> wereArmorString = new ArrayList<String>();
 
-	public static Map<Material, Double> materialOpacity = new HashMap<Material, Double>();
 	public static Set<Material> transparent = new HashSet<Material>();
 
 	public static Recipes vampireAltarInfectRecipe = new Recipes();
@@ -247,30 +245,6 @@ public class SNConfigHandler {
 	public static Recipes wereWolfbaneRecipe = new Recipes();
 
 	static {
-		materialOpacity.put(Material.AIR, 0D);
-		materialOpacity.put(Material.OAK_SAPLING, 0.3D);
-		materialOpacity.put(Material.OAK_LEAVES, 0.3D);
-		materialOpacity.put(Material.GLASS, 0.5D);
-		materialOpacity.put(Material.DANDELION, 0.1D);
-		materialOpacity.put(Material.POPPY, 0.1D);
-		materialOpacity.put(Material.BROWN_MUSHROOM, 0.1D);
-		materialOpacity.put(Material.RED_MUSHROOM, 0.1D);
-		materialOpacity.put(Material.TORCH, 0.1D);
-		materialOpacity.put(Material.FIRE, 0D);
-		materialOpacity.put(Material.SPAWNER, 0.3D);
-		materialOpacity.put(Material.REDSTONE_WIRE, 0D);
-		materialOpacity.put(Material.WHEAT, 0.2D);
-		materialOpacity.put(Material.OAK_WALL_SIGN, 0.1D);
-		materialOpacity.put(Material.OAK_SIGN, 0.2D);
-		materialOpacity.put(Material.LEVER, 0.1D);
-		materialOpacity.put(Material.STONE_PRESSURE_PLATE, 0D);
-		materialOpacity.put(Material.OAK_PRESSURE_PLATE, 0D);
-		materialOpacity.put(Material.REDSTONE_TORCH, 0.1D);
-		materialOpacity.put(Material.STONE_BUTTON, 0D);
-		materialOpacity.put(Material.SUGAR_CANE, 0.3D);
-		materialOpacity.put(Material.OAK_FENCE, 0.2D);
-		materialOpacity.put(Material.REPEATER, 0D);
-
 		transparent.add(Material.WATER);
 		transparent.add(Material.AIR);
 	}

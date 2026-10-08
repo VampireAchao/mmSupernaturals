@@ -28,7 +28,6 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.World.Environment;
 import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -460,38 +459,17 @@ public class VampireManager extends ClassManager {
 
 	public boolean isUnderRoof(Player player) {
 		/*
-		 * We start checking opacity 2 blocks up. As Max Y is 255 there CAN be a
-		 * roof over the player if he is standing in block 253: 255 Solid Block
-		 * 254 253 Player However if he is standing in 254 there is no chance.
+		 * 直接问光照引擎："玩家眼睛这一格能不能晒到太阳？"
+		 *
+		 * 旧实现往上逐格查一张手工维护的"方块透光度"表，凡是不在表里的方块
+		 * 一律当成屋顶。那张表是 1.7 时代按 data value 写的，方块展平成命名空间之后
+		 * 只认 OAK_* 一种变体，于是白桦/云杉/樱花树叶、高草、雪层、藤蔓等常见方块
+		 * 全被判成屋顶，白天站在树下或草丛里就不会燃烧。表里还写死了 Y<=255 的上限，
+		 * 1.18 之后世界高度到 319，这个上限也早已不对。
+		 *
+		 * 天空光照 15 = 该位置直通天光，与 vanilla 的 canSeeSky 语义一致，
+		 * 且不会随版本新增方块而失效。
 		 */
-		boolean retVal = false;
-		Block blockCurrent = player.getLocation().getBlock();
-
-		if (player.getLocation().getY() >= 254) {
-			retVal = false;
-		} else {
-			// blockCurrent = blockCurrent.getFace(BlockFace.UP, 1); //What was
-			// the point?
-
-			double opacityAccumulator = 0;
-			Double opacity;
-
-			while (blockCurrent.getY() + 1 <= 255) {
-				blockCurrent = blockCurrent.getRelative(BlockFace.UP);
-
-				opacity = SNConfigHandler.materialOpacity.get(blockCurrent.getType());
-				if (opacity == null) {
-					retVal = true; // Blocks not in that map have opacity 1;
-					break;
-				}
-
-				opacityAccumulator += opacity;
-				if (opacityAccumulator >= 1.0D) {
-					retVal = true;
-					break;
-				}
-			}
-		}
-		return retVal;
+		return player.getEyeLocation().getBlock().getLightFromSky() < 15;
 	}
 }
