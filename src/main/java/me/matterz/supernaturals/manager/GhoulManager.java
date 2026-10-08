@@ -27,6 +27,7 @@ import me.matterz.supernaturals.io.SNConfigHandler;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Boat;
@@ -434,27 +435,29 @@ public class GhoulManager extends ClassManager {
 
 	public boolean isUnderRoof(Player player) {
 		/*
-		 * We start checking opacity 2 blocks up. As Max Y is 127 there CAN be a
-		 * roof over the player if he is standing in block 125: 127 Solid Block
-		 * 126 125 Player However if he is standing in 126 there is no chance.
+		 * 淋雨判定：上方出现第一个"实体"方块就算有遮挡。
+		 *
+		 * 旧实现把任意非 AIR 方块都当成遮挡，而且写死了 Y<=127 的上限。
+		 * 1.13 方块展平之后，高草、各种花、藤蔓、雪层这些非实体方块全都在列，
+		 * 站在草地/花丛里也会被判成有遮挡，于是淋雨不掉血；1.18 之后世界高度到 319，
+		 * 那个上限同样已经不对。
+		 *
+		 * 雨是被方块挡住的（不是被光挡住的，玻璃挡雨但不挡阳光），所以这里用
+		 * Material#isSolid 而不是光照：树叶/玻璃算遮挡，花草火炬不算。
 		 */
-		boolean retVal = false;
+		World world = player.getWorld();
 		Block blockCurrent = player.getLocation().getBlock();
+		int maxY = world.getMaxHeight();
 
-		if (player.getLocation().getY() >= 126) {
-			retVal = false;
-		} else {
-			// blockCurrent = blockCurrent.getFace(BlockFace.UP, 1); //What was
-			// the point anyway?
-			while (blockCurrent.getY() + 1 <= 127) {
-				blockCurrent = blockCurrent.getRelative(BlockFace.UP);
+		while (blockCurrent.getY() + 1 < maxY) {
+			blockCurrent = blockCurrent.getRelative(BlockFace.UP);
 
-				if (!blockCurrent.getType().equals(Material.AIR)) {
-					retVal = true;
-					break;
-				}
+			Material type = blockCurrent.getType();
+			if (type.isAir() || !type.isSolid()) {
+				continue;
 			}
+			return true;
 		}
-		return retVal;
+		return false;
 	}
 }
