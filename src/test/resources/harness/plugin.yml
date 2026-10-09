@@ -1,0 +1,10 @@
+name: mmHarness
+version: "1.0.0"
+main: me.matterz.supernaturals.it.harness.HarnessPlugin
+api-version: "26.3"
+description: Drives fake players for the integration tests. Never shipped.
+depend: [mmSupernaturals]
+commands:
+  mmp:
+    description: Control the test harness from the server console
+    usage: /mmp <spawn|quit|online|type|run|give|perm|tp|interact|block|count|fireticks|health|stop>
