@@ -122,6 +122,23 @@
               </execution>
             </executions>
           </plugin>
+          <!-- Starts the scratch server and keeps it up, for testing by hand:
+               mvn -Pit test-compile exec:java -->
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <version>3.5.0</version>
+            <configuration>
+              <mainClass>me.matterz.supernaturals.it.TestServer</mainClass>
+              <classpathScope>test</classpathScope>
+              <systemProperties>
+                <systemProperty>
+                  <key>it.paperVersion</key>
+                  <value>${paper.version}</value>
+                </systemProperty>
+              </systemProperties>
+            </configuration>
+          </plugin>
         </plugins>
       </build>
     </profile>

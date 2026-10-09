@@ -101,18 +101,26 @@ public final class HarnessPlugin extends JavaPlugin {
 
     /** Runs one request on the server thread and returns a single-line response. */
     String onRequest(String request) {
+        // A command typed on the console is already running on the server thread. Scheduling
+        // the work onto that thread and then waiting for it would have the thread wait for
+        // itself, which trips the watchdog and takes the server down.
+        if (Bukkit.isPrimaryThread()) {
+            return handleSafely(request);
+        }
         CompletableFuture<String> answer = new CompletableFuture<>();
-        Bukkit.getScheduler().runTask(this, () -> {
-            try {
-                answer.complete(handle(request));
-            } catch (Throwable t) {
-                answer.complete("err " + t);
-            }
-        });
+        Bukkit.getScheduler().runTask(this, () -> answer.complete(handleSafely(request)));
         try {
             return answer.get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             return "err no answer within " + REQUEST_TIMEOUT_SECONDS + "s: " + request;
+        }
+    }
+
+    private String handleSafely(String request) {
+        try {
+            return handle(request);
+        } catch (Throwable t) {
+            return "err " + t;
         }
     }
 

@@ -4,8 +4,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -14,29 +17,54 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
 
 /**
- * The scratch Paper server the scenarios run against.
+ * The scratch Paper server the scenarios run against, and the only thing that starts a
+ * server at all - there is no separate run configuration to keep in step with it.
  *
- * <p>It is built under {@code target/it}, on its own port, from a generated flat world
- * and a fixed seed: nothing here touches the {@code server/} directory a developer uses
- * to play on, and any two machines produce the same world. Started once per test
- * JVM and stopped when it exits.
+ * <p>It is built under {@code target/it}, on its own ports, from a generated flat world
+ * with a fixed seed, so nothing here touches the {@code server/} directory a developer
+ * plays on and any two machines produce the same world. Started once per test JVM.
  *
- * <p>The server this class starts is a fixture, not a thing you attach to. If you want
- * to watch a scenario while driving a client yourself, run the scenario and keep the
- * client pointed at 25577.
+ * <h2>Testing by hand</h2>
+ * {@link #main} starts the server and keeps it up, so a real client can join and the
+ * plugin can be driven with the harness:
+ * <pre>
+ *   mvn -Pit test-compile exec:java
+ * </pre>
+ * The entry point is a main method rather than an IDE run configuration on purpose: it
+ * lives in version control, so losing an IDE's settings cannot lose the ability to
+ * start a server.
+ *
+ * <p>Two switches, both off for the scenarios:
+ * <ul>
+ *   <li>{@code -Dit.keepServer=true} leaves the server running when the tests finish.</li>
+ *   <li>{@code -Dit.debug=true} opens a JDWP port as well (5005, or
+ *       {@code -Dit.debugPort}), so a remote debugger can attach and breakpoints in the
+ *       plugin work while a scenario runs.</li>
+ * </ul>
  */
 public final class TestServer implements AutoCloseable {
+
+    /** Where the server jar is expected, relative to the project root. */
+    private static final String PAPER_JAR = "server/paper.jar";
+
+    /** Where the built plugin is expected, relative to the project root. */
+    private static final String PLUGIN_JAR = "server/plugins/mmSupernaturals.jar";
 
     public static final int GAME_PORT = 25577;
     public static final int CONTROL_PORT = 25578;
 
+    private static final int DEFAULT_DEBUG_PORT = 5005;
+    private static final String PAPER_BUILDS = "https://fill.papermc.io/v3/projects/paper/versions/";
+    private static final String PAPER_DOWNLOAD = "https://papermc.io/downloads/paper";
     private static final Duration STARTUP_TIMEOUT = Duration.ofMinutes(3);
     private static final String HARNESS_CLASSES = "me/matterz/supernaturals/it/harness";
 
@@ -49,6 +77,31 @@ public final class TestServer implements AutoCloseable {
             Runtime.getRuntime().addShutdownHook(new Thread(shared::close, "it-server"));
         }
         return shared;
+    }
+
+    /**
+     * Starts the server and holds it open for testing by hand: join with a real client on
+     * {@link #GAME_PORT}, drive the harness from the console, attach a debugger to the
+     * plugin on {@link #DEFAULT_DEBUG_PORT}. Stops with Ctrl+C, saving the world.
+     */
+    public static void main(String[] args) throws Exception {
+        System.setProperty("it.keepServer", "true");
+        System.setProperty("it.debug", System.getProperty("it.debug", "true"));
+
+        TestServer server = start();
+        Runtime.getRuntime().addShutdownHook(new Thread(server::shutdown, "it-server"));
+        server.forwardConsole();
+
+        System.out.println();
+        System.out.println("test server is up - Ctrl+C stops it (the world is saved)");
+        System.out.println("  join          : localhost:" + GAME_PORT + "   offline mode, any name");
+        System.out.println("  server console: type a command here, e.g.  mmp spawn Someone");
+        System.out.println("  debugger      : attach a remote JVM debugger to localhost:"
+                + Integer.getInteger("it.debugPort", DEFAULT_DEBUG_PORT));
+        System.out.println("  files         : " + server.directory());
+        System.out.println();
+
+        Thread.currentThread().join();
     }
 
     private final Path directory;
@@ -70,6 +123,7 @@ public final class TestServer implements AutoCloseable {
         Path project = projectDirectory();
         Path work = project.resolve("target/it");
         Path server = work.resolve("server");
+        Path console = server.resolve("console.log");
         try {
             Files.createDirectories(server.resolve("plugins"));
             if (!Boolean.getBoolean("it.keepWorld")) {
@@ -81,11 +135,7 @@ public final class TestServer implements AutoCloseable {
             install(project, work, server);
             writeConfiguration(server);
 
-            Path console = server.resolve("console.log");
-            Process process = new ProcessBuilder(
-                    javaBinary(), "-Xms1G", "-Xmx1G",
-                    "-Dharness.port=" + CONTROL_PORT,
-                    "-jar", "paper.jar", "--nogui")
+            Process process = new ProcessBuilder(command())
                     .directory(server.toFile())
                     .redirectErrorStream(true)
                     .redirectOutput(console.toFile())
@@ -97,22 +147,120 @@ public final class TestServer implements AutoCloseable {
         }
     }
 
+    private static List<String> command() {
+        List<String> command = new ArrayList<>(List.of(
+                javaBinary(), "-Xms1G", "-Xmx1G", "-Dharness.port=" + CONTROL_PORT));
+        if (Boolean.getBoolean("it.debug")) {
+            int port = Integer.getInteger("it.debugPort", DEFAULT_DEBUG_PORT);
+            command.add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:" + port);
+        }
+        command.add("-jar");
+        command.add("paper.jar");
+        command.add("--nogui");
+        return command;
+    }
+
     private static void install(Path project, Path work, Path server) throws IOException {
-        Path paper = resolvePaper(project, work);
+        Path paper = requirePaper(project);
         Path paperInPlace = server.resolve("paper.jar");
         if (!Files.isRegularFile(paperInPlace) || Files.size(paperInPlace) != Files.size(paper)) {
             Files.copy(paper, paperInPlace, StandardCopyOption.REPLACE_EXISTING);
         }
 
-        Path plugin = project.resolve("server/plugins/mmSupernaturals.jar");
-        if (!Files.isRegularFile(plugin)) {
-            throw new IllegalStateException(plugin + " is missing - run 'mvn package' first");
-        }
-        Files.copy(plugin, server.resolve("plugins/mmSupernaturals.jar"),
+        Files.copy(requirePluginJar(project), server.resolve("plugins/mmSupernaturals.jar"),
                 StandardCopyOption.REPLACE_EXISTING);
-
         Files.copy(buildHarnessJar(project, work), server.resolve("plugins/mmHarness.jar"),
                 StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /** An existing server jar, or a freshly downloaded one; a message with the fix if neither works. */
+    private static Path requirePaper(Path project) {
+        Path jar = project.resolve(PAPER_JAR);
+        if (Files.isRegularFile(jar)) {
+            return jar;
+        }
+        try {
+            return downloadPaper(jar);
+        } catch (Exception e) {
+            throw new IllegalStateException(fixThis(
+                    "Paper server jar is missing and could not be downloaded.",
+                    jar,
+                    "Paper " + minecraftVersion() + " (this build pins " + paperVersion() + " or newer)",
+                    PAPER_DOWNLOAD,
+                    e))
+                    ;
+        }
+    }
+
+    /**
+     * Fetches the newest build of the pinned Minecraft version. Only reached when there is
+     * no jar to use, so a checkout with one already in place never touches the network.
+     */
+    private static Path downloadPaper(Path target) throws IOException, InterruptedException {
+        System.out.println("paper.jar is missing, downloading Paper " + minecraftVersion() + " ...");
+        try (HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build()) {
+            String builds = PAPER_BUILDS + minecraftVersion() + "/builds";
+            JsonArray releases = JsonParser.parseString(get(http, builds)).getAsJsonArray();
+            JsonObject download = releases.get(0).getAsJsonObject()
+                    .getAsJsonObject("downloads")
+                    .getAsJsonObject("server:default");
+            String name = download.get("name").getAsString();
+            String url = download.get("url").getAsString();
+
+            Files.createDirectories(target.getParent());
+            Path partial = target.resolveSibling(target.getFileName() + ".part");
+            HttpResponse<Path> response = http.send(
+                    HttpRequest.newBuilder(URI.create(url))
+                            .header("User-Agent", "mmSupernaturals-it").build(),
+                    HttpResponse.BodyHandlers.ofFile(partial));
+            if (response.statusCode() != 200) {
+                Files.deleteIfExists(partial);
+                throw new IOException(name + " answered HTTP " + response.statusCode());
+            }
+            Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("  saved " + name + " to " + target);
+            return target;
+        }
+    }
+
+    private static String get(HttpClient http, String url) throws IOException, InterruptedException {
+        HttpResponse<String> response = http.send(
+                HttpRequest.newBuilder(URI.create(url))
+                        .header("User-Agent", "mmSupernaturals-it").build(),
+                HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new IOException(url + " answered HTTP " + response.statusCode());
+        }
+        return response.body();
+    }
+
+    /** The plugin under test, built by {@code mvn package} into the local server's folder. */
+    private static Path requirePluginJar(Path project) {
+        Path jar = project.resolve(PLUGIN_JAR);
+        if (!Files.isRegularFile(jar)) {
+            throw new IllegalStateException(fixThis(
+                    "The plugin under test has not been built.",
+                    jar,
+                    "run `mvn package` first, it writes the jar here",
+                    null,
+                    null));
+        }
+        return jar;
+    }
+
+    /** One shape for every "a file is missing" message, so the fix is always in the same place. */
+    private static String fixThis(String problem, Path expected, String what, String download,
+            Exception cause) {
+        String lines = "  expected at : " + expected + System.lineSeparator()
+                + "  needed      : " + what;
+        if (download != null) {
+            lines += System.lineSeparator() + "  download    : " + download;
+        }
+        if (cause != null) {
+            lines += System.lineSeparator() + "  reason      : " + cause;
+        }
+        return problem + System.lineSeparator() + System.lineSeparator()
+                + lines + System.lineSeparator();
     }
 
     /**
@@ -124,7 +272,12 @@ public final class TestServer implements AutoCloseable {
         Path classes = project.resolve("target/test-classes");
         Path descriptor = project.resolve("src/test/resources/harness/plugin.yml");
         if (!Files.isDirectory(classes) || !Files.isRegularFile(descriptor)) {
-            throw new IllegalStateException("run 'mvn test-compile' first");
+            throw new IllegalStateException(fixThis(
+                    "The harness classes are not compiled yet.",
+                    classes,
+                    "run `mvn test-compile` first",
+                    null,
+                    null));
         }
         Path jar = work.resolve("mmHarness.jar");
         try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
@@ -140,51 +293,6 @@ public final class TestServer implements AutoCloseable {
             }
         }
         return jar;
-    }
-
-    /** The developer's own server jar if there is one, otherwise the newest build of the pinned version. */
-    private static Path resolvePaper(Path project, Path work) throws IOException {
-        Path devServer = project.resolve("server/paper.jar");
-        if (Files.isRegularFile(devServer)) {
-            return devServer;
-        }
-        Path cache = work.resolve("cache");
-        Files.createDirectories(cache);
-        String requested = System.getProperty("it.paperVersion", "26.3.build.159-beta");
-        String minecraftVersion = requested.split("\\.build\\.")[0];
-        try (HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build()) {
-            String builds = "https://fill.papermc.io/v3/projects/paper/versions/" + minecraftVersion + "/builds";
-            JsonArray releases = JsonParser.parseString(get(http, builds)).getAsJsonArray();
-            JsonObject download = releases.get(0).getAsJsonObject()
-                    .getAsJsonObject("downloads")
-                    .getAsJsonObject("server:default");
-            Path target = cache.resolve(download.get("name").getAsString());
-            if (!Files.isRegularFile(target)) {
-                HttpResponse<Path> response = http.send(
-                        HttpRequest.newBuilder(URI.create(download.get("url").getAsString()))
-                                .header("User-Agent", "mmSupernaturals-it").build(),
-                        HttpResponse.BodyHandlers.ofFile(target));
-                if (response.statusCode() != 200) {
-                    throw new IOException("downloading " + download.get("name")
-                            + " answered HTTP " + response.statusCode());
-                }
-            }
-            return target;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("interrupted while downloading the server jar", e);
-        }
-    }
-
-    private static String get(HttpClient http, String url) throws IOException, InterruptedException {
-        HttpResponse<String> response = http.send(
-                HttpRequest.newBuilder(URI.create(url))
-                        .header("User-Agent", "mmSupernaturals-it").build(),
-                HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            throw new IOException(url + " answered HTTP " + response.statusCode());
-        }
-        return response.body();
     }
 
     /** A flat world with a fixed seed, so terrain is identical on every machine. */
@@ -243,6 +351,29 @@ public final class TestServer implements AutoCloseable {
         }
     }
 
+    /**
+     * Sends this process's input to the server's console. Typed input has to be pumped by
+     * hand because the server's stdin is a pipe rather than this terminal - and leaving it
+     * as a pipe is deliberate: a server whose stdin reaches end-of-input hangs during
+     * startup, while a pipe nobody writes to simply waits.
+     */
+    private void forwardConsole() {
+        Thread pump = new Thread(() -> {
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(System.in))) {
+                PrintWriter out = new PrintWriter(
+                        new OutputStreamWriter(process.getOutputStream()), true);
+                String line;
+                while ((line = in.readLine()) != null) {
+                    out.println(line);
+                }
+            } catch (IOException e) {
+                // input closed; the server keeps running, its console just goes quiet
+            }
+        }, "it-server-console");
+        pump.setDaemon(true);
+        pump.start();
+    }
+
     // -- what scenarios use ------------------------------------------------
 
     /** Adds a player to the game and returns a handle the scenario acts through. */
@@ -264,8 +395,16 @@ public final class TestServer implements AutoCloseable {
         return console;
     }
 
+    /** Asks for the server to be kept: {@code -Dit.keepServer}, or the main method. */
     @Override
     public synchronized void close() {
+        if (!Boolean.getBoolean("it.keepServer")) {
+            shutdown();
+        }
+    }
+
+    /** Stops the server and waits for it to save. Safe to call more than once. */
+    private synchronized void shutdown() {
         if (stopped) {
             return;
         }
@@ -289,6 +428,15 @@ public final class TestServer implements AutoCloseable {
 
     private static Path projectDirectory() {
         return Path.of(System.getProperty("it.projectDir", System.getProperty("user.dir")));
+    }
+
+    /** e.g. {@code 26.3.build.159-beta} -> {@code 26.3}. */
+    private static String minecraftVersion() {
+        return paperVersion().split("\\.build\\.")[0];
+    }
+
+    private static String paperVersion() {
+        return System.getProperty("it.paperVersion", "26.3.build.159-beta");
     }
 
     private static String javaBinary() {

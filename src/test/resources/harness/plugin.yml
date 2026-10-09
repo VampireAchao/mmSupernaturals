@@ -7,4 +7,4 @@ depend: [mmSupernaturals]
 commands:
   mmp:
     description: Control the test harness from the server console
-    usage: /mmp <spawn|quit|online|type|run|give|perm|tp|interact|block|fireticks|health|stop>
+    usage: /mmp <spawn|quit|online|type|run|give|perm|tp|interact|block|count|fireticks|health|stop>
