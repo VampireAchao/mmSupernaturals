@@ -5,10 +5,15 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -16,11 +21,13 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -30,19 +37,34 @@ import java.util.stream.Stream;
  * The scratch Paper server the scenarios run against, and the only thing that starts a
  * server at all - there is no separate run configuration to keep in step with it.
  *
- * <p>It is built under {@code target/it}, on its own ports, from a generated flat world
- * with a fixed seed, so nothing here touches the {@code server/} directory a developer
- * plays on and any two machines produce the same world. Started once per test JVM.
+ * <p>Everything it needs is under {@code target/}: the server jar it launches (downloaded on
+ * first run), the world it generates, Paper's own config, and the plugin jar {@code mvn
+ * package} writes. A fresh clone therefore needs nothing seeded by hand, and {@code mvn
+ * clean} is the only thing that resets the lot - at the price of downloading Paper again.
+ * The world comes from a seeded flat generator, so any two machines produce the same one,
+ * and scenarios share one such server per test JVM.
+ *
+ * <p>It serves on {@link #GAME_PORT}, the vanilla default, so a client joins with a plain
+ * {@code localhost} rather than a port someone has to remember. The price is that anything
+ * else on this machine already using that port has to be stopped first.
  *
  * <h2>Testing by hand</h2>
- * {@link #main} starts the server and keeps it up, so a real client can join and the
- * plugin can be driven with the harness:
+ * {@link #main} starts the server, streams its console to this terminal and keeps it up, so
+ * a real client can join and the plugin can be driven by typing commands here:
  * <pre>
- *   mvn -Pit test-compile exec:java
+ *   mvn -Pit package exec:java
  * </pre>
- * The entry point is a main method rather than an IDE run configuration on purpose: it
- * lives in version control, so losing an IDE's settings cannot lose the ability to
- * start a server.
+ * {@code package} is not decoration: it is what builds the plugin the server loads.
+ * {@code exec:java} alone has no jar to load and refuses before starting anything, which is
+ * the first thing a fresh clone runs into. The entry point is a main method rather than an
+ * IDE run configuration on purpose: it lives in version control, so losing an IDE's settings
+ * cannot lose the ability to start a server.
+ *
+ * <p>Run it from the IDE's Debug action and the plugin is debuggable too: the server runs
+ * in its own JVM, so this process being debugged does not cover the plugin, and the main
+ * method opens a JDWP listener in the server's JVM for a second debugger to attach to.
+ * Set {@code -Dit.debugSuspend=true} to hold the server before its first line of code, for
+ * breakpoints in {@code onEnable}.
  *
  * <p>Every run starts from a rebuilt server directory. The world, Paper's config files, its
  * ops/whitelist/usercache files, the logs and every plugin's data directory are deleted
@@ -50,7 +72,7 @@ import java.util.stream.Stream;
  * expensive to obtain again (the downloaded vanilla jar, the patched server jar, and the
  * resolved libraries) survive.
  *
- * <p>Two switches, both off for the scenarios:
+ * <p>Switches, all off for the scenarios:
  * <ul>
  *   <li>{@code -Dit.keepServer=true} leaves the server running when the tests finish.</li>
  *   <li>{@code -Dit.debug=true} opens a JDWP port as well (5005, or
@@ -62,16 +84,34 @@ import java.util.stream.Stream;
  */
 public final class TestServer implements AutoCloseable {
 
-    /** Where the server jar is expected, relative to the project root. */
-    private static final String PAPER_JAR = "server/paper.jar";
+    /**
+     * Where the server jar lives: in the fixture's own directory, so there is exactly one
+     * copy of it. Downloaded here if this checkout has never run.
+     */
+    private static final String PAPER_JAR = "target/it/server/paper.jar";
 
-    /** Where the built plugin is expected, relative to the project root. */
-    private static final String PLUGIN_JAR = "server/plugins/mmSupernaturals.jar";
+    /** Where {@code mvn package} leaves the plugin under test - Maven's own output. */
+    private static final String PLUGIN_JAR = "target/mmSupernaturals.jar";
 
-    public static final int GAME_PORT = 25577;
-    public static final int CONTROL_PORT = 25578;
+    /** The one seed the flat test world uses, so its terrain is identical on every machine. */
+    private static final String FLAT_SEED = "mmSupernaturals";
+
+    /** The vanilla default, so a client joins with a plain {@code localhost}. */
+    public static final int GAME_PORT = Integer.getInteger("it.gamePort", 25565);
+
+    /**
+     * The harness's control socket, not a game port: nothing outside this fixture ever
+     * connects to it. One above {@link #GAME_PORT} only so the pair is easy to remember.
+     *
+     * <p>Both ports can be moved with {@code -Dit.gamePort} / {@code -Dit.controlPort}, which
+     * is how two of these - or the ITs while a hand-run one is up - share a machine.
+     */
+    public static final int CONTROL_PORT = Integer.getInteger("it.controlPort", 25566);
 
     private static final int DEFAULT_DEBUG_PORT = 5005;
+
+    /** Where the debug agent listens, and where a debugger has to look for it. */
+    private static final String LOOPBACK = "127.0.0.1";
     private static final String PAPER_BUILDS = "https://fill.papermc.io/v3/projects/paper/versions/";
     private static final String PAPER_DOWNLOAD = "https://papermc.io/downloads/paper";
     private static final Duration STARTUP_TIMEOUT = Duration.ofMinutes(3);
@@ -92,6 +132,15 @@ public final class TestServer implements AutoCloseable {
 
     private static TestServer shared;
 
+    /** Set once a JDWP port has been picked, so the banner can name the port in use. */
+    private static volatile int resolvedDebugPort = -1;
+
+    /** The seed the world was built from, decided once so the banner cannot contradict it. */
+    private static volatile String resolvedSeed;
+
+    /** Whether {@link #reset} left the previous run's world in place, {@code -Dit.keepState}. */
+    private static volatile boolean keptWorld;
+
     /** The one server for this JVM, started on first use. */
     public static synchronized TestServer shared() {
         if (shared == null) {
@@ -102,29 +151,69 @@ public final class TestServer implements AutoCloseable {
     }
 
     /**
-     * Starts the server and holds it open for testing by hand: join with a real client on
-     * {@link #GAME_PORT}, drive the harness from the console, attach a debugger to the
-     * plugin on {@link #DEFAULT_DEBUG_PORT}. Stops with Ctrl+C, saving the world.
+     * Starts the server, streams its console to this terminal, and holds it open for testing
+     * by hand: join with a real client on {@link #GAME_PORT}, walk to the altars the
+     * scenarios use, type server commands here, and attach a debugger to the plugin on the
+     * port in the banner. Stops with Ctrl+C, saving the world.
+     *
+     * <p>The world is generated terrain by default - a fresh one every run - because that is
+     * what the plugin's races want to be tried in. {@code -Dit.flat=true} asks for the flat
+     * world the scenarios themselves run in instead.
      */
     public static void main(String[] args) throws Exception {
+        boolean debugging = isDebuggingThisJvm();
         System.setProperty("it.keepServer", "true");
-        System.setProperty("it.debug", System.getProperty("it.debug", "true"));
+        System.setProperty("it.interactive", "true");
+        // Under a debugger, make the plugin debuggable as well; -Dit.debug overrides either way.
+        System.setProperty("it.debug", System.getProperty("it.debug", Boolean.toString(debugging)));
 
+        if (Boolean.getBoolean("it.debug") && Boolean.getBoolean("it.debugSuspend")) {
+            System.out.println("the server is held until a debugger attaches to "
+                    + LOOPBACK + ":" + debugPort());
+        }
+
+        boolean flat = flatWorld();
         TestServer server = start();
         Runtime.getRuntime().addShutdownHook(new Thread(server::shutdown, "it-server"));
         server.forwardConsole();
+        String hallAt = server.hallLobby();
 
         System.out.println();
         System.out.println("test server is up - Ctrl+C stops it (the world is saved)");
         System.out.println("  join          : localhost:" + GAME_PORT + "   offline mode, any name");
-        System.out.println("  server console: type a command here, e.g.  mmp spawn Someone");
-        System.out.println("  debugger      : attach a remote JVM debugger to localhost:"
-                + Integer.getInteger("it.debugPort", DEFAULT_DEBUG_PORT));
+        System.out.println("  console       : type a server command here, e.g.  op YourName");
+        if (hallAt != null) {
+            System.out.println("  hall          : you spawn in the lobby at " + hallAt);
+            System.out.println("                  eight race buttons on the lobby wall, plus leaving."
+                    + " Each race hall is");
+            System.out.println("                  a corridor of numbered sections, read left to"
+                    + " right; every row ends");
+            System.out.println("                  with a damage dummy, a +1000 power switch, and"
+                    + " switches back to");
+            System.out.println("                  the start or out of the test");
+        }
+        System.out.println("  world         : " + (flat
+                ? "flat test world, -Dit.flat=false for real terrain"
+                : keptWorld
+                        ? "kept from the last run, -Dit.flat=true for the test world"
+                        : "generated, seed " + resolvedSeed + ", -Dit.seed=<n> to reuse it"));
+        if (resolvedDebugPort > 0) {
+            System.out.println("  plugin debug  : attach a remote JVM debugger to "
+                    + LOOPBACK + ":" + resolvedDebugPort);
+            if (debugging) {
+                System.out.println("                  (the plugin runs in the server JVM, so this is a"
+                        + " second debugger)");
+            }
+        }
         System.out.println("  files         : " + server.directory());
         System.out.println("  state         : rebuilt on start; -Dit.keepState=true keeps it");
         System.out.println();
 
-        Thread.currentThread().join();
+        // Typing "stop" here ends the server; this ends the launcher with it rather than
+        // sitting on a join with nothing left to do.
+        int exit = server.awaitExit();
+        System.out.println("the server has stopped (exit " + exit + ")");
+        System.exit(exit);
     }
 
     private final Path directory;
@@ -147,18 +236,28 @@ public final class TestServer implements AutoCloseable {
         Path work = project.resolve("target/it");
         Path server = work.resolve("server");
         Path console = server.resolve("console.log");
+        boolean interactive = Boolean.getBoolean("it.interactive");
         try {
             Files.createDirectories(server.resolve("plugins"));
             reset(server);
             install(project, work, server);
             writeConfiguration(server);
 
-            Process process = new ProcessBuilder(command())
+            ProcessBuilder builder = new ProcessBuilder(command())
                     .directory(server.toFile())
-                    .redirectErrorStream(true)
-                    .redirectOutput(console.toFile())
-                    .start();
+                    .redirectErrorStream(true);
+            if (interactive) {
+                // A hand-run server shows its console here. The log is created up front -
+                // a startup failure reads it - and filled as the output streams past.
+                Files.writeString(console, "");
+            } else {
+                builder.redirectOutput(console.toFile());
+            }
 
+            Process process = builder.start();
+            if (interactive) {
+                teeConsole(process.getInputStream(), console);
+            }
             return new TestServer(server, process, awaitControl(process, console), console);
         } catch (IOException e) {
             throw new IllegalStateException("could not start the test server under " + server, e);
@@ -168,9 +267,17 @@ public final class TestServer implements AutoCloseable {
     private static List<String> command() {
         List<String> command = new ArrayList<>(List.of(
                 javaBinary(), "-Xms1G", "-Xmx1G", "-Dharness.port=" + CONTROL_PORT));
+        if (Boolean.getBoolean("it.interactive")) {
+            // A hand-run server gets the test hall. The scenarios place what they need at
+            // known coordinates and would only be in its way.
+            command.add("-Dharness.hall=true");
+        }
         if (Boolean.getBoolean("it.debug")) {
-            int port = Integer.getInteger("it.debugPort", DEFAULT_DEBUG_PORT);
-            command.add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:" + port);
+            // The plugin lives in the server JVM, so the listener goes on that JVM rather
+            // than on this one; that is what makes a debugger able to stop in the plugin.
+            String suspend = Boolean.getBoolean("it.debugSuspend") ? "y" : "n";
+            command.add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=" + suspend
+                    + ",address=" + LOOPBACK + ":" + debugPort());
         }
         command.add("-jar");
         command.add("paper.jar");
@@ -188,6 +295,7 @@ public final class TestServer implements AutoCloseable {
             return;
         }
         boolean keepState = Boolean.getBoolean("it.keepState");
+        keptWorld = keepState && Files.isDirectory(server.resolve("world"));
         try (Stream<Path> entries = Files.list(server)) {
             for (Path entry : entries.toList()) {
                 String name = entry.getFileName().toString();
@@ -211,26 +319,24 @@ public final class TestServer implements AutoCloseable {
     }
 
     private static void install(Path project, Path work, Path server) throws IOException {
-        Path paper = requirePaper(project);
-        Path paperInPlace = server.resolve("paper.jar");
-        if (!Files.isRegularFile(paperInPlace) || Files.size(paperInPlace) != Files.size(paper)) {
-            Files.copy(paper, paperInPlace, StandardCopyOption.REPLACE_EXISTING);
-        }
-
+        ensurePaper(project);
         Files.copy(requirePluginJar(project), server.resolve("plugins/mmSupernaturals.jar"),
                 StandardCopyOption.REPLACE_EXISTING);
         Files.copy(buildHarnessJar(project, work), server.resolve("plugins/mmHarness.jar"),
                 StandardCopyOption.REPLACE_EXISTING);
     }
 
-    /** An existing server jar, or a freshly downloaded one; a message with the fix if neither works. */
-    private static Path requirePaper(Path project) {
+    /**
+     * The jar the launch command names, already in place or fetched now. Nothing is copied:
+     * it is downloaded straight to where the server runs from, so the fixture holds one copy.
+     */
+    private static void ensurePaper(Path project) {
         Path jar = project.resolve(PAPER_JAR);
         if (Files.isRegularFile(jar)) {
-            return jar;
+            return;
         }
         try {
-            return downloadPaper(jar);
+            downloadPaper(jar);
         } catch (Exception e) {
             throw new IllegalStateException(fixThis(
                     "Paper server jar is missing and could not be downloaded.",
@@ -243,11 +349,12 @@ public final class TestServer implements AutoCloseable {
     }
 
     /**
-     * Fetches the newest build of the pinned Minecraft version. Only reached when there is
-     * no jar to use, so a checkout with one already in place never touches the network.
+     * Fetches the newest build of the pinned Minecraft version, straight to {@code target},
+     * where the launch command will name it. Only reached when there is none to use, so a
+     * checkout that has run before never touches the network.
      */
-    private static Path downloadPaper(Path target) throws IOException, InterruptedException {
-        System.out.println("paper.jar is missing, downloading Paper " + minecraftVersion() + " ...");
+    private static void downloadPaper(Path target) throws IOException, InterruptedException {
+        System.out.println("no server jar yet, downloading Paper " + minecraftVersion() + " ...");
         try (HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build()) {
             String builds = PAPER_BUILDS + minecraftVersion() + "/builds";
             JsonArray releases = JsonParser.parseString(get(http, builds)).getAsJsonArray();
@@ -269,7 +376,6 @@ public final class TestServer implements AutoCloseable {
             }
             Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING);
             System.out.println("  saved " + name + " to " + target);
-            return target;
         }
     }
 
@@ -284,14 +390,14 @@ public final class TestServer implements AutoCloseable {
         return response.body();
     }
 
-    /** The plugin under test, built by {@code mvn package} into the local server's folder. */
+    /** The plugin under test, built by {@code mvn package} into {@code target/}. */
     private static Path requirePluginJar(Path project) {
         Path jar = project.resolve(PLUGIN_JAR);
         if (!Files.isRegularFile(jar)) {
             throw new IllegalStateException(fixThis(
                     "The plugin under test has not been built.",
                     jar,
-                    "run `mvn package` first, it writes the jar here",
+                    "run `mvn -Pit package exec:java` - package is what builds it",
                     null,
                     null));
         }
@@ -345,9 +451,14 @@ public final class TestServer implements AutoCloseable {
         return jar;
     }
 
-    /** A flat world with a fixed seed, so terrain is identical on every machine. */
+    /**
+     * Writes the properties the fixture needs, and chooses what kind of world it is:
+     * {@link #flatWorld()} decides, because a scenario asserts blocks by coordinate and
+     * needs the fixed flat one, while a developer trying a race wants terrain.
+     */
     private static void writeConfiguration(Path server) throws IOException {
-        String flat = "{\"layers\":[{\"block\":\"minecraft:bedrock\",\"height\":1},"
+        boolean flat = flatWorld();
+        String layers = "{\"layers\":[{\"block\":\"minecraft:bedrock\",\"height\":1},"
                 + "{\"block\":\"minecraft:stone\",\"height\":3},"
                 + "{\"block\":\"minecraft:dirt\",\"height\":1},"
                 + "{\"block\":\"minecraft:grass_block\",\"height\":1}],"
@@ -358,21 +469,54 @@ public final class TestServer implements AutoCloseable {
                 "enforce-secure-profile=false",
                 "spawn-protection=0",
                 "server-port=" + GAME_PORT,
+                // Paper 26.3 defaults a fresh config to white-list=true, which turned a
+                // joining developer away with "not whitelisted" while the log said nothing
+                // about where that came from. Pinned false, like the rest of this list.
+                "white-list=false",
+                "enforce-whitelist=false",
                 "level-name=world",
-                "level-type=minecraft:flat",
-                "level-seed=mmSupernaturals",
-                "generator-settings=" + flat,
+                "level-type=" + (flat ? "minecraft:flat" : "minecraft:normal"),
+                "level-seed=" + worldSeed(flat),
+                "generator-settings=" + (flat ? layers : ""),
                 "gamemode=survival",
                 "difficulty=normal",
-                "allow-nether=false",
+                // The demon area is the nether, so the fixture needs one to exist.
+                "allow-nether=true",
                 "max-players=20",
                 "view-distance=6",
                 "simulation-distance=4",
                 "enable-command-block=true") + "\n");
     }
 
+    /**
+     * True when the fixed flat test world is wanted rather than generated terrain. The
+     * scenarios always want it - they assert blocks by absolute coordinate - and a hand-run
+     * server does not, unless asked.
+     */
+    private static boolean flatWorld() {
+        return !Boolean.getBoolean("it.interactive") || Boolean.getBoolean("it.flat");
+    }
+
+    /** The flat world is seeded once forever; a hand-run world gets a new seed each run. */
+    private static String worldSeed(boolean flat) {
+        if (flat) {
+            return FLAT_SEED;
+        }
+        // Rolled once: writeConfiguration and the banner both ask, and they have to agree.
+        if (resolvedSeed == null) {
+            resolvedSeed = System.getProperty("it.seed",
+                    Long.toString(ThreadLocalRandom.current().nextLong()));
+        }
+        return resolvedSeed;
+    }
+
     private static ControlClient awaitControl(Process process, Path console) throws IOException {
-        long deadline = System.nanoTime() + STARTUP_TIMEOUT.toNanos();
+        // A suspended server is deliberately waiting for a debugger, so waiting for it is
+        // not the same thing as waiting for a slow startup.
+        Duration timeout = Boolean.getBoolean("it.debugSuspend")
+                ? Duration.ofMinutes(15)
+                : STARTUP_TIMEOUT;
+        long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             if (!process.isAlive()) {
                 throw new IllegalStateException("the test server exited during startup (exit "
@@ -390,7 +534,32 @@ public final class TestServer implements AutoCloseable {
             sleep();
         }
         throw new IllegalStateException("no answer on port " + CONTROL_PORT + " within "
-                + STARTUP_TIMEOUT + ":\n" + tail(console));
+                + timeout + ":\n" + tail(console));
+    }
+
+    /**
+     * Copies the server's output to this terminal while writing the same lines to the log,
+     * so a hand-run server looks like a normal one and the log still has everything for
+     * startup failures. Reads to end-of-stream, which arrives when the server exits.
+     */
+    private static void teeConsole(InputStream from, Path console) {
+        Thread tee = new Thread(() -> {
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(from));
+                    BufferedWriter out = Files.newBufferedWriter(console,
+                            StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                String line;
+                while ((line = in.readLine()) != null) {
+                    System.out.println(line);
+                    out.write(line);
+                    out.newLine();
+                    out.flush();
+                }
+            } catch (IOException e) {
+                // the server exited, or the terminal went away; the log has what we saw
+            }
+        }, "it-server-output");
+        tee.setDaemon(true);
+        tee.start();
     }
 
     private static void sleep() {
@@ -445,6 +614,23 @@ public final class TestServer implements AutoCloseable {
         return console;
     }
 
+    /**
+     * Where the hall's lobby is, as {@code x y z}. The hall is the harness's, not this
+     * class's, so this only asks it - and answers null on a server that has none.
+     */
+    private String hallLobby() {
+        try {
+            return control.call("hall");
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Blocks until the server process exits; its exit code. The hand-run mode uses this. */
+    public int awaitExit() throws InterruptedException {
+        return process.waitFor();
+    }
+
     /** Asks for the server to be kept: {@code -Dit.keepServer}, or the main method. */
     @Override
     public synchronized void close() {
@@ -478,6 +664,43 @@ public final class TestServer implements AutoCloseable {
 
     private static Path projectDirectory() {
         return Path.of(System.getProperty("it.projectDir", System.getProperty("user.dir")));
+    }
+
+    /** A position written the way a server command wants it, minus the decimals. */
+    private static String at(int x, int y, int z) {
+        return x + "," + y + "," + z;
+    }
+
+    /** True when this JVM itself was launched by a debugger, e.g. the IDE's Debug action. */
+    private static boolean isDebuggingThisJvm() {
+        return ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+                .anyMatch(argument -> argument.contains("jdwp"));
+    }
+
+    /**
+     * The port the server JVM's debugger listens on: {@code -Dit.debugPort} (5005) if free,
+     * else the next free one up, so a debug session left over from last time cannot stop the
+     * server starting - a JDWP agent that cannot bind takes the whole JVM down with it.
+     *
+     * <p>The probe asks for exactly what the agent will ask for, {@value #LOOPBACK} rather
+     * than the loopback name: on macOS that name resolves to {@code ::1}, which a debugger on
+     * {@code 127.0.0.1} cannot reach, and probing it would miss a port that is taken.
+     */
+    private static synchronized int debugPort() {
+        if (resolvedDebugPort > 0) {
+            return resolvedDebugPort;
+        }
+        int preferred = Integer.getInteger("it.debugPort", DEFAULT_DEBUG_PORT);
+        for (int port = preferred; port < preferred + 20; port++) {
+            try (ServerSocket probe = new ServerSocket(port, 1, InetAddress.getByName(LOOPBACK))) {
+                resolvedDebugPort = port;
+                return port;
+            } catch (IOException taken) {
+                // bound by something else; try the next one
+            }
+        }
+        throw new IllegalStateException(
+                "no free debug port in " + preferred + ".." + (preferred + 19));
     }
 
     /** e.g. {@code 26.3.build.159-beta} -> {@code 26.3}. */

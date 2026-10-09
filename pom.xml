@@ -79,10 +79,11 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.4.2</version>
-        <configuration>
-          <!-- 直接投到本地开发服务端的 plugins 目录，保持仓库根目录干净 -->
-          <outputDirectory>${session.executionRootDirectory}/server/plugins/</outputDirectory>
-        </configuration>
+        <!--
+          The jar stays where Maven puts it, target/<finalName>.jar, and the integration
+          tests read it from there. Nothing outside target/ is produced by a build, so a
+          clone needs no directory of checked-in-nowhere artifacts to be seeded by hand.
+        -->
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
