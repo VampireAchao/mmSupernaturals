@@ -13,6 +13,7 @@
     <java.version>25</java.version>
     <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <plugin.output.dir>${project.basedir}/server/plugins</plugin.output.dir>
     <!-- Paper 从 26.x 起把 API 版本改成了 <MC版本>.build.<构建号>-<通道>，不再是 1.21.x-R0.1-SNAPSHOT。
          paper.version 是编译用的 API，plugin.api.version 经资源过滤写进 plugin.yml 的 api-version。 -->
     <paper.version>26.3.build.159-beta</paper.version>
@@ -79,11 +80,9 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.4.2</version>
-        <!--
-          The jar stays where Maven puts it, target/<finalName>.jar, and the integration
-          tests read it from there. Nothing outside target/ is produced by a build, so a
-          clone needs no directory of checked-in-nowhere artifacts to be seeded by hand.
-        -->
+        <configuration>
+          <outputDirectory>${plugin.output.dir}</outputDirectory>
+        </configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -99,6 +98,9 @@
          `mvn package` still produces exactly the same jar as before. -->
     <profile>
       <id>it</id>
+      <properties>
+        <plugin.output.dir>${project.build.directory}</plugin.output.dir>
+      </properties>
       <build>
         <plugins>
           <plugin>
@@ -124,7 +126,7 @@
             </executions>
           </plugin>
           <!-- Starts the scratch server and keeps it up, for testing by hand:
-               mvn -Pit test-compile exec:java -->
+               mvn -Pit package exec:java -->
           <plugin>
             <groupId>org.codehaus.mojo</groupId>
             <artifactId>exec-maven-plugin</artifactId>

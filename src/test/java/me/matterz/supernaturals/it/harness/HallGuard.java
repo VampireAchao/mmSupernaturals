@@ -323,7 +323,7 @@ final class HallGuard implements Listener {
         for (int step = zone.x1(); step <= zone.x2(); step++) {
             for (int depth = zone.z1(); depth <= zone.z2(); depth++) {
                 // A write to a chunk nobody has loaded is a write that never happened.
-                world.getChunkAt(step, depth);
+                world.getChunkAt(Math.floorDiv(step, 16), Math.floorDiv(depth, 16));
                 world.setBiome(step, 0, depth, Biome.SNOWY_PLAINS);
             }
         }
@@ -745,10 +745,9 @@ final class HallGuard implements Listener {
     /**
      * Casts one of a priest's spells at the stand-in.
      *
-     * <p>Every priest spell fires when the priest <b>attacks a target</b> with the item in hand,
-     * and most of them only mean anything against another supernatural player - so the stand-in
-     * is turned into one first, and then hit with the item. The spell's own messages go to the
-     * caster, which is the player standing here.
+     * <p>Every priest spell fires when the priest <b>attacks a target</b> with the item in hand.
+     * Most act on a supernatural target; healing and Guardian Angel require a human. The spell's
+     * own messages go to the caster, which is the player standing here.
      */
     private void testSpell(Player player, String itemName) {
         Material item = itemName == null ? null : Material.matchMaterial(itemName);
@@ -762,13 +761,20 @@ final class HallGuard implements Listener {
         }
         spar.teleport(spotInFrontOf(player));
         spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
-        // A cure, a banishing or a draining needs something to act on, so the target is made
-        // into a supernatural player before the spell lands. Healing is the one that wants a
-        // plain human, so it is left alone.
-        if (!Material.PAPER.equals(item)) {
+        boolean guardianAngel = item.name().equalsIgnoreCase(SNConfigHandler.priestSpellGuardianAngel);
+        boolean humanOnly = Material.PAPER.equals(item) || guardianAngel;
+        if (humanOnly) {
+            SuperNPlayer target = SuperNManager.get(spar);
+            if (!target.isHuman()) {
+                SuperNManager.cure(target);
+            }
+        } else {
             SuperNManager.convert(SuperNManager.get(spar), "vampire",
                     SNConfigHandler.vampirePowerStart);
             spar.setHealth(6);
+        }
+        if (Material.FLINT.equals(item)) {
+            spar.getInventory().setItemInMainHand(new ItemStack(item));
         }
         player.getInventory().setItemInMainHand(new ItemStack(item));
         EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(player, spar,

@@ -318,7 +318,8 @@ public final class HarnessPlugin extends JavaPlugin {
             case "bucket":
                 return bucket(rest);
             case "bounds":
-                return hall == null ? "err no hall on this server" : "ok" + hall.describeBounds();
+                return hall == null ? "err no hall on this server"
+                        : "ok" + hall.describeBounds().replaceAll("\\R", " ");
             case "zombie":
                 return zombie(rest);
             case "wear":
@@ -385,7 +386,7 @@ public final class HarnessPlugin extends JavaPlugin {
 
     private String give(String rest) {
         String[] args = rest.split("\\s+");
-        if (args.length < 3) {
+        if (args.length < 2) {
             return "err usage: give <name> <material> [count]";
         }
         Player player = player(args[0]);
@@ -596,10 +597,10 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     private static Block blockInWorld(String[] args, int from) {
-        int offset = looksLikeWorld(args[0]) ? 1 : 0;
-        World world = offset == 1 ? Bukkit.getWorld(args[0]) : Bukkit.getWorlds().get(0);
+        int offset = looksLikeWorld(args[from]) ? 1 : 0;
+        World world = offset == 1 ? Bukkit.getWorld(args[from]) : Bukkit.getWorlds().get(0);
         if (world == null) {
-            throw new IllegalArgumentException("no such world: " + args[0]);
+            throw new IllegalArgumentException("no such world: " + args[from]);
         }
         return world.getBlockAt(intOf(args[from + offset]), intOf(args[from + offset + 1]),
                 intOf(args[from + offset + 2]));
@@ -1010,7 +1011,7 @@ public final class HarnessPlugin extends JavaPlugin {
             }
             int setX = intOf(args[2]);
             int setZ = intOf(args[3]);
-            target.getChunkAt(setX, setZ);
+            target.getChunkAt(Math.floorDiv(setX, 16), Math.floorDiv(setZ, 16));
             target.setBiome(setX, 0, setZ, org.bukkit.block.Biome.SNOWY_PLAINS);
             return "ok y0=" + target.getBiome(setX, 0, setZ);
         }

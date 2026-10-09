@@ -38,7 +38,7 @@ import java.util.stream.Stream;
  * server at all - there is no separate run configuration to keep in step with it.
  *
  * <p>Everything it needs is under {@code target/}: the server jar it launches (downloaded on
- * first run), the world it generates, Paper's own config, and the plugin jar {@code mvn
+ * first run), the world it generates, Paper's own config, and the plugin jar {@code mvn -Pit
  * package} writes. A fresh clone therefore needs nothing seeded by hand, and {@code mvn
  * clean} is the only thing that resets the lot - at the price of downloading Paper again.
  * The world comes from a seeded flat generator, so any two machines produce the same one,
@@ -90,7 +90,7 @@ public final class TestServer implements AutoCloseable {
      */
     private static final String PAPER_JAR = "target/it/server/paper.jar";
 
-    /** Where {@code mvn package} leaves the plugin under test - Maven's own output. */
+    /** Where {@code mvn package -Pit} leaves the plugin under test - Maven's own output. */
     private static final String PLUGIN_JAR = "target/mmSupernaturals.jar";
 
     /** The one seed the flat test world uses, so its terrain is identical on every machine. */
@@ -237,6 +237,7 @@ public final class TestServer implements AutoCloseable {
         Path server = work.resolve("server");
         Path console = server.resolve("console.log");
         boolean interactive = Boolean.getBoolean("it.interactive");
+        Process process = null;
         try {
             Files.createDirectories(server.resolve("plugins"));
             reset(server);
@@ -254,13 +255,30 @@ public final class TestServer implements AutoCloseable {
                 builder.redirectOutput(console.toFile());
             }
 
-            Process process = builder.start();
+            process = builder.start();
             if (interactive) {
                 teeConsole(process.getInputStream(), console);
             }
             return new TestServer(server, process, awaitControl(process, console), console);
         } catch (IOException e) {
+            if (process != null) {
+                stopAfterStartupFailure(process);
+            }
             throw new IllegalStateException("could not start the test server under " + server, e);
+        } catch (RuntimeException e) {
+            if (process != null) {
+                stopAfterStartupFailure(process);
+            }
+            throw e;
+        }
+    }
+
+    private static void stopAfterStartupFailure(Process process) {
+        process.destroyForcibly();
+        try {
+            process.waitFor();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -390,7 +408,7 @@ public final class TestServer implements AutoCloseable {
         return response.body();
     }
 
-    /** The plugin under test, built by {@code mvn package} into {@code target/}. */
+    /** The plugin under test, built by {@code mvn -Pit package} into {@code target/}. */
     private static Path requirePluginJar(Path project) {
         Path jar = project.resolve(PLUGIN_JAR);
         if (!Files.isRegularFile(jar)) {

@@ -1,4 +1,5 @@
 target/
+/server/
 .idea/*
 !.idea/runConfigurations/
 *.iml
