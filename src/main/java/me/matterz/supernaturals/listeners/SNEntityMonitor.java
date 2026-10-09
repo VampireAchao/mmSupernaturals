@@ -34,6 +34,7 @@ import org.bukkit.entity.Arrow;
 import org.bukkit.entity.Creature;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
 import org.bukkit.entity.Monster;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -115,15 +116,14 @@ public class SNEntityMonitor implements Listener {
 			}
 			SuperNPlayer snDamager = SuperNManager.get(pDamager);
 
-			if (victim instanceof Creature) {
-				Creature cVictim = (Creature) victim;
+			if (victim instanceof Mob) {
 
 				// Break vampire truce
 				if (snDamager.isVampire()
-						&& SNConfigHandler.vampireTruce.contains(EntityUtil.entityTypeFromEntity(cVictim))) {
+						&& SNConfigHandler.vampireTruce.contains(EntityUtil.entityTypeFromEntity(victim))) {
 					plugin.getSuperManager().truceBreak(snDamager);
 				} else if (snDamager.isGhoul()
-						&& SNConfigHandler.ghoulTruce.contains(EntityUtil.entityTypeFromEntity(cVictim))) {
+						&& SNConfigHandler.ghoulTruce.contains(EntityUtil.entityTypeFromEntity(victim))) {
 					plugin.getSuperManager().truceBreak(snDamager);
 				}
 			}

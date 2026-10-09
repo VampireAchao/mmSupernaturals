@@ -518,7 +518,8 @@ public class SNConfigHandler {
 				config.set("BurnableBlocks", burnableBlocksString);
 			}
 
-				// Bukkit 的 Monster 接口即"会主动攻击玩家的敌对生物"全集
+			// Bukkit 的 Enemy 接口即"敌对生物"全集，其中 Ghast/Phantom/EnderDragon 等
+			// 并不是 Creature，所以这里必须写全，否则它们不会进入休战契约
 			if (vampireTruceString.size() == 0) {
 				vampireTruceString.add("BLAZE");
 				vampireTruceString.add("BOGGED");
@@ -528,20 +529,27 @@ public class SNConfigHandler {
 				vampireTruceString.add("CREEPER");
 				vampireTruceString.add("DROWNED");
 				vampireTruceString.add("ELDER_GUARDIAN");
+				vampireTruceString.add("ENDER_DRAGON");
 				vampireTruceString.add("ENDERMAN");
 				vampireTruceString.add("ENDERMITE");
 				vampireTruceString.add("EVOKER");
+				vampireTruceString.add("GHAST");
 				vampireTruceString.add("GIANT");
 				vampireTruceString.add("GUARDIAN");
+				vampireTruceString.add("HOGLIN");
 				vampireTruceString.add("HUSK");
 				vampireTruceString.add("ILLUSIONER");
+				vampireTruceString.add("MAGMA_CUBE");
 				vampireTruceString.add("PARCHED");
+				vampireTruceString.add("PHANTOM");
 				vampireTruceString.add("PIGLIN");
 				vampireTruceString.add("PIGLIN_BRUTE");
 				vampireTruceString.add("PILLAGER");
 				vampireTruceString.add("RAVAGER");
+				vampireTruceString.add("SHULKER");
 				vampireTruceString.add("SILVERFISH");
 				vampireTruceString.add("SKELETON");
+				vampireTruceString.add("SLIME");
 				vampireTruceString.add("SPIDER");
 				vampireTruceString.add("STRAY");
 				vampireTruceString.add("VEX");
