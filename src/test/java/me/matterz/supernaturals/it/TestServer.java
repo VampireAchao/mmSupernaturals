@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -43,12 +44,20 @@ import java.util.stream.Stream;
  * lives in version control, so losing an IDE's settings cannot lose the ability to
  * start a server.
  *
+ * <p>Every run starts from a rebuilt server directory. The world, Paper's config files, its
+ * ops/whitelist/usercache files, the logs and every plugin's data directory are deleted
+ * first, so no scenario can pass on leftovers; only the three cached artifacts that are
+ * expensive to obtain again (the downloaded vanilla jar, the patched server jar, and the
+ * resolved libraries) survive.
+ *
  * <p>Two switches, both off for the scenarios:
  * <ul>
  *   <li>{@code -Dit.keepServer=true} leaves the server running when the tests finish.</li>
  *   <li>{@code -Dit.debug=true} opens a JDWP port as well (5005, or
  *       {@code -Dit.debugPort}), so a remote debugger can attach and breakpoints in the
  *       plugin work while a scenario runs.</li>
+ *   <li>{@code -Dit.keepState=true} keeps the world and the plugin's data between runs,
+ *       for iterating on one world by hand.</li>
  * </ul>
  */
 public final class TestServer implements AutoCloseable {
@@ -67,6 +76,19 @@ public final class TestServer implements AutoCloseable {
     private static final String PAPER_DOWNLOAD = "https://papermc.io/downloads/paper";
     private static final Duration STARTUP_TIMEOUT = Duration.ofMinutes(3);
     private static final String HARNESS_CLASSES = "me/matterz/supernaturals/it/harness";
+
+    /**
+     * The only things kept between runs: the vanilla jar Paper downloads, the jar it patches
+     * from that one, and the libraries it resolves - all of them tens of megabytes, and all
+     * of them derived from the server jar rather than from anything a scenario does.
+     *
+     * <p>Everything else under the test server's directory is deleted before a run: the
+     * world (and with it every player's data, stats and advancements), all of Paper's config
+     * files, ops/whitelist/usercache, the logs, and every plugin's data directory. A test
+     * that passed on leftovers from the previous run would be a bug that shows up in CI, or
+     * never.
+     */
+    private static final Set<String> CACHED = Set.of("paper.jar", "plugins", "versions", "libraries", "cache");
 
     private static TestServer shared;
 
@@ -99,6 +121,7 @@ public final class TestServer implements AutoCloseable {
         System.out.println("  debugger      : attach a remote JVM debugger to localhost:"
                 + Integer.getInteger("it.debugPort", DEFAULT_DEBUG_PORT));
         System.out.println("  files         : " + server.directory());
+        System.out.println("  state         : rebuilt on start; -Dit.keepState=true keeps it");
         System.out.println();
 
         Thread.currentThread().join();
@@ -126,12 +149,7 @@ public final class TestServer implements AutoCloseable {
         Path console = server.resolve("console.log");
         try {
             Files.createDirectories(server.resolve("plugins"));
-            if (!Boolean.getBoolean("it.keepWorld")) {
-                // Both the world and the plugin's own files go: a scenario has to start
-                // from defaults, or the second run tests the leftovers of the first.
-                deleteRecursively(server.resolve("world"));
-                deleteRecursively(server.resolve("plugins/mmSupernaturals"));
-            }
+            reset(server);
             install(project, work, server);
             writeConfiguration(server);
 
@@ -158,6 +176,38 @@ public final class TestServer implements AutoCloseable {
         command.add("paper.jar");
         command.add("--nogui");
         return command;
+    }
+
+    /**
+     * Puts the server directory back to "never run before", except for {@link #CACHED}.
+     * {@code -Dit.keepState=true} also keeps the world and the plugin's data, for the
+     * workflow of iterating on one world by hand.
+     */
+    private static void reset(Path server) throws IOException {
+        if (!Files.isDirectory(server)) {
+            return;
+        }
+        boolean keepState = Boolean.getBoolean("it.keepState");
+        try (Stream<Path> entries = Files.list(server)) {
+            for (Path entry : entries.toList()) {
+                String name = entry.getFileName().toString();
+                if (CACHED.contains(name) || (keepState && name.equals("world"))) {
+                    continue;
+                }
+                deleteRecursively(entry);
+            }
+        }
+        Path plugins = server.resolve("plugins");
+        try (Stream<Path> entries = Files.list(plugins)) {
+            for (Path entry : entries.toList()) {
+                String name = entry.getFileName().toString();
+                // The jars are put back by install(); everything else in here is state.
+                if (name.endsWith(".jar") || (keepState && name.equals("mmSupernaturals"))) {
+                    continue;
+                }
+                deleteRecursively(entry);
+            }
+        }
     }
 
     private static void install(Path project, Path work, Path server) throws IOException {
