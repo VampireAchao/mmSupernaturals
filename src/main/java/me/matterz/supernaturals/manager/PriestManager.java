@@ -27,6 +27,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Animals;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Monster;
@@ -181,77 +182,76 @@ public class PriestManager extends HumanManager {
 	// Church //
 	// -------------------------------------------- //
 
-	public void useAltar(Player player) {
-		Location location = player.getLocation();
-		World world = location.getWorld();
-		int locX = location.getBlockX();
-		int locY = location.getBlockY();
-		int locZ = location.getBlockZ();
+	/**
+	 * An altar answers for a church, and there can be as many churches as the server wants.
+	 *
+	 * <p>This used to compare the player's position against <em>one</em> point read from the
+	 * config, so a server with a second chapel only ever had one of them working - and a hall
+	 * built in a world of its own could not be a church at all, which is why a ghoul standing at
+	 * a perfectly good altar got no answer out of it. The diamond block is the altar; whether it
+	 * belongs to a church is now a question about the churches that have been registered.
+	 */
+	public void useAltar(Player player, Block altar) {
+		if (altar == null || !SNConfigHandler.isChurch(altar.getLocation())) {
+			return;
+		}
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		int amount = 0;
 		int delta = 0;
-		if (world.getName().equalsIgnoreCase(SNConfigHandler.priestChurchWorld)) {
-			if (Math.abs(locX - SNConfigHandler.priestChurchLocationX) <= 10) {
-				if (Math.abs(locY - SNConfigHandler.priestChurchLocationY) <= 10) {
-					if (Math.abs(locZ - SNConfigHandler.priestChurchLocationZ) <= 10) {
-						if (snplayer.isPriest()) {
-							if (player.getItemInHand().getType().equals(Material.COAL)) {
-								SuperNManager.sendMessage(snplayer, "The Church excommunicates you!");
-								SuperNManager.cure(snplayer);
-							} else {
-								PlayerInventory inv = player.getInventory();
-								ItemStack[] items = inv.getContents();
-								for (Material mat : SNConfigHandler.priestDonationMap.keySet()) {
-									for (ItemStack itemStack : items) {
-										if (itemStack != null) {
-											if (itemStack.getType().equals(mat)) {
-												amount += itemStack.getAmount();
-											}
-										}
-									}
-									delta += amount
-											* SNConfigHandler.priestDonationMap.get(mat);
-									amount = 0;
-								}
-								for (Material mat : SNConfigHandler.priestDonationMap.keySet()) {
-									inv.remove(mat);
-								}
-								player.updateInventory();
-								SuperNManager.sendMessage(snplayer, "The Church accepts your gracious donations of Bread, Fish, Grilled Pork and Apples.");
-								SuperNManager.alterPower(snplayer, delta, "Donations!");
-							}
-						} else {
-							SuperNManager.sendMessage(snplayer, "The Church Altar radiates holy power.");
-							if (snplayer.isSuper()) {
-								SuperNManager.sendMessage(snplayer, "The holy power of the Church tears you asunder!");
-								EntityDamageEvent event = new EntityDamageEvent(player, DamageCause.BLOCK_EXPLOSION, 20);
-								player.setLastDamageCause(event);
-								player.setHealth(0);
-								if (snplayer.isGhoul()) {
-									double random = Math.random();
-									if (random < SNConfigHandler.spreadChance - 0.1) {
-										SuperNManager.cure(snplayer);
-									}
-								}
-								return;
-							}
-							if (SNConfigHandler.priestAltarRecipe.playerHasEnough(player)) {
-								if(!SupernaturalsPlugin.hasPermissions(player, "supernatural.player.shrineuse.priest")) {
-									SuperNManager.sendMessage(snplayer, "You cannot use priest altars.");
-									return;
-								}
-								SuperNManager.sendMessage(snplayer, "You donate these items to the Church:");
-								SuperNManager.sendMessage(snplayer, SNConfigHandler.priestAltarRecipe.getRecipeLine());
-								SuperNManager.sendMessage(snplayer, "The Church recognizes your holy spirit and accepts you into the priesthood.");
-								SNConfigHandler.priestAltarRecipe.removeFromPlayer(player);
-								SuperNManager.convert(snplayer, "priest", SNConfigHandler.priestPowerStart);
-							} else {
-								SuperNManager.sendMessage(snplayer, "The Church judges your intended donate insufficient.  You must gather the following: ");
-								SuperNManager.sendMessage(snplayer, SNConfigHandler.priestAltarRecipe.getRecipeLine());
+		if (snplayer.isPriest()) {
+			if (player.getItemInHand().getType().equals(Material.COAL)) {
+				SuperNManager.sendMessage(snplayer, "The Church excommunicates you!");
+				SuperNManager.cure(snplayer);
+			} else {
+				PlayerInventory inv = player.getInventory();
+				ItemStack[] items = inv.getContents();
+				for (Material mat : SNConfigHandler.priestDonationMap.keySet()) {
+					for (ItemStack itemStack : items) {
+						if (itemStack != null) {
+							if (itemStack.getType().equals(mat)) {
+								amount += itemStack.getAmount();
 							}
 						}
 					}
+					delta += amount
+							* SNConfigHandler.priestDonationMap.get(mat);
+					amount = 0;
 				}
+				for (Material mat : SNConfigHandler.priestDonationMap.keySet()) {
+					inv.remove(mat);
+				}
+				player.updateInventory();
+				SuperNManager.sendMessage(snplayer, "The Church accepts your gracious donations of Bread, Fish, Grilled Pork and Apples.");
+				SuperNManager.alterPower(snplayer, delta, "Donations!");
+			}
+		} else {
+			SuperNManager.sendMessage(snplayer, "The Church Altar radiates holy power.");
+			if (snplayer.isSuper()) {
+				SuperNManager.sendMessage(snplayer, "The holy power of the Church tears you asunder!");
+				EntityDamageEvent event = new EntityDamageEvent(player, DamageCause.BLOCK_EXPLOSION, 20);
+				player.setLastDamageCause(event);
+				player.setHealth(0);
+				if (snplayer.isGhoul()) {
+					double random = Math.random();
+					if (random < SNConfigHandler.spreadChance - 0.1) {
+						SuperNManager.cure(snplayer);
+					}
+				}
+				return;
+			}
+			if (SNConfigHandler.priestAltarRecipe.playerHasEnough(player)) {
+				if (!SupernaturalsPlugin.hasPermissions(player, "supernatural.player.shrineuse.priest")) {
+					SuperNManager.sendMessage(snplayer, "You cannot use priest altars.");
+					return;
+				}
+				SuperNManager.sendMessage(snplayer, "You donate these items to the Church:");
+				SuperNManager.sendMessage(snplayer, SNConfigHandler.priestAltarRecipe.getRecipeLine());
+				SuperNManager.sendMessage(snplayer, "The Church recognizes your holy spirit and accepts you into the priesthood.");
+				SNConfigHandler.priestAltarRecipe.removeFromPlayer(player);
+				SuperNManager.convert(snplayer, "priest", SNConfigHandler.priestPowerStart);
+			} else {
+				SuperNManager.sendMessage(snplayer, "The Church judges your intended donate insufficient.  You must gather the following: ");
+				SuperNManager.sendMessage(snplayer, SNConfigHandler.priestAltarRecipe.getRecipeLine());
 			}
 		}
 	}

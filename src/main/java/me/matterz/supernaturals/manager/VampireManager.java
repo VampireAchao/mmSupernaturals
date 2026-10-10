@@ -186,15 +186,12 @@ public class VampireManager extends ClassManager {
 		}
 
 		if (itemMaterial != null) {
-			if (SNConfigHandler.foodMaterials.contains(itemMaterial)) {
-				if (SNConfigHandler.debugMode) {
-					SupernaturalsPlugin.log(snplayer.getName()
-							+ " attempted to eat " + itemMaterial.toString());
-				}
-				SuperNManager.sendMessage(snplayer, "Vampires can't eat food. You must drink blood instead.");
-				event.setCancelled(true);
-				return true;
-			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.vampireTeleportMaterial)) {
+			// Food is *not* refused here any more. Refusing the right-click took the whole
+			// interaction with it: a vampire holding a loaf could not open a chest, pull a
+			// lever or use a door, because the click never reached the block. The meal itself
+			// is refused where a meal is actually eaten, in the consume event - the bite plays,
+			// and nothing comes of it.
+			if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.vampireTeleportMaterial)) {
 				setTeleport(player);
 				return true;
 			}

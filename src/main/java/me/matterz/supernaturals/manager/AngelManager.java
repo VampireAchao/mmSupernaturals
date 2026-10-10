@@ -82,49 +82,59 @@ public class AngelManager extends ClassManager {
 		Action action = event.getAction();
 		Material itemInHandMaterial = player.getItemInHand().getType();
 		SuperNPlayer snplayer = SuperNManager.get(player);
-		if (action.equals(Action.LEFT_CLICK_AIR)
-				|| action.equals(Action.LEFT_CLICK_BLOCK)) {
-			if (itemInHandMaterial.equals(Material.DANDELION)) {
-				if (snplayer.getPower() > SNConfigHandler.angelJumpPowerCost) {
-					jump(player, SNConfigHandler.angelJumpDeltaSpeed);
-				} else {
-					SuperNManager.sendMessage(snplayer, "Not enough power to jump!");
-				}
+		if (!action.equals(Action.LEFT_CLICK_AIR)
+				&& !action.equals(Action.LEFT_CLICK_BLOCK)) {
+			return false;
+		}
+		if (itemInHandMaterial.equals(Material.DANDELION)) {
+			if (snplayer.getPower() > SNConfigHandler.angelJumpPowerCost) {
+				jump(player, SNConfigHandler.angelJumpDeltaSpeed);
+			} else {
+				SuperNManager.sendMessage(snplayer, "Not enough power to jump!");
 			}
 			return false;
 		}
-		if (action.equals(Action.LEFT_CLICK_BLOCK)) {
-			Block targetBlock = player.getTargetBlock(null, 20);
-			Location targetBlockLocation = targetBlock.getLocation();
-			if (itemInHandMaterial.equals(Material.BEEF)
-					|| itemInHandMaterial.equals(Material.BONE)
-					|| itemInHandMaterial.equals(Material.PORKCHOP)) {
-				if (snplayer.getPower() > SNConfigHandler.angelSummonPowerCost) {
-					if (itemInHandMaterial.equals(Material.BEEF)) {
-						player.getWorld().spawnEntity(targetBlockLocation, EntityType.COW);
-						event.setCancelled(true);
-						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned cow.");
-						return true;
-					}
-					if (itemInHandMaterial.equals(Material.BONE)) {
-						Wolf spawnedWolf = (Wolf) player.getWorld().spawnEntity(targetBlockLocation, EntityType.WOLF);
-						spawnedWolf.setTamed(true);
-						spawnedWolf.setOwner(player);
-						spawnedWolf.setHealth(20);
-						event.setCancelled(true);
-						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned wolf.");
-						return true;
-					}
-					if (itemInHandMaterial.equals(Material.PORKCHOP)) {
-						player.getWorld().spawnEntity(targetBlockLocation, EntityType.PIG);
-						event.setCancelled(true);
-						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned pig.");
-						return true;
-					}
-				}
-			}
+		// This is the branch that used to be unreachable. The summoning sat in its own
+		// `if (LEFT_CLICK_BLOCK)` *below* the one above, which had already returned for both
+		// click actions - so an angel could never call a cow, a wolf or a pig, whatever it was
+		// holding, and every summon looked like a dead ability. Reaching it is the fix; the
+		// calls themselves are the ones that were always here.
+		if (!action.equals(Action.LEFT_CLICK_BLOCK)) {
+			return false;
 		}
-		return false;
+		if (!itemInHandMaterial.equals(Material.BEEF)
+				&& !itemInHandMaterial.equals(Material.BONE)
+				&& !itemInHandMaterial.equals(Material.PORKCHOP)) {
+			return false;
+		}
+		Block targetBlock = player.getTargetBlock(null, 20);
+		if (targetBlock == null) {
+			return false;
+		}
+		Location targetBlockLocation = targetBlock.getLocation();
+		if (snplayer.getPower() <= SNConfigHandler.angelSummonPowerCost) {
+			SuperNManager.sendMessage(snplayer, "Not enough power to summon!");
+			return false;
+		}
+		if (itemInHandMaterial.equals(Material.BEEF)) {
+			player.getWorld().spawnEntity(targetBlockLocation, EntityType.COW);
+			event.setCancelled(true);
+			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned cow.");
+			return true;
+		}
+		if (itemInHandMaterial.equals(Material.BONE)) {
+			Wolf spawnedWolf = (Wolf) player.getWorld().spawnEntity(targetBlockLocation, EntityType.WOLF);
+			spawnedWolf.setTamed(true);
+			spawnedWolf.setOwner(player);
+			spawnedWolf.setHealth(20);
+			event.setCancelled(true);
+			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned wolf.");
+			return true;
+		}
+		player.getWorld().spawnEntity(targetBlockLocation, EntityType.PIG);
+		event.setCancelled(true);
+		SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned pig.");
+		return true;
 	}
 
 	@Override

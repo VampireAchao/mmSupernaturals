@@ -36,6 +36,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.material.Door;
@@ -182,13 +183,34 @@ public class SNPlayerListener implements Listener {
 				SupernaturalsPlugin.log(snplayer.getName()
 						+ " triggered a Priest Altar.");
 			}
-			plugin.getPriestManager().useAltar(player);
+			plugin.getPriestManager().useAltar(player, event.getClickedBlock());
 		}
 	}
 
+	/**
+	 * A vampire's meal plays out and then does nothing.
+	 *
+	 * <p>The bite is theirs - the item is used, the animation runs - but no hunger comes back and
+	 * the food is not used up, because a vampire feeds on blood. This is where that is decided
+	 * now. It used to be decided by refusing the right-click, which also refused every chest,
+	 * lever and door a vampire happened to be holding a meal in front of.
+	 */
 	@EventHandler(priority = EventPriority.LOW)
-	public void onPlayerKick(PlayerKickEvent event) {
-		if (event.isCancelled()) {
+	public void onPlayerConsume(PlayerItemConsumeEvent event) {
+		Player player = event.getPlayer();
+		SuperNPlayer snplayer = SuperNManager.get(player);
+		if (!snplayer.isVampire()) {
+			return;
+		}
+		if (!SNConfigHandler.foodMaterials.contains(event.getItem().getType())) {
+			return;
+		}
+		event.setCancelled(true);
+		SuperNManager.sendMessage(snplayer, "Vampires can't eat food. You must drink blood instead.");
+	}
+
+	@EventHandler(priority = EventPriority.LOW)
+	public void onPlayerKick(PlayerKickEvent event) {		if (event.isCancelled()) {
 			return;
 		}
 

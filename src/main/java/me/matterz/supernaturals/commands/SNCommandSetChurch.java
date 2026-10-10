@@ -42,54 +42,20 @@ public class SNCommandSetChurch extends SNCommand {
 	public void perform() {
 
 		Player senderPlayer = (Player) sender;
-		if (SNConfigHandler.spanish) {
-			if (!SupernaturalsPlugin.hasPermissions(senderPlayer, permissions)) {
-				this.sendMessage("No tienes permiso para usar este comando.");
-				return;
-			}
-
-			double currentX = senderPlayer.getLocation().getX();
-			double currentY = senderPlayer.getLocation().getY();
-			double currentZ = senderPlayer.getLocation().getZ();
-
-			SNConfigHandler.priestChurchWorld = senderPlayer.getWorld().getName();
-			SNConfigHandler.priestChurchLocationX = (int) currentX;
-			SNConfigHandler.priestChurchLocationY = (int) currentY;
-			SNConfigHandler.priestChurchLocationZ = (int) currentZ;
-			SNConfigHandler.priestChurchLocation = senderPlayer.getLocation();
-
-			SNConfigHandler.getConfig().set("Priest.Church.World", SNConfigHandler.priestChurchWorld);
-			SNConfigHandler.getConfig().set("Priest.Church.Location.X", SNConfigHandler.priestChurchLocationX);
-			SNConfigHandler.getConfig().set("Priest.Church.Location.Y", SNConfigHandler.priestChurchLocationY);
-			SNConfigHandler.getConfig().set("Priest.Church.Location.Z", SNConfigHandler.priestChurchLocationZ);
-
-			SNConfigHandler.saveConfig();
-
-			this.sendMessage("La localizaci�n de la Iglesia ha sido definida.");
-			return;
-		}
 		if (!SupernaturalsPlugin.hasPermissions(senderPlayer, permissions)) {
-			this.sendMessage("You do not have permissions to use this command.");
+			this.sendMessage(SNConfigHandler.spanish
+					? "No tienes permiso para usar este comando."
+					: "You do not have permissions to use this command.");
 			return;
 		}
 
-		double currentX = senderPlayer.getLocation().getX();
-		double currentY = senderPlayer.getLocation().getY();
-		double currentZ = senderPlayer.getLocation().getZ();
+		// "Set the church" still means there is one, and it is here: everything registered before
+		// is forgotten. A server that wants more than one uses /sn church add.
+		SNConfigHandler.clearChurches();
+		SNConfigHandler.addChurch(senderPlayer.getLocation());
 
-		SNConfigHandler.priestChurchWorld = senderPlayer.getWorld().getName();
-		SNConfigHandler.priestChurchLocationX = (int) currentX;
-		SNConfigHandler.priestChurchLocationY = (int) currentY;
-		SNConfigHandler.priestChurchLocationZ = (int) currentZ;
-		SNConfigHandler.priestChurchLocation = senderPlayer.getLocation();
-
-		SNConfigHandler.getConfig().set("Priest.Church.World", SNConfigHandler.priestChurchWorld);
-		SNConfigHandler.getConfig().set("Priest.Church.Location.X", SNConfigHandler.priestChurchLocationX);
-		SNConfigHandler.getConfig().set("Priest.Church.Location.Y", SNConfigHandler.priestChurchLocationY);
-		SNConfigHandler.getConfig().set("Priest.Church.Location.Z", SNConfigHandler.priestChurchLocationZ);
-
-		SNConfigHandler.saveConfig();
-
-		this.sendMessage("Church location set.");
+		this.sendMessage(SNConfigHandler.spanish
+				? "La localizaci�n de la Iglesia ha sido definida."
+				: "Church location set. (/sn church add registers more)");
 	}
 }

@@ -33,6 +33,7 @@ import me.matterz.supernaturals.util.Recipes;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.entity.EntityType;
 
@@ -203,6 +204,19 @@ public class SNConfigHandler {
 	public static int priestChurchLocationX;
 	public static int priestChurchLocationY;
 	public static int priestChurchLocationZ;
+
+	/** How close to a registered church its altar still counts as part of that church. */
+	public static final int PRIEST_CHURCH_RADIUS = 10;
+
+	/**
+	 * Every church on the server.
+	 *
+	 * <p>A church used to be one point in the config, and an altar only answered within ten
+	 * blocks of it - so a server with two chapels could only ever have one of them work, and a
+	 * hall built somewhere else could not be a church at all. The altar is the block; a church
+	 * is a place that block belongs to, and there can be as many as the server wants.
+	 */
+	public static List<Location> priestChurches = new ArrayList<Location>();
 	public static String priestBanishWorld;
 	public static int priestBanishLocationX;
 	public static int priestBanishLocationY;
@@ -1030,10 +1044,26 @@ public class SNConfigHandler {
 		vampireAltarCureMaterialsString = config.getStringList("Vampire.Altar.Cure.Recipe.Materials");
 		vampireAltarCureQuantities = config.getIntegerList("Vampire.Altar.Cure.Recipe.Quantities");
 
-		priestChurchWorld = config.getString("Priest.Church.World", "world");
-		priestChurchLocationX = config.getInt("Priest.Church.Location.X", 0);
-		priestChurchLocationY = config.getInt("Priest.Church.Location.Y", 80);
-		priestChurchLocationZ = config.getInt("Priest.Church.Location.Z", 0);
+		priestChurches = new ArrayList<Location>();
+		for (String entry : config.getStringList("Priest.Church.Locations")) {
+			Location church = parseChurch(entry);
+			if (church != null) {
+				priestChurches.add(church);
+			}
+		}
+		if (priestChurches.isEmpty()) {
+			// A server that has been running since before churches came in a list still has its
+			// one church in the four settings below, and it has to keep working.
+			Location legacy = new Location(
+					plugin.getServer().getWorld(config.getString("Priest.Church.World", "world")),
+					config.getInt("Priest.Church.Location.X", 0),
+					config.getInt("Priest.Church.Location.Y", 80),
+					config.getInt("Priest.Church.Location.Z", 0));
+			if (legacy.getWorld() != null) {
+				priestChurches.add(legacy);
+			}
+		}
+		storeChurches(config);
 		priestBanishWorld = config.getString("Priest.Banish.World", "world");
 		priestBanishLocationX = config.getInt("Priest.Banish.Location.X", 0);
 		priestBanishLocationY = config.getInt("Priest.Banish.Location.Y", 80);
@@ -1306,7 +1336,6 @@ public class SNConfigHandler {
 			priestDonationMap.put(material, reward);
 		}
 
-		priestChurchLocation = new Location(plugin.getServer().getWorld(priestChurchWorld), priestChurchLocationX, priestChurchLocationY, priestChurchLocationZ);
 		priestBanishLocation = new Location(plugin.getServer().getWorld(priestBanishWorld), priestBanishLocationX, priestBanishLocationY, priestBanishLocationZ);
 
 		warnAboutUnknownMaterials(config);
@@ -1326,6 +1355,134 @@ public class SNConfigHandler {
 
 	public static Configuration getConfig() {
 		return config;
+	}
+
+	// -------------------------------------------- //
+	// Churches //
+	// -------------------------------------------- //
+
+	/** Whether an altar block belongs to one of the server's churches. */
+	public static boolean isChurch(Location at) {
+		if (at == null || at.getWorld() == null) {
+			return false;
+		}
+		for (Location church : priestChurches) {
+			if (church == null || church.getWorld() == null) {
+				continue;
+			}
+			if (!church.getWorld().equals(at.getWorld())) {
+				continue;
+			}
+			if (Math.abs(church.getBlockX() - at.getBlockX()) <= PRIEST_CHURCH_RADIUS
+					&& Math.abs(church.getBlockY() - at.getBlockY()) <= PRIEST_CHURCH_RADIUS
+					&& Math.abs(church.getBlockZ() - at.getBlockZ()) <= PRIEST_CHURCH_RADIUS) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Registers another church at a place, and writes it down. */
+	public static void addChurch(Location at) {
+		if (at == null || at.getWorld() == null) {
+			return;
+		}
+		priestChurches.add(at);
+		storeChurches(config);
+		saveConfig();
+	}
+
+	/** Forgets every church, and writes that down. */
+	public static void clearChurches() {
+		priestChurches.clear();
+		storeChurches(config);
+		saveConfig();
+	}
+
+	/**
+	 * Forgets the church nearest to a place, within {@link #PRIEST_CHURCH_RADIUS}. Answers
+	 * whether there was one to forget, so a command can say so rather than claim success.
+	 */
+	public static boolean removeChurchNear(Location at) {
+		Location nearest = null;
+		double best = Double.MAX_VALUE;
+		for (Location church : priestChurches) {
+			if (church == null || church.getWorld() == null || at == null
+					|| !church.getWorld().equals(at.getWorld())) {
+				continue;
+			}
+			double away = church.distance(at);
+			if (away <= PRIEST_CHURCH_RADIUS && away < best) {
+				best = away;
+				nearest = church;
+			}
+		}
+		if (nearest == null) {
+			return false;
+		}
+		priestChurches.remove(nearest);
+		storeChurches(config);
+		saveConfig();
+		return true;
+	}
+
+	/** A church as the config writes it: {@code world,x,y,z}. */
+	public static String describeChurch(Location church) {
+		return church.getWorld().getName() + "," + church.getBlockX() + ","
+				+ church.getBlockY() + "," + church.getBlockZ();
+	}
+
+	private static Location parseChurch(String entry) {
+		if (entry == null) {
+			return null;
+		}
+		String[] parts = entry.split(",");
+		if (parts.length != 4) {
+			return null;
+		}
+		World world = plugin.getServer().getWorld(parts[0].trim());
+		if (world == null) {
+			// A church in a world that is not loaded right now is kept, so starting the server
+			// without that world does not quietly delete it.
+			SupernaturalsPlugin.log(Level.WARNING, "the church in \"" + parts[0].trim()
+					+ "\" is not loaded, so that church is not active this session");
+			return null;
+		}
+		try {
+			return new Location(world, Integer.parseInt(parts[1].trim()),
+					Integer.parseInt(parts[2].trim()), Integer.parseInt(parts[3].trim()));
+		} catch (NumberFormatException notANumber) {
+			SupernaturalsPlugin.log(Level.WARNING, "unreadable church entry: " + entry);
+			return null;
+		}
+	}
+
+	/**
+	 * Writes the churches out, in both forms: the list the plugin now reads, and the four older
+	 * settings, mirrored from the first church so anything still reading those keeps working.
+	 */
+	private static void storeChurches(Configuration config) {
+		List<String> encoded = new ArrayList<String>();
+		for (Location church : priestChurches) {
+			if (church != null && church.getWorld() != null) {
+				encoded.add(describeChurch(church));
+			}
+		}
+		config.set("Priest.Church.Locations", encoded);
+		if (priestChurches.isEmpty()) {
+			priestChurchLocation = null;
+			return;
+		}
+		Location first = priestChurches.get(0);
+		priestChurchLocation = first;
+		priestChurchWorld = first.getWorld().getName();
+		priestChurchLocationX = first.getBlockX();
+		priestChurchLocationY = first.getBlockY();
+		priestChurchLocationZ = first.getBlockZ();
+		config.set("Priest.Church.World", priestChurchWorld);
+		config.set("Priest.Church.Location.X", priestChurchLocationX);
+		config.set("Priest.Church.Location.Y", priestChurchLocationY);
+		config.set("Priest.Church.Location.Z", priestChurchLocationZ);
 	}
 
 	/**

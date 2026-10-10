@@ -29,6 +29,7 @@ import java.util.logging.Logger;
 
 import me.matterz.supernaturals.commands.SNCommand;
 import me.matterz.supernaturals.commands.SNCommandAdmin;
+import me.matterz.supernaturals.commands.SNCommandChurch;
 import me.matterz.supernaturals.commands.SNCommandClasses;
 import me.matterz.supernaturals.commands.SNCommandConvert;
 import me.matterz.supernaturals.commands.SNCommandCure;
@@ -229,6 +230,7 @@ public class SupernaturalsPlugin extends JavaPlugin {
 		commands.add(new SNCommandList());
 		commands.add(new SNCommandClasses());
 		commands.add(new SNCommandSetChurch());
+		commands.add(new SNCommandChurch());
 		commands.add(new SNCommandSetBanish());
 		commands.add(new SNCommandReset());
 		commands.add(new SNCommandKillList());

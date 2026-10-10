@@ -310,6 +310,12 @@ public class SuperNManager {
 
 		// Untarget the player.
 		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
+		if (player == null) {
+			// There is nobody to untarget: they are not on the server. This used to be a crash -
+			// the lookup answers null for anybody who has left, and calling getWorld() on it is
+			// the null dereference rather than the guard.
+			return;
+		}
 		for (LivingEntity entity : player.getWorld().getLivingEntities()) {
 			// Mob (not Creature) so that hostile mobs without the Creature interface
 			// (Ghast, Phantom, EnderDragon, ...) are untargeted as well.
