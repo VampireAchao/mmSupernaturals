@@ -51,6 +51,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
@@ -89,6 +90,13 @@ final class HallGuard implements Listener {
 
     /** The name of the stand-in a section uses when a test needs somebody to be hit by. */
     private static final String SPAR = "Sparring";
+
+    /** How far off the stand-in starts walking in from, at most. */
+    private static final int WALK_FROM = 6;
+
+    /** How often he takes a step, in ticks, and how far each one carries him. */
+    private static final long WALK_PERIOD = 2L;
+    private static final double WALK_STEP = 0.4;
 
     /** Marks everything a section let out, so a stray one can be recognised. */
     private static final String HALL_MOB = "mmhall";
@@ -133,6 +141,9 @@ final class HallGuard implements Listener {
 
     /** The stand-ins the hall has brought up as prey, by name, so they can be taken back out. */
     private final Map<String, Object> prey = new HashMap<>();
+
+    /** The walk the stand-in is currently on, so a second section cannot start another. */
+    private BukkitTask walkTask;
 
     HallGuard(HarnessPlugin plugin) {
         this.plugin = plugin;
@@ -363,6 +374,7 @@ final class HallGuard implements Listener {
 
     /** Empties the props, takes the hall's monsters back, restores humanity and moves the player. */
     private void backToHuman(Player player, Hall hall, Location where, String what) {
+        cancelWalk();
         clearHallMobs(player, null);
         clearPrey();
         player.getInventory().clear();
@@ -809,37 +821,167 @@ final class HallGuard implements Listener {
             // leaves him something other than a person; the stand-in is meant to be one.
             SuperNManager.cure(asPlayer);
         }
-        spar.teleport(spotFor(player));
         spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
-        note(player, "§f陪练就位（他叫 " + SPAR + "），他会砍你一下");
-        Bukkit.getScheduler().runTaskLater(plugin, () -> swingOnce(spar, player), 20L);
+        spar.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
+        // He walks in from a clear spot rather than appearing on top of the player, because a
+        // target that materialises and then announces a hit in chat is not a fight - and that is
+        // exactly what this looked like: the number arrived with nobody swinging.
+        Location start = approachFrom(player);
+        spar.teleport(facing(start, player.getLocation()));
+        note(player, "§f陪练从 " + Math.round(start.distance(player.getLocation()))
+                + " 格外走过来（他叫 " + SPAR + "），他会砍你一下");
+        walkIn(spar, player);
     }
 
     /**
-     * One real swing from the stand-in, and then he stops.
+     * The stand-in closes the distance a step at a time, then strikes once and stops.
      *
-     * <p>A stand-in that never hits back is a target, not an opponent, and half of these sections
-     * are "let him hit you first, then watch". One swing is the whole test; a stand-in that keeps
-     * swinging is a fight.
+     * <p>A player entity has no monster AI - there is nothing that walks a {@code ServerPlayer}
+     * towards anybody - so he is moved a fraction of a block every other tick. Clients interpolate
+     * between the position updates they are sent and swing the legs off the movement they see, so
+     * this reads as a person walking over. One strike, and then he stays where he is: a stand-in
+     * that keeps swinging is a fight, not a test.
      */
-    private void swingOnce(Player spar, Player player) {
-        if (!spar.isValid() || !player.isValid() || !spar.isOnline()) {
-            return;
-        }
-        spar.teleport(spotFor(player));
-        spar.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
-        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(spar, player,
-                EntityDamageEvent.DamageCause.ENTITY_ATTACK,
-                BLADES.getOrDefault(Material.IRON_SWORD, 1.0));
-        Bukkit.getPluginManager().callEvent(event);
-        double lost = event.isCancelled() ? 0 : Math.max(0, event.getFinalDamage());
-        if (lost > 0) {
-            player.setHealth(Math.max(1, player.getHealth() - lost));
-        }
+    private void walkIn(Player spar, Player player) {
+        cancelWalk();
+        final double reach = 2.4;
+        final int[] steps = {40};
+        walkTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            if (steps[0]-- <= 0 || !spar.isOnline() || !spar.isValid() || !player.isValid()
+                    || !spar.getWorld().equals(player.getWorld())) {
+                cancelWalk();
+                giveBackSword(spar);
+                return;
+            }
+            Location target = player.getLocation();
+            double away = spar.getLocation().distance(target);
+            if (away > 12) {
+                // The player has gone somewhere else entirely; walking after them is not useful.
+                cancelWalk();
+                giveBackSword(spar);
+                return;
+            }
+            if (away <= reach) {
+                cancelWalk();
+                strike(spar, player);
+                return;
+            }
+            Vector step = target.toVector().subtract(spar.getLocation().toVector());
+            step.setY(0);
+            if (step.lengthSquared() < 1.0e-6) {
+                cancelWalk();
+                strike(spar, player);
+                return;
+            }
+            Location at = spar.getLocation();
+            Location next = at.clone().add(step.normalize().multiply(WALK_STEP));
+            // Same floor as the player: these halls are flat, and a stand-in that walks into a
+            // step and gets stuck would be a worse test than one that slides along the floor.
+            next.setY(target.getY());
+            if (!canStand(next)) {
+                // Something is in the way. Slide along it rather than walking into it - and if
+                // there is no way past at all, strike from where he stands instead of burying
+                // himself in a wall.
+                Location alongX = new Location(next.getWorld(), next.getX(), next.getY(), at.getZ());
+                Location alongZ = new Location(next.getWorld(), at.getX(), next.getY(), next.getZ());
+                if (canStand(alongX)) {
+                    next = alongX;
+                } else if (canStand(alongZ)) {
+                    next = alongZ;
+                } else {
+                    cancelWalk();
+                    strike(spar, player);
+                    return;
+                }
+            }
+            spar.teleport(facing(next, target));
+        }, 0L, WALK_PERIOD);
+    }
+
+    /**
+     * One strike, through the server's own combat path.
+     *
+     * <p>The arm goes back, then the target is damaged <em>by this player</em>: the server runs
+     * its normal hit - the flash, the knockback, the sound, the invulnerability window - and the
+     * plugin's own handlers decide what the blow is worth. The number reported is the health that
+     * actually left the bar, so an immunity reads as a zero because there was nothing there to
+     * read. Raising the event by hand and moving the health bar afterwards, which is what this
+     * did before, produced a number with nothing behind it.
+     */
+    private void strike(Player spar, Player player) {
+        ItemStack held = spar.getInventory().getItemInMainHand();
+        double raw = BLADES.getOrDefault(held.getType(), 1.0);
+        spar.teleport(facing(spotFor(player), player.getLocation()));
+        spar.swingMainHand();
+        double before = player.getHealth();
+        player.damage(raw, spar);
+        double lost = Math.max(0, before - player.getHealth());
         floatNumber(player.getLocation().add(0, 1.8, 0), lost);
         note(player, "§7陪练的剑落在你身上：§f" + trim(lost) + " §7点伤害（他只砍这一下）"
                 + (lost <= 0 ? " §a（免疫）" : ""));
-        spar.getInventory().setItemInMainHand(null);
+        giveBackSword(spar);
+    }
+
+    /** He puts the sword away when the test is over, so he is not left holding a weapon. */
+    private void giveBackSword(Player spar) {
+        if (spar.isOnline()) {
+            spar.getInventory().setItemInMainHand(null);
+        }
+    }
+
+    /** Stops a walk that is still going, so two sections cannot both be driving him. */
+    private void cancelWalk() {
+        if (walkTask != null) {
+            walkTask.cancel();
+            walkTask = null;
+        }
+    }
+
+    /**
+     * A clear spot a few blocks off to walk in from.
+     *
+     * <p>The player's own facing first, then the four sides, and the longest run of standable
+     * floor wins - so he arrives along an open line instead of pushing out of a wall.
+     */
+    private Location approachFrom(Player player) {
+        Location at = player.getLocation();
+        List<Vector> ways = new ArrayList<>();
+        Vector looking = at.getDirection().setY(0);
+        if (looking.lengthSquared() > 0.01) {
+            ways.add(looking.normalize());
+        }
+        for (BlockFace way : new BlockFace[] {BlockFace.NORTH, BlockFace.SOUTH,
+                BlockFace.EAST, BlockFace.WEST}) {
+            ways.add(new Vector(way.getModX(), 0, way.getModZ()));
+        }
+        Location best = at.clone();
+        int bestClear = 0;
+        for (Vector way : ways) {
+            int clear = 0;
+            for (int distance = 1; distance <= WALK_FROM; distance++) {
+                Location spot = at.clone().add(way.clone().multiply(distance));
+                if (!canStand(spot)) {
+                    break;
+                }
+                clear = distance;
+            }
+            if (clear > bestClear) {
+                bestClear = clear;
+                best = at.clone().add(way.clone().multiply(clear));
+            }
+        }
+        return best;
+    }
+
+    /** A spot with its yaw turned towards somebody, so he walks in looking where he is going. */
+    private static Location facing(Location at, Location target) {
+        Location turned = at.clone();
+        Vector look = target.toVector().subtract(at.toVector());
+        look.setY(0);
+        if (look.lengthSquared() > 1.0e-6) {
+            turned.setDirection(look);
+        }
+        return turned;
     }
 
     /**
@@ -917,9 +1059,10 @@ final class HallGuard implements Listener {
      *
      * <p>The ghoul's immunity to a diamond sword is decided on the <b>victim's</b> side and only
      * when the attacker is a player, so the hit has to come from a player: the hall keeps one
-     * standing in the section. The damage is applied rather than merely announced - the number
-     * on the health bar is the test - and the player is put back to full afterwards so the
-     * section can be run again without a death in between.
+     * standing in the section. He walks over and swings like anybody else - the arm goes back, the
+     * server runs its ordinary hit - and the number reported is the health that actually left the
+     * bar, so an immunity reads as a zero because there was nothing to read. The player is put
+     * back to full afterwards so the section can be run again without a death in between.
      */
     private void testHit(Player player, String weaponName) {
         Material weapon = weaponName == null ? null : Material.matchMaterial(weaponName);
@@ -934,24 +1077,14 @@ final class HallGuard implements Listener {
         spar.teleport(spotFor(player));
         spar.getInventory().setItemInMainHand(new ItemStack(weapon));
         spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
-
-        // The event is what the plugin decides on - it reads the weapon, and for a ghoul it
-        // answers zero for a diamond sword - and the health is moved by hand afterwards, because
-        // `Player#damage` refuses on a player with no client: the server keeps such a player
-        // invulnerable after a move between worlds until a real client answers a packet that
-        // never comes. A real player is never in that state; the number they see is the same
-        // one this reports.
-        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(spar, player,
-                EntityDamageEvent.DamageCause.ENTITY_ATTACK, BLADES.getOrDefault(weapon, 1.0));
-        Bukkit.getPluginManager().callEvent(event);
-        double lost = event.isCancelled() ? 0 : Math.max(0, event.getFinalDamage());
+        spar.swingMainHand();
         double before = player.getHealth();
-        if (lost > 0) {
-            player.setHealth(Math.max(0, before - lost));
-        }
+        player.damage(BLADES.getOrDefault(weapon, 1.0), spar);
+        double lost = Math.max(0, before - player.getHealth());
         floatNumber(player.getLocation().add(0, 1.8, 0), lost);
         note(player, "§7" + weapon.name() + " 打在你身上：§f" + trim(lost) + " §7点伤害"
                 + (lost <= 0 ? " §a（免疫）" : ""));
+        giveBackSword(spar);
         player.setHealth(player.getAttribute(Attribute.MAX_HEALTH).getValue());
     }
 

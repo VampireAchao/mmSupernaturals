@@ -1054,18 +1054,11 @@ public final class HarnessPlugin extends JavaPlugin {
         double before = spar.getHealth();
         ItemStack held = player.getInventory().getItemInMainHand();
         double swing = held.getType() == Material.AIR ? 1.0 : 7.0;
-        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(player, spar,
-                DamageCause.ENTITY_ATTACK, swing);
-        Bukkit.getPluginManager().callEvent(event);
-        // The event only decides; something has to move the health bar, and a scenario cannot
-        // click. This is the same arithmetic the server would have done. A hit the hall refused -
-        // one that would have finished him, which he answers by refreshing - leaves him as he is.
-        double applied = event.isCancelled() ? 0 : Math.max(0, event.getFinalDamage());
-        if (applied > 0) {
-            spar.setHealth((float) Math.max(0, spar.getHealth() - applied));
-        }
-        return "ok held=" + held.getType() + " cancelled=" + event.isCancelled()
-                + " damage=" + event.getDamage() + " healthWas=" + before
+        // The real path: the server runs the hit and the plugin decides what it is worth, exactly
+        // as it would for a client that swung. Raising the event and moving the health bar by hand
+        // said nothing about whether the stand-in can be hurt at all.
+        spar.damage(swing, player);
+        return "ok held=" + held.getType() + " damage=" + swing + " healthWas=" + before
                 + " healthNow=" + spar.getHealth() + " race=" + SuperNManager.get(spar).getType();
     }
 
