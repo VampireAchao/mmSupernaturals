@@ -486,7 +486,7 @@ public final class Hall {
         int x0 = centreX - 40;
         int z0 = centreZ - DEPTH / 2;
         room(nether, x0, y, z0, 5 * SLOT, DEPTH, 12, THEMES.get("demon"));
-        sectionHead(nether, y, x0, z0, "§4① 转化 · 下界的火",
+        sectionHead(nether, y, x0, z0, "§4① 转化 下界的火",
                 brief("穿着整套皮革死在下界的火里，验证恶魔转化",
                         "死后成为恶魔；皮革是这一步的判定条件",
                         "从箱子里拿走整套皮革穿上", "点「跳进岩浆」"));
@@ -499,7 +499,7 @@ public final class Hall {
         largeChest(nether, x0 + 2, y + 1, z0 + DEPTH - 2, leather());
         switchpoint(nether, y, x0 + 2, z0 + 3, Trigger.of(Kind.DIP),
                 "§c跳进岩浆", "§7点了就下池子");
-        sectionHead(nether, y, x0 + SLOT, z0, "§f② 陪练 · 伤害测试",
+        sectionHead(nether, y, x0 + SLOT, z0, "§f② 陪练 伤害测试",
                 brief("在下界也能正常打伤害、拿能量",
                         "陪练站在你面前，真实掉血；打不动就点按钮把他刷新",
                         "点「放出陪练」", "用武器打他一下，再看伤害数字"));
@@ -553,7 +553,7 @@ public final class Hall {
      * he loses health when he is hit, and the button puts him back to full.
      */
     private Section sparSection(String race) {
-        return section("§f陪练 · 伤害测试", 1, (w, y, x, z, width) -> {
+        return section("§f陪练 伤害测试", 1, (w, y, x, z, width) -> {
             sparMark(w, race, x + SLOT / 2 + 4, y, z + DEPTH / 2);
             switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.SPAR),
                     "§f放出陪练", "§7他站在你面前，真的会掉血");
@@ -563,7 +563,7 @@ public final class Hall {
     }
 
     private Section powerSection(String race) {
-        return section("§b能量 · +1000", 1, (w, y, x, z, width) -> switchpoint(w, y,
+        return section("§b能量 +1000", 1, (w, y, x, z, width) -> switchpoint(w, y,
                 x + SLOT / 2, z + 3, Trigger.of(Kind.POWER, race),
                 "§b能量 +1000", "§7点一下加一千"), "把能量补满，不用先刷到够用",
                 "点一下加 1000 能量", "每个种族的走廊末尾都有这一个");
@@ -582,7 +582,7 @@ public final class Hall {
         List<Section> sections = new ArrayList<>();
         switch (race) {
             case "vampire" -> {
-                sections.add(section("§c① 转化 · 成为吸血鬼", 1, (w, y, x, z, width) -> {
+                sections.add(section("§c① 转化 成为吸血鬼", 1, (w, y, x, z, width) -> {
                     Shrines.vampire(new Blocks(w), x + 5, y, z + DEPTH / 2);
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.MUSHROOM_STEW, 1),
@@ -593,7 +593,7 @@ public final class Hall {
                         "右键金块后你会变成吸血鬼，聊天栏出现提示",
                         "在箱子里拿齐四样材料（关箱会自动补满）",
                         "站到黑曜石台子上，右键中间的金块"));
-                sections.add(section("§b② 恢复人类 · 治愈祭坛", 1, (w, y, x, z, width) -> {
+                sections.add(section("§b② 治愈 变回人类", 1, (w, y, x, z, width) -> {
                     Shrines.cure(new Blocks(w), x + 5, y, z + DEPTH / 2);
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.WATER_BUCKET, 1),
@@ -623,7 +623,7 @@ public final class Hall {
                         "白天露天会着火；戴金头盔或入夜不会。只影响本大厅自己的世界",
                         "先点「白天」，再点「站到露天台」",
                         "拿箱子里的金头盔戴上，重复一次对照"));
-                sections.add(section("§a④ 回复饱食度 · 食物清单", 2, (w, y, x, z, width) -> {
+                sections.add(section("§a④ 食物 不回饱食度", 2, (w, y, x, z, width) -> {
                     largeChest(w, x + 4, y + 1, z + DEPTH - 2, foodList());
                     switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.CLEAR_HUNGER),
                             "§7清空饱食度", "§7方便看杀怪回饱食");
@@ -631,13 +631,13 @@ public final class Hall {
                         "吃的行为照常播放，但吃完饱食度不变、食物也不会少，并给出提示",
                         "点「清空饱食度」让自己饿着",
                         "拿着箱子里的食物右键空气，看聊天栏提示"));
-                sections.add(section("§2⑤ 杀鸡回饱食度", 1, (w, y, x, z, width) ->
+                sections.add(section("§2⑤ 杀鸡 回饱食度", 1, (w, y, x, z, width) ->
                         switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.SPAWN_CHICKEN),
                                 "§a放出一只鸡", "§7它不会动，杀掉看饱食度"),
                         "吸血鬼真正回饱食度的方式是击杀生物",
                         "杀掉鸡以后饱食度上升",
                         "点按钮放出一只鸡（旧的会被清掉）", "把它杀掉，回头看饱食度"));
-                sections.add(section("§5⑥ 休战 · 敌对怪物", 4, true, (w, y, x, z, width) -> {
+                sections.add(section("§5⑥ 休战 敌对怪物", 4, true, (w, y, x, z, width) -> {
                     box(w, Material.BLACKSTONE, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "vampire"),
                             "§c召唤全部敌对怪物", "§7看它们打不打你");
@@ -647,7 +647,7 @@ public final class Hall {
                         "全部怪物站在原地不追你；你打它们任意一下，契约立刻破裂",
                         "点「召唤全部敌对怪物」，站着别动，观察它们是否追你",
                         "点「清空怪物」收拾干净（离开测试也会清）"));
-                sections.add(section("§d⑦ 道具 · 跑酷", 2, (w, y, x, z, width) -> {
+                sections.add(section("§d⑦ 道具 跑酷与传送", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.POPPY, 8),
                             new ItemStack(Material.BOOK, 4)));
@@ -665,13 +665,13 @@ public final class Hall {
                         "拿书左键传回存点，再用「重置传送点」把它钉回大厅"));
             }
             case "ghoul" -> {
-                sections.add(section("§2① 转化 · 被僵尸杀死", 1, (w, y, x, z, width) ->
+                sections.add(section("§2① 转化 被僵尸杀死", 1, (w, y, x, z, width) ->
                         switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.PREPARE_GHOUL),
                                 "§a放出一只僵尸", "§7它杀死你就会转化"),
                         "让大厅里的僵尸杀死你，验证死亡转化",
                         "你一定会变成食尸鬼（这里转化率是 100%）",
                         "点按钮放出一只僵尸", "站在它旁边别动，等它打死你"));
-                sections.add(section("§f② 教会净化 · 恢复人类", 2, (w, y, x, z, width) -> {
+                sections.add(section("§f② 教会 净化回人类", 2, (w, y, x, z, width) -> {
                     Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
                     priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
                     // A pillar over the altar, so the one thing that undoes a ghoul is the one
@@ -691,7 +691,7 @@ public final class Hall {
                         "右键教会祭坛后会被圣光杀死，并有机会直接恢复人类",
                         "食尸鬼自己没有任何解药，只能找教会",
                         "走到发光柱子下的钻石块旁边，右键它"));
-                sections.add(section("§b③ 道具 · 召唤与羁绊", 2, (w, y, x, z, width) -> {
+                sections.add(section("§b③ 道具 召唤与羁绊", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.PORKCHOP, 8),
                             new ItemStack(Material.BONE, 8),
@@ -703,7 +703,7 @@ public final class Hall {
                         "猪排左键会召出一只僵尸；拿着骨头打陪练会和他建立羁绊（分担伤害）",
                         "先点「叫陪练过来」，站到他面前",
                         "拿骨头打他一下，再看聊天栏的羁绊提示"));
-                sections.add(section("§5④ 休战 · 僵尸系怪物", 4, true, (w, y, x, z, width) -> {
+                sections.add(section("§5④ 休战 僵尸系怪物", 4, true, (w, y, x, z, width) -> {
                     box(w, Material.MOSS_BLOCK, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "ghoul"),
                             "§c召唤僵尸系怪物", "§7看它们打不打你");
@@ -713,7 +713,7 @@ public final class Hall {
                         "僵尸 / 尸壳 / 溺尸 / 巨人等都不主动攻击；你打任意一只立刻破约",
                         "点「召唤僵尸系怪物」，站着不动观察",
                         "打完点「清空怪物」收尾"));
-                sections.add(section("§9⑤ 露天 · 阳光与下雨", 2, true, (w, y, x, z, width) -> {
+                sections.add(section("§9⑤ 露天 阳光与下雨", 2, true, (w, y, x, z, width) -> {
                     // No roof over this section: the plugin asks the sky, and both tests are
                     // about the sky - the sun for a ghoul's regeneration, the rain for the
                     // rule that switches that regeneration off.
@@ -730,7 +730,7 @@ public final class Hall {
                         "露天淋雨时完全不回血；回到有顶的格子里每 10 秒回 1 点",
                         "先点「先被打掉血」，血量掉到一半",
                         "站到露天台点「切换下雨」等一会，再走回有顶的格子等一会"));
-                sections.add(section("§b⑥ 钻石剑 · 伤害为 0", 2, (w, y, x, z, width) -> {
+                sections.add(section("§b⑥ 钻石剑 伤害 0", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
                             new ItemStack(Material.IRON_SWORD, 1)));
@@ -748,7 +748,7 @@ public final class Hall {
                         "依次点「挨一下钻石剑」和「挨一下铁剑」对比"));
             }
             case "werewolf" -> {
-                sections.add(section("§6① 转化 · 夜里被狼咬死", 1, (w, y, x, z, width) -> {
+                sections.add(section("§6① 转化 夜里被狼咬死", 1, (w, y, x, z, width) -> {
                     switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.NIGHT),
                             "§9夜晚", "§7先调成夜里");
                     switchpoint(w, y, x + 7, z + 3, Trigger.of(Kind.PREPARE_WEREWOLF),
@@ -756,7 +756,7 @@ public final class Hall {
                 }, "让未驯服的狼在夜里咬死你，验证死亡转化",
                         "只有夜里放的狼才算数，白天放不出来",
                         "先点「夜晚」把本大厅调成夜里", "再点「放出一只狼」，站着等它咬死你"));
-                sections.add(section("§a② 狼毒解药 · 制作与使用", 2, (w, y, x, z, width) -> {
+                sections.add(section("§a② 解药 狼毒解药", 2, (w, y, x, z, width) -> {
                     largeChest(w, x + 4, y + 1, z + DEPTH - 2, wereWolfbaneList());
                     switchpoint(w, y, x + 10, z + 3, Trigger.of(Kind.DAY),
                             "§e白天", "§7狼毒只能在白天做");
@@ -801,7 +801,7 @@ public final class Hall {
                 }, "验证恶魔的两个主世界能力：火球与蜘蛛网束缚",
                         "红石左键射出火球；墨囊左键在目标处生成蜘蛛网并在到期后自己清掉",
                         "拿箱子里的红石左键一次", "拿墨囊对着地面左键一次，看蜘蛛网"));
-                sections.add(section("§b② 寒冷生物群系 · 溺死恢复人类", 2, (w, y, x, z, width) -> {
+                sections.add(section("§b② 溺死 恢复人类", 2, (w, y, x, z, width) -> {
                     // The pool is sunk into the floor and has a bottom of its own. The first
                     // version was a raised basin three blocks high, which nobody could get into;
                     // the version before that was dug one block below the room's own floor,
@@ -822,7 +822,7 @@ public final class Hall {
                         "背包里带够 30 个雪球时溺死才会变成人类；水池是走进去的，不会掉出世界",
                         "先从箱子里拿走至少 30 个雪球",
                         "点「查看生物群系」确认是寒冷群系，再点「跳进水里」等着淹死"));
-                sections.add(section("§4③ 前往下界 · 岩浆转化", 2, (w, y, x, z, width) -> {
+                sections.add(section("§4③ 下界 岩浆转化", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.NETHERRACK, 8)));
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.GO_NETHER, "demon"),
@@ -834,7 +834,7 @@ public final class Hall {
                         "在那边穿上整套皮革，再跳进岩浆（死后即转化）"));
             }
             case "priest" -> {
-                sections.add(section("§f① 入教 · 教会祭坛", 1, (w, y, x, z, width) -> {
+                sections.add(section("§f① 入教 教会祭坛", 1, (w, y, x, z, width) -> {
                     Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
                     priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
@@ -846,19 +846,19 @@ public final class Hall {
                         "右键钻石块后材料被收走，你变成牧师；教会位置就设在这里",
                         "在箱子里拿齐四样材料（关箱自动补满）",
                         "右键中间的钻石块"));
-                sections.add(section("§6② 献祭 · 教会捐赠", 1, (w, y, x, z, width) ->
+                sections.add(section("§6② 献祭 教会捐赠", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, donationList()),
                         "验证牧师向教会捐献换能量的收益",
                         "拿指定食物右键祭坛，聊天栏列出收到的能量数值",
                         "成为牧师后再回到这一格", "拿走箱子里的食物，右键钻石块"));
-                sections.add(section("§8③ 逐出教会 · 恢复人类", 1, (w, y, x, z, width) ->
+                sections.add(section("§8③ 逐出 恢复人类", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                                 new ItemStack(Material.COAL, 4))),
                         "验证牧师手持煤炭右键祭坛会被逐出教会",
                         "右键后立刻恢复人类，牧师身份清空",
                         "确保自己还是牧师",
                         "拿箱子里的煤炭右键钻石块"));
-                sections.add(section("§b④ 法术 · 净化与治疗", 3, (w, y, x, z, width) -> {
+                sections.add(section("§b④ 法术 净化与治疗", 3, (w, y, x, z, width) -> {
                     spellBench(w, y, x, z, Material.FEATHER, Material.SUGAR, Material.FLINT,
                             Material.PAPER);
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.SPAR),
@@ -876,7 +876,7 @@ public final class Hall {
                         "每个法术都会在陪练身上生效：放逐传送、驱魔变人类、治愈、加血",
                         "点「叫陪练过来」，他会先变成异族",
                         "手持箱子里的法术物品打他一下，看陪练的变化和聊天栏"));
-                sections.add(section("§5⑤ 法术 · 汲取与守护", 2, (w, y, x, z, width) -> {
+                sections.add(section("§5⑤ 法术 汲取与守护", 2, (w, y, x, z, width) -> {
                     spellBench(w, y, x, z, Material.BOOK, Material.WHITE_WOOL, Material.BOWL);
                     switchpoint(w, y, x + 5, z + 3, spell("BOOK"),
                             "§7书 · 汲取", "§7抽走对方 15% 能量");
@@ -891,7 +891,7 @@ public final class Hall {
                         "依次用书 / 羊毛 / 碗打他，注意聊天栏的回报"));
             }
             case "witchhunter" -> {
-                sections.add(section("§7① 入会 · 杀死三个异族", 3, (w, y, x, z, width) -> {
+                sections.add(section("§7① 入会 杀三个异族", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 5, z + 3,
@@ -901,7 +901,7 @@ public final class Hall {
                         "杀满三种后聊天栏会收到公会邀请（约 10 秒后），这才是正规入会",
                         "先用铁剑（箱子里有）杀掉放出来的三个异族",
                         "杀满三种后去下一格开门"));
-                sections.add(section("§7② 入会 · 铁门与告示牌", 1, (w, y, x, z, width) -> {
+                sections.add(section("§7② 入会 铁门与告示牌", 1, (w, y, x, z, width) -> {
                     door(w, x + 6, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 2, z + DEPTH / 2);
@@ -912,7 +912,7 @@ public final class Hall {
                         "有邀请时右键铁门会开门并把你变成猎巫人；没邀请只会提示 WitchHunters Only",
                         "（可选）点左边按钮直接拿一张邀请",
                         "右键铁门，门开一下再关上，人就入会了"));
-                sections.add(section("§a③ 弓箭模式 · 打陪练", 3, (w, y, x, z, width) -> {
+                sections.add(section("§a③ 弓箭模式", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BOW, 1),
                             new ItemStack(Material.ARROW, 32)));
@@ -948,7 +948,7 @@ public final class Hall {
                         "依次穿上，看哪两件被脱下来"));
             }
             case "enderborn" -> {
-                sections.add(section("§5① 转化 · 珍珠与粘土", 1, (w, y, x, z, width) -> {
+                sections.add(section("§5① 转化 珍珠与粘土", 1, (w, y, x, z, width) -> {
                     layer(w, Material.CLAY, y, x + 4, z + DEPTH / 2 - 1,
                             x + 6, z + DEPTH / 2 + 1);
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
@@ -957,7 +957,7 @@ public final class Hall {
                         "珍珠右键粘土后你会变成末影族，聊天栏出现提示",
                         "从箱子里拿一颗末影珍珠",
                         "对着粘土方块右键"));
-                sections.add(section("§d② 末影珍珠 · 两种用法", 1, (w, y, x, z, width) -> {
+                sections.add(section("§d② 珍珠 两种用法", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.ENDER_PEARL, 16)));
                     powerButton(w, y, x + 5, z, "enderborn");
@@ -967,7 +967,7 @@ public final class Hall {
                         "拿珍珠右键一次（加能量），再左键切换模式"));
             }
             case "angel" -> {
-                sections.add(section("§f① 转化 · 手持羽毛摔死", 3, (w, y, x, z, width) -> {
+                sections.add(section("§f① 转化 羽毛摔死", 3, (w, y, x, z, width) -> {
                     // A human has twenty health and a fall costs one per block past the third,
                     // so a ledge has to be about twenty-five blocks up before the fall is a
                     // death at all. The first version was six up and simply broke an ankle.
@@ -983,7 +983,7 @@ public final class Hall {
                         "摔死的那一刻你会变成天使：掉落伤害被免除，但死亡本身照常触发",
                         "从箱子里拿一根羽毛拿在手上",
                         "点「上到高台」，走到中间的洞里跳下去"));
-                sections.add(section("§e② 天使道具 · 跳与治疗", 1, (w, y, x, z, width) -> {
+                sections.add(section("§e② 道具 跳与治疗", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DANDELION, 8),
                             new ItemStack(Material.FEATHER, 8),
@@ -1007,7 +1007,7 @@ public final class Hall {
                         "生牛肉 / 骨头 / 猪肉对方块左键分别召出牛 / 驯服的狼 / 猪（各耗 5000）；金与钻石护甲会被脱掉",
                         "拿箱子里的三种肉，对着地面对应左键一次",
                         "再穿一次金胸甲和钻石胸甲，看它们是不是被立刻脱下来"));
-                sections.add(section("§e④ 净化异族 · 用纸", 1, (w, y, x, z, width) -> {
+                sections.add(section("§e④ 净化 用纸", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.PAPER, 8)));
                     switchpoint(w, y, x + 6, z + 3,
@@ -1034,7 +1034,7 @@ public final class Hall {
      * test altogether.
      */
     private Section endSection(String race) {
-        return section("§f→ 回到开头 / 离开测试", 2, (w, y, x, z, width) -> {
+        return section("§f末尾 重来或离开", 2, (w, y, x, z, width) -> {
             switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.RETURN_START, race),
                     "§a回到开头", "§7回到这一族的入口，种族不变");
             switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.EXIT_TEST, race),
