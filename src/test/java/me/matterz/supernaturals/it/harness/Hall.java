@@ -217,6 +217,27 @@ public final class Hall {
     /** How deep a hall is, in blocks. */
     private static final int DEPTH = 15;
 
+    /**
+     * How much text fits on one line of a sign board, in units of one ASCII character.
+     *
+     * <p>The board's text area is about ninety pixels and the default font is six pixels a
+     * character, so fifteen. A full-width character is nine pixels and counts as one and a half.
+     */
+    private static final double SIGN_WIDTH = 15.0;
+
+    /** How many lines a board holds, and how many boards one run of signs may use. */
+    private static final int LINES_PER_BOARD = 4;
+    private static final int MAX_BOARDS = 8;
+
+    /**
+     * A page break: the next line starts a fresh board.
+     *
+     * <p>A goal or an expectation is a sentence, and half of one on the end of a board and the
+     * rest on the next is worse than a board that ends early. Every part of a section's teaching
+     * gets its own board, so whichever one a person looks at says one thing.
+     */
+    private static final String BREAK = "\u0000";
+
     /** How far the halls sit from the world spawn, and from each other. */
     private static final int CELL = 320;
 
@@ -506,9 +527,16 @@ public final class Hall {
         return layout;
     }
 
-    /** The switches at the near end of every hall: how to stop, and how to get out. */
+    /**
+     * The switches at the near end of every hall: how to stop, and how to get out.
+     *
+     * <p>The sign goes on the very first column of the wall. It used to sit four blocks in, which
+     * was the start of the first section's own run of signs - and a section's signs now run to
+     * three or four boards, so the entry board was sitting on top of the last of them and eating
+     * whatever was written there.
+     */
     private void entryStation(World target, String race, int x0, int y, int z0) {
-        wallSign(target, y, x0 + 4, z0, "§f入口 · 退出", "§7随时可以停下", "§7按钮就在对面墙上");
+        wallSign(target, y, x0, z0, "§f入口 · 退出", "§7随时可以停下", "§7按钮就在对面墙上");
         switchpoint(target, y, x0 + 1, z0 + 3, Trigger.of(Kind.EXIT_TEST, race),
                 "§a退出测试", "§7清道具 · 恢复人类 · 回大厅");
         switchpoint(target, y, x0 + 3, z0 + 3, Trigger.of(Kind.RESET_HUMAN, race),
@@ -1039,8 +1067,10 @@ public final class Hall {
     private static List<String> brief(String goal, String expect, String... steps) {
         List<String> lines = new ArrayList<>();
         lines.add("§e目标 §f" + goal);
+        lines.add(BREAK);
         lines.add("§b预期 §f" + expect);
         for (int index = 0; index < steps.length; index++) {
+            lines.add(BREAK);
             lines.add("§7" + (index + 1) + ". " + steps[index]);
         }
         return lines;
@@ -1347,14 +1377,103 @@ public final class Hall {
         wallSign(target, y, x + 2, z, text.toArray(new String[0]));
     }
 
-    /** A run of signs on a hall's near wall, three lines each, readable from inside. */
+    /**
+     * A run of signs on a hall's near wall, four lines each, readable from inside.
+     *
+     * <p>Every line is wrapped first. A sign board's text area is about ninety pixels and the
+     * default font is six pixels a character - nine for a full-width one - so a line much past
+     * fifteen letters (or ten characters of Chinese) runs off the board and over whatever is
+     * beside it. A section's goal is a sentence, not a label: without wrapping, the boards next
+     * to each other become one unreadable smear, and the parts that matter are the parts that
+     * get lost.
+     */
     private void wallSign(World target, int y, int x, int z, String... lines) {
-        for (int sign = 0; sign * 3 < lines.length && sign < 4; sign++) {
-            int from = sign * 3;
-            int to = Math.min(lines.length, from + 3);
-            signOn(target, x + sign, y + 2, z - 1, BlockFace.SOUTH,
-                    List.of(lines).subList(from, to).toArray(new String[0]));
+        signBoard(target, x, y + 2, z - 1, BlockFace.SOUTH, wrapAll(lines));
+    }
+
+    /** Writes wrapped lines out, four to a board, with further boards along the same wall. */
+    private void signBoard(World target, int supportX, int supportY, int supportZ, BlockFace side,
+            List<String> lines) {
+        List<String> board = new ArrayList<>();
+        int placed = 0;
+        for (String line : lines) {
+            if (BREAK.equals(line)) {
+                if (!board.isEmpty()) {
+                    writeBoard(target, supportX, supportY, supportZ, side, placed++, board);
+                    board.clear();
+                }
+                continue;
+            }
+            if (board.size() == LINES_PER_BOARD) {
+                writeBoard(target, supportX, supportY, supportZ, side, placed++, board);
+                board.clear();
+            }
+            board.add(line);
         }
+        if (!board.isEmpty() && placed < MAX_BOARDS) {
+            writeBoard(target, supportX, supportY, supportZ, side, placed, board);
+        }
+    }
+
+    private void writeBoard(World target, int supportX, int supportY, int supportZ, BlockFace side,
+            int board, List<String> lines) {
+        if (board >= MAX_BOARDS) {
+            return;
+        }
+        signOn(target, supportX + board, supportY, supportZ, side,
+                lines.toArray(new String[0]));
+    }
+
+    private static List<String> wrapAll(String... lines) {
+        List<String> out = new ArrayList<>();
+        for (String line : lines) {
+            out.addAll(wrap(line));
+        }
+        return out;
+    }
+
+    /**
+     * Splits one line to what fits on a board, in units of one ASCII character.
+     *
+     * <p>A colour code takes no room and is carried onto the next line, so a wrapped line does
+     * not come back in the default colour halfway through.
+     */
+    private static List<String> wrap(String line) {
+        List<String> out = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        String colour = "";
+        double width = 0;
+        for (int index = 0; index < line.length(); index++) {
+            char c = line.charAt(index);
+            if (c == '\u00a7' && index + 1 < line.length()) {
+                colour = line.substring(index, index + 2);
+                current.append(colour);
+                index++;
+                continue;
+            }
+            double size = c >= 0x2E80 ? 1.5 : (c == ' ' ? 0.5 : 1.0);
+            if (width + size > SIGN_WIDTH && current.length() > 0 && !isClosing(c)) {
+                out.add(current.toString());
+                current.setLength(0);
+                current.append(colour);
+                width = 0;
+            }
+            current.append(c);
+            width += size;
+        }
+        if (current.length() > 0) {
+            out.add(current.toString());
+        }
+        return out;
+    }
+
+    /**
+     * Punctuation that may not open a line. A wrapped sentence reads wrong with a lone "）" or
+     * "，" sitting at the start of the next board, so one of these is allowed to overhang the
+     * line it belongs to instead.
+     */
+    private static boolean isClosing(char c) {
+        return "）)】」』》〉、。，,．.！!？?：:；;…".indexOf(c) >= 0;
     }
 
     private void edge(World target, int x, int y, int z, int length, int depth, Material material) {
@@ -1402,7 +1521,7 @@ public final class Hall {
         set(target, STELE, x, y + 1, z - 1);
         set(target, STELE, x, y + 2, z - 1);
         button(target, x, y + 1, z, BlockFace.SOUTH, trigger);
-        signOn(target, x, y + 2, z - 1, BlockFace.SOUTH, lines);
+        signBoard(target, x, y + 2, z - 1, BlockFace.SOUTH, wrapAll(lines));
     }
 
     private void door(World target, int x, int y, int z) {
