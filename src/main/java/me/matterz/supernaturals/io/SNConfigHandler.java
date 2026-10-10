@@ -24,7 +24,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.logging.Level;
 
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.util.Recipes;
@@ -334,7 +336,10 @@ public class SNConfigHandler {
 			config.set("Priest.Spell.DrainFactor", 0.15);
 			config.set("Priest.DamageFactor.FireTicks", 50);
 			config.set("Priest.Church.AltarMaterial", "DIAMOND_BLOCK");
-			config.set("Priest.Spell.Material.GuardianAngel", "WOOL");
+			// WOOL stopped being a material when the wool items were split by colour, and the
+			// spell is matched by name, so a default of "WOOL" left guardian angel permanently
+			// uncastable on any server that had not edited it by hand.
+			config.set("Priest.Spell.Material.GuardianAngel", "WHITE_WOOL");
 
 			config.set("Ghoul.Power.Start", 5000);
 			config.set("Ghoul.Kill.SpreadCurse", true);
@@ -382,7 +387,7 @@ public class SNConfigHandler {
 			config.set("Demon.Fireball.Damage", 10);
 			config.set("Demon.Power.Snare", 1000);
 			config.set("Demon.Snare.Duration", 10000);
-			config.set("Demon.Snare.Material", "INK_SACK");
+			config.set("Demon.Snare.Material", "INK_SAC");
 			config.set("Demon.SnowballAmount", 30);
 			config.set("Demon.DamageFactor.FireTicks", 50);
 
@@ -1049,7 +1054,11 @@ public class SNConfigHandler {
 		priestFireTicks = config.getInt("Priest.DamageFactor.FireTicks", 50);
 		priestAltarMaterial = config.getString("Priest.Church.AltarMaterial", "DIAMOND_BLOCK");
 		priestMaterialsString = config.getStringList("Priest.Spell.Material");
-		priestSpellGuardianAngel = config.getString("Priest.Spell.Material.GuardianAngel", "WOOL");
+		// WOOL stopped existing when the wool items were split by colour, and INK_SACK is INK_SAC
+		// here, so both spells were impossible to cast on any server that had the old defaults.
+		priestSpellGuardianAngel = usableMaterial("Priest.Spell.Material.GuardianAngel",
+				config.getString("Priest.Spell.Material.GuardianAngel", "WHITE_WOOL"),
+				"WHITE_WOOL");
 		priestAltarMaterialsString = config.getStringList("Priest.Church.Recipe.Materials");
 		priestAltarQuantities = config.getIntegerList("Priest.Church.Recipe.Quantities");
 		priestDonationMaterialsString = config.getStringList("Priest.Church.Donation.Materials");
@@ -1110,7 +1119,8 @@ public class SNConfigHandler {
 		demonFireballDamage = config.getInt("Demon.Fireball.Damage", 10);
 		demonPowerSnare = config.getInt("Demon.Power.Snare", 1000);
 		demonSnareDuration = config.getInt("Demon.Snare.Duration", 10000);
-		demonSnareMaterial = config.getString("Demon.Snare.Material", "INK_SACK");
+		demonSnareMaterial = usableMaterial("Demon.Snare.Material",
+				config.getString("Demon.Snare.Material", "INK_SAC"), "INK_SAC");
 		demonSnowballAmount = config.getInt("Demon.SnowballAmount", 30);
 		demonArmorString = config.getStringList("Demon.Armor");
 		demonWeaponsString = config.getStringList("Demon.Weapon.Restrictions");
@@ -1298,6 +1308,8 @@ public class SNConfigHandler {
 
 		priestChurchLocation = new Location(plugin.getServer().getWorld(priestChurchWorld), priestChurchLocationX, priestChurchLocationY, priestChurchLocationZ);
 		priestBanishLocation = new Location(plugin.getServer().getWorld(priestBanishWorld), priestBanishLocationX, priestBanishLocationY, priestBanishLocationZ);
+
+		warnAboutUnknownMaterials(config);
 	}
 
 	public static void saveConfig() {
@@ -1314,6 +1326,62 @@ public class SNConfigHandler {
 
 	public static Configuration getConfig() {
 		return config;
+	}
+
+	/**
+	 * Whether an item is the one a setting names.
+	 *
+	 * <p>Abilities used to compare the item's <b>name</b> against the configured string, so a
+	 * setting whose value no longer exists in this version simply stopped matching: an ability
+	 * would quietly become impossible to use, with nothing anywhere to say why. Comparing the
+	 * resolved materials means a name is either right, or reported at load.
+	 */
+	public static boolean isItem(Material item, String configuredName) {
+		return item != null && configuredName != null
+				&& item == Material.matchMaterial(configuredName);
+	}
+
+	/** Settings a substitution was already made for, so the sweep does not report them twice. */
+	private static final Set<String> substitutedMaterials = new HashSet<>();
+
+	/**
+	 * A material setting that is guaranteed to name something this version has.
+	 *
+	 * <p>A name that does not resolve cannot be a deliberate choice - the ability that reads it
+	 * simply would not work - and an existing {@code config.yml} keeps whatever was written into
+	 * it the first time, so changing a default alone would never reach a server that already had
+	 * one. The fallback is used, and the substitution is logged.
+	 */
+	private static String usableMaterial(String setting, String value, String fallback) {
+		if (value != null && Material.matchMaterial(value) != null) {
+			return value;
+		}
+		substitutedMaterials.add(setting);
+		SupernaturalsPlugin.log(Level.WARNING, setting + " is set to \"" + value
+				+ "\", which is not a material in this version - using \"" + fallback
+				+ "\" instead.");
+		return fallback;
+	}
+
+	/**
+	 * Every setting whose name says it holds a material, checked once, at load. A Minecraft
+	 * update that renames an item does not break an ability loudly - it makes it impossible to
+	 * use - so this is the only thing that will ever say so.
+	 */
+	private static void warnAboutUnknownMaterials(Configuration config) {
+		for (String key : config.getKeys(true)) {
+			Object value = config.get(key);
+			if (!(value instanceof String name) || name.isEmpty()
+					|| !key.toLowerCase(Locale.ROOT).contains("material")
+					|| substitutedMaterials.contains(key)) {
+				continue;
+			}
+			if (Material.matchMaterial(name) == null) {
+				SupernaturalsPlugin.log(Level.WARNING, key + " is set to \"" + name
+						+ "\", which is not a material in this version - the ability that uses"
+						+ " it cannot be used.");
+			}
+		}
 	}
 
 }

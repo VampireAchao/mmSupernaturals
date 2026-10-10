@@ -197,7 +197,7 @@ public class DemonManager extends ClassManager {
 			return false;
 		}
 
-		if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.demonMaterial)) {
+		if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.demonMaterial)) {
 			if (SNConfigHandler.debugMode) {
 				SupernaturalsPlugin.log(player.getName()
 						+ " is casting FIREBALL with "
@@ -208,7 +208,7 @@ public class DemonManager extends ClassManager {
 				event.setCancelled(true);
 			}
 			return true;
-		} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.demonSnareMaterial)) {
+		} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.demonSnareMaterial)) {
 			if (SNConfigHandler.debugMode) {
 				SupernaturalsPlugin.log(player.getName()
 						+ " is casting SNARE with " + itemMaterial.toString());

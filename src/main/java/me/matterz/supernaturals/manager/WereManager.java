@@ -140,7 +140,7 @@ public class WereManager extends ClassManager {
 				return false;
 			}
 
-			if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.wolfMaterial)) {
+			if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.wolfMaterial)) {
 				if (SuperNManager.worldTimeIsNight(player)) {
 					summon(player);
 					event.setCancelled(true);
@@ -149,7 +149,7 @@ public class WereManager extends ClassManager {
 					SuperNManager.sendMessage(snplayer, "Cannot use this ability during the day.");
 					return false;
 				}
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.wolfbaneMaterial)) {
+			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.wolfbaneMaterial)) {
 				if (!SupernaturalsPlugin.hasPermissions(player, permissions2)) {
 					return false;
 				}
@@ -161,7 +161,7 @@ public class WereManager extends ClassManager {
 					event.setCancelled(true);
 					return true;
 				}
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.dashMaterial)) {
+			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.dashMaterial)) {
 				if (SuperNManager.worldTimeIsNight(player)) {
 					SuperNManager.jump(event.getPlayer(), SNConfigHandler.dashDeltaSpeed, false);
 					event.setCancelled(true);
