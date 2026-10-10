@@ -32,6 +32,9 @@ import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.util.Location;
 
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+
 public class SNDataHandler implements Serializable {
 
 	/**
@@ -79,21 +82,46 @@ public class SNDataHandler implements Serializable {
 	// Teleportation //
 	// -------------------------------------------- //
 
+	/**
+	 * Records where this player is standing as their teleport point. Nothing is recorded for
+	 * somebody the server does not have online - {@code getPlayer} answers with null then, and
+	 * the old version dereferenced it straight away.
+	 */
 	public void addTeleport(SuperNPlayer player) {
-		teleportLocations.put(player, new Location(SupernaturalsPlugin.instance.getServer().getPlayer(player.getName()).getLocation()));
+		Player online = SupernaturalsPlugin.instance.getServer().getPlayer(player.getName());
+		if (online == null) {
+			return;
+		}
+		teleportLocations.put(player, new Location(online.getLocation()));
 	}
 
 	public boolean checkPlayer(SuperNPlayer player) {
-		if (teleportLocations.containsKey(player)) {
-			return true;
-		}
-		return false;
+		return getTeleport(player) != null;
 	}
 
+	/**
+	 * The saved point as a Bukkit location, or null when there is none - or when the world it was
+	 * saved in is not loaded any more.
+	 *
+	 * <p>Both of those nulls used to be a crash: the old version read the map, called
+	 * {@code getWorld()} on whatever came back, and handed the result to {@code new Location(...)}
+	 * without looking at any of it.
+	 */
 	public org.bukkit.Location getTeleport(SuperNPlayer player) {
-		Location location = teleportLocations.get(player);
-		org.bukkit.Location bLocation = new org.bukkit.Location(location.getWorld(), location.getX(), location.getY(), location.getZ());
-		return bLocation;
+		Location stored = teleportLocations.get(player);
+		if (stored == null) {
+			return null;
+		}
+		World world = stored.getWorld();
+		if (world == null) {
+			return null;
+		}
+		return new org.bukkit.Location(world, stored.getX(), stored.getY(), stored.getZ());
+	}
+
+	/** Forgets a point that can no longer be used, so the next check tells the truth. */
+	public void removeTeleport(SuperNPlayer player) {
+		teleportLocations.remove(player);
 	}
 
 	// -------------------------------------------- //

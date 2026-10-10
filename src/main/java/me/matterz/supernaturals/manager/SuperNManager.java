@@ -448,7 +448,9 @@ public class SuperNManager {
 
 	public static void sendMessage(SuperNPlayer snplayer, String message) {
 		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
-		if (!player.isOnline()) {
+		// The lookup answers null for anybody who is not on the server, and asking that null
+		// whether it is online is the crash rather than the guard.
+		if (player == null) {
 			return;
 		}
 		player.sendMessage(ChatColor.RED + message);
@@ -462,6 +464,9 @@ public class SuperNManager {
 
 	public static void updateName(SuperNPlayer snplayer) {
 		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
+		if (player == null) {
+			return;
+		}
 		String name = player.getName();
 		String displayname = player.getDisplayName().trim();
 		String updatedname;

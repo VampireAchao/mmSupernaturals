@@ -170,11 +170,11 @@ public class VampireManager extends ClassManager {
 				return false;
 			}
 
-			if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.jumpMaterial)) {
+			if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.jumpMaterial)) {
 				SuperNManager.jump(player, SNConfigHandler.jumpDeltaSpeed, true);
 				event.setCancelled(true);
 				return true;
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.vampireMaterial)) {
+			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.vampireMaterial)) {
 				teleport(player);
 				event.setCancelled(true);
 				return true;
@@ -194,7 +194,7 @@ public class VampireManager extends ClassManager {
 				SuperNManager.sendMessage(snplayer, "Vampires can't eat food. You must drink blood instead.");
 				event.setCancelled(true);
 				return true;
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.vampireTeleportMaterial)) {
+			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.vampireTeleportMaterial)) {
 				setTeleport(player);
 				return true;
 			}
@@ -270,9 +270,19 @@ public class VampireManager extends ClassManager {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		ItemStack item = player.getItemInHand();
 		if (SupernaturalsPlugin.instance.getDataHandler().checkPlayer(snplayer)) {
+			org.bukkit.Location destination = SupernaturalsPlugin.instance.getDataHandler()
+					.getTeleport(snplayer);
+			if (destination == null || !destination.getWorld().equals(player.getWorld())) {
+				// A saved point belongs to the world it was saved in. Carrying it across worlds
+				// is how somebody teleports out of an area they were sealed into - the point is
+				// kept, so going back to that world still uses it.
+				SuperNManager.sendMessage(snplayer,
+						"Your teleport location is in another world. Save a new one here.");
+				return false;
+			}
 			if (snplayer.getPower() > SNConfigHandler.vampireTeleportCost) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.vampireTeleportCost, "Teleport!");
-				player.teleport(SupernaturalsPlugin.instance.getDataHandler().getTeleport(snplayer));
+				player.teleport(destination);
 				if (item.getAmount() == 1) {
 					player.setItemInHand(null);
 				} else {
@@ -476,7 +486,8 @@ public class VampireManager extends ClassManager {
 
 	public boolean hasHelmet(Player player) {
 		if (player.getInventory().getHelmet() != null) {
-			if(player.getInventory().getHelmet().getType().toString().equalsIgnoreCase(SNConfigHandler.vampireHelmet)) {
+			if (SNConfigHandler.isItem(player.getInventory().getHelmet().getType(),
+					SNConfigHandler.vampireHelmet)) {
 				return true;
 			}
 		}
