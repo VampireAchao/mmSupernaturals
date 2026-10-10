@@ -187,6 +187,8 @@ public class SupernaturalsPlugin extends JavaPlugin {
 			return wereManager;
 		} else if (snplayer.getType().equalsIgnoreCase("enderborn")) {
 			return enderManager;
+		} else if (snplayer.getType().equalsIgnoreCase("angel")) {
+			return angelManager;
 		} else {
 			return humanManager;
 		}
@@ -272,25 +274,17 @@ public class SupernaturalsPlugin extends JavaPlugin {
 
 	@Override
 	public boolean onCommand(CommandSender sender, Command cmd, String commandLabel, String[] args) {
-		if (sender instanceof Player) {
-			List<String> parameters = new ArrayList<String>(Arrays.asList(args));
-			if (SNConfigHandler.debugMode) {
-				SupernaturalsPlugin.log(((Player) sender).getName()
-						+ " used command: " + commandLabel + " with args: "
-						+ TextUtil.implode(parameters, ", "));
-			}
-			handleCommand(sender, parameters, true);
-			return true;
-		} else {
-			List<String> parameters = new ArrayList<String>(Arrays.asList(args));
-			if (SNConfigHandler.debugMode) {
-				SupernaturalsPlugin.log(((Player) sender).getName()
-						+ " used command: " + commandLabel + " with args: "
-						+ TextUtil.implode(parameters, ", "));
-			}
-			handleCommand(sender, parameters, false);
-			return true;
+		// The sender is only a Player when a player typed the command. The console is the other
+		// half of this branch, and casting it to a Player to write one log line turned every
+		// console command into a ClassCastException the moment debug logging was on.
+		if (SNConfigHandler.debugMode) {
+			SupernaturalsPlugin.log(sender.getName()
+					+ " used command: " + commandLabel + " with args: "
+					+ TextUtil.implode(Arrays.asList(args), ", "));
 		}
+		List<String> parameters = new ArrayList<String>(Arrays.asList(args));
+		handleCommand(sender, parameters, sender instanceof Player);
+		return true;
 	}
 
 	public void handleCommand(CommandSender sender, List<String> parameters, boolean isPlayer) {
