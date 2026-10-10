@@ -18,6 +18,20 @@ import org.bukkit.inventory.ItemStack;
 
 public class EnderBornManager extends ClassManager {
 
+	/**
+	 * How often one of an enderborn's blows carries its attack bonus, and how often a killing
+	 * blow turns the victim into one of them.
+	 *
+	 * <p>Both used to be written as {@code Math.random() == 0.35} and {@code == 0.10}: a double
+	 * compared for <em>exact</em> equality with a number that is not even representable, so the
+	 * rolls could never come up and neither the attack bonus nor the conversion ever happened.
+	 */
+	private static final double ATTACK_BONUS_CHANCE = 0.35;
+	private static final double CONVERT_CHANCE = 0.10;
+
+	/** Deaths it takes for an enderborn to be reborn as a human. */
+	private static final int DEATHS_UNTIL_HUMAN = 5;
+
 	public SupernaturalsPlugin plugin;
 	public HashMap<SuperNPlayer, Boolean> teleMap = new HashMap<SuperNPlayer, Boolean>();
 	public HashMap<SuperNPlayer, Integer> deathTimesMap = new HashMap<SuperNPlayer, Integer>();
@@ -83,7 +97,7 @@ public class EnderBornManager extends ClassManager {
 						+ itemMaterial.toString().replace('_', ' '));
 				return 0;
 			}
-			if (Math.random() == 0.35) {
+			if (Math.random() < ATTACK_BONUS_CHANCE) {
 				damage += damage
 						* snDamager.scale(SNConfigHandler.enderDamageFactor);
 				return damage;
@@ -118,31 +132,30 @@ public class EnderBornManager extends ClassManager {
 	public void deathEvent(Player player) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		SuperNManager.alterPower(snplayer, -SNConfigHandler.enderDeathPowerPenalty, "You died!");
-		if (!deathTimesMap.containsKey(snplayer)) {
-			deathTimesMap.put(snplayer, 1);
-			SuperNManager.sendMessage(snplayer, "You have "
-					+ (5 - getDeathTimes(snplayer))
-					+ " deaths untill you are reborn as human.");
-		}
-		if (deathTimesMap.get(snplayer).equals(5)) {
+
+		// One death, counted once. The old version seeded the counter on the first death and
+		// then fell through to the "not five yet" branch, which advanced it a second time and
+		// printed the countdown twice - "4 deaths" immediately followed by "3".
+		int deaths = deathTimesMap.merge(snplayer, 1, Integer::sum);
+		if (deaths >= DEATHS_UNTIL_HUMAN) {
 			SuperNManager.sendMessage(snplayer, "You have been reborn as a human.");
+			if (SNConfigHandler.debugMode) {
+				SupernaturalsPlugin.log(snplayer.getName() + " died " + deaths
+						+ " times and is human again.");
+			}
 			SuperNManager.cure(snplayer);
 			deathTimesMap.remove(snplayer);
-		} else {
-			deathTimesMap.put(snplayer, (deathTimesMap.get(snplayer) + 1));
-			SuperNManager.sendMessage(snplayer, "You have "
-					+ (5 - getDeathTimes(snplayer))
-					+ " deaths untill you are reborn as human.");
+			return;
 		}
+
+		int left = DEATHS_UNTIL_HUMAN - deaths;
+		SuperNManager.sendMessage(snplayer, "You have " + left
+				+ (left == 1 ? " death" : " deaths") + " untill you are reborn as human.");
 	}
 
+	/** How many times this enderborn has died, without the reading changing the answer. */
 	public int getDeathTimes(SuperNPlayer snplayer) {
-		if(!deathTimesMap.containsKey(snplayer)) {
-			deathTimesMap.put(snplayer, 1);
-			return 1;
-		} else {
-			return deathTimesMap.get(snplayer);
-		}
+		return deathTimesMap.getOrDefault(snplayer, 0);
 	}
 
 	public void killEvent(SuperNPlayer damager, SuperNPlayer victim) {
@@ -153,7 +166,7 @@ public class EnderBornManager extends ClassManager {
 					+ " stole some of your power!");
 			SuperNManager.alterPower(damager, SNConfigHandler.enderKillPower, "Stole power from "
 					+ victim.getName());
-			if (Math.random() == 0.10) {
+			if (Math.random() < CONVERT_CHANCE) {
 				SuperNManager.convert(victim, "enderborn");
 			}
 		}
