@@ -46,10 +46,21 @@ final class Nms {
 
     /** Places a player of that name into the first world, through the normal join path. */
     static Object spawn(String name) {
+        return spawn(name, Bukkit.getWorlds().get(0));
+    }
+
+    /**
+     * Places a player of that name into one particular world.
+     *
+     * <p>The world is worth choosing. The server leaves a clientless player invulnerable after
+     * it moves them between worlds - it is waiting for a client to acknowledge a dimension
+     * change that never arrives - so a stand-in that is going to be hit has to be created in the
+     * world the hitting happens in, not wherever the first world is.
+     */
+    static Object spawn(String name, World world) {
         try {
             Object bukkit = Bukkit.getServer();
             Object minecraftServer = call(bukkit, "getServer");
-            World world = Bukkit.getWorlds().get(0);
             Object serverLevel = call(world, "getHandle");
 
             Class<?> profileClass = load("com.mojang.authlib.GameProfile");

@@ -33,6 +33,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
@@ -75,6 +76,9 @@ public final class HarnessPlugin extends JavaPlugin {
 
     /** Server-side player objects, so {@code quit} can remove exactly what was added. */
     private final Map<String, Object> actors = new LinkedHashMap<>();
+
+    /** The stand-ins brought up for a hall section, by handle name, so they can be taken back. */
+    private final Map<String, Object> ghosts = new LinkedHashMap<>();
     private ControlSocket socket;
     private Hall hall;
     private HallGuard guard;
@@ -111,9 +115,9 @@ public final class HarnessPlugin extends JavaPlugin {
         guard = new HallGuard(this);
         getServer().getPluginManager().registerEvents(guard, this);
         // Every way out of the hall is a switch the hall placed, so the hall watches its own
-        // furniture: whatever manages to move a button is back a moment later, every dummy is
-        // back where it was put, and everything a section let out goes home. Anything that
-        // changes a block inside the hall also repairs on the spot; this is the backstop.
+        // furniture: whatever manages to move a button is back a moment later, and everything a
+        // section let out goes home. Anything that changes a block inside the hall also repairs
+        // on the spot; this is the backstop.
         getServer().getScheduler().runTaskTimer(this, guard::tick, 40L, 40L);
         // The priest's altar only answers within ten blocks of the church in the plugin's
         // configuration, and writing that file ourselves would stop the plugin generating its
@@ -132,18 +136,26 @@ public final class HarnessPlugin extends JavaPlugin {
                 + hall.lobbySpawn().getBlockZ() + " - joining puts you there");
     }
 
+    /**
+     * Registers every altar the hall built as a church.
+     *
+     * <p>Every one of them, not just one: the ghoul's altar is in the ghoul's own world and the
+     * priest's is in the overworld, and a church used to be a single point in the config. A
+     * hall whose altar is not a church is a hall where the one thing that undoes a ghoul does
+     * nothing at all.
+     */
     private void pointTheChurchAtTheHall() {
-        if (hall == null || hall.priestAltar() == null) {
+        if (hall == null || hall.priestAltars().isEmpty()) {
             return;
         }
-        SNConfigHandler.priestChurchWorld = hall.priestAltar().getWorld().getName();
-        SNConfigHandler.priestChurchLocationX = hall.priestAltar().getBlockX();
-        SNConfigHandler.priestChurchLocationY = hall.priestAltar().getBlockY();
-        SNConfigHandler.priestChurchLocationZ = hall.priestAltar().getBlockZ();
-        getLogger().info("priest church pointed at " + String.join(",",
-                String.valueOf(SNConfigHandler.priestChurchLocationX),
-                String.valueOf(SNConfigHandler.priestChurchLocationY),
-                String.valueOf(SNConfigHandler.priestChurchLocationZ)));
+        SNConfigHandler.clearChurches();
+        for (Location altar : hall.priestAltars()) {
+            SNConfigHandler.addChurch(altar);
+        }
+        getLogger().info("priest churches pointed at " + String.join(", ",
+                hall.priestAltars().stream().map(altar -> altar.getWorld().getName() + " "
+                        + altar.getBlockX() + "," + altar.getBlockY() + "," + altar.getBlockZ())
+                        .toList()));
     }
 
     /** The hall, or null on a server that was not asked for one. */
@@ -152,19 +164,26 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
-     * Brings a stand-in player up, for the few sections that need somebody to do the hitting: a
-     * rule decided on the victim's side cannot be shown any other way than by hitting the victim.
+     * Brings a stand-in up in the world it is needed in, and remembers its handle so it can be
+     * taken back out. Any older one of the same name goes first - two players cannot share a name.
      */
-    Object spawnGhost(String name) {
+    Object spawnGhost(String name, World world) {
+        dropGhost(name);
         try {
-            return Nms.spawn(name);
+            Object actor = Nms.spawn(name, world);
+            ghosts.put(name, actor);
+            return actor;
         } catch (RuntimeException alreadyThere) {
             return null;
         }
     }
 
-    /** Takes the stand-in away again, so it is not left in the tab list between tests. */
-    void dropGhost(Object actor) {
+    /**
+     * Takes a stand-in away again, so it is not left in the tab list between tests. One that was
+     * never brought up - a section that failed before it could - is simply nothing to do.
+     */
+    void dropGhost(String name) {
+        Object actor = ghosts.remove(name);
         if (actor != null) {
             Nms.disconnect(actor);
         }
@@ -183,6 +202,14 @@ public final class HarnessPlugin extends JavaPlugin {
             }
         }
         actors.clear();
+        for (Map.Entry<String, Object> ghost : new ArrayList<>(ghosts.entrySet())) {
+            try {
+                Nms.disconnect(ghost.getValue());
+            } catch (RuntimeException e) {
+                getLogger().warning("leaving " + ghost.getKey() + " behind: " + e);
+            }
+        }
+        ghosts.clear();
     }
 
     // -- the two front ends ------------------------------------------------
@@ -271,10 +298,15 @@ public final class HarnessPlugin extends JavaPlugin {
                 return step(rest);
             case "leftclick":
                 return leftClick(rest);
+            case "strike":
+                return strike(rest);
+            case "execute":
+                return execute(rest);
             case "food":
                 return "ok " + player(rest.trim()).getFoodLevel();
             case "power":
                 return "ok " + (int) SuperNManager.get(player(rest.trim())).getPower();
+            case "spar":
             case "dummies":
                 return dummies();
             case "buttons":
@@ -287,6 +319,7 @@ public final class HarnessPlugin extends JavaPlugin {
                 return weather(rest);
             case "repairs":
                 return repairs();
+            case "hitspar":
             case "hitdummy":
                 return hitDummy(rest);
             case "tppoint":
@@ -334,6 +367,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return "ok " + player(rest).getFireTicks();
             case "health":
                 return "ok " + player(rest).getHealth();
+            case "effects":
+                return effects(rest.trim());
             case "stop":
                 Bukkit.getScheduler().runTask(this, Bukkit::shutdown);
                 return "ok stopping";
@@ -721,8 +756,24 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " night=" + (time < 0 || time > 12400);
     }
 
-    /** A world's difficulty, which is per world - and on peaceful, nothing can be hurt. */
-    private String difficulty(String rest) {
+    /**
+     * Everything a section could have left on a player: their health, their hunger, whether they
+     * are on fire, and every effect still running. Leaving a test is supposed to clear all of it,
+     * and none of it can be read back off a fake player any other way.
+     */
+    private String effects(String name) {
+        Player player = player(name);
+        List<String> running = new ArrayList<>();
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            running.add(effect.getType().getKey().getKey() + "x" + effect.getAmplifier()
+                    + "(" + effect.getDuration() + ")");
+        }
+        return "ok health=" + player.getHealth() + " food=" + player.getFoodLevel()
+                + " saturation=" + player.getSaturation() + " fire=" + player.getFireTicks()
+                + " effects=" + (running.isEmpty() ? "none" : String.join(" ", running));
+    }
+
+    /** A world's difficulty, which is per world - and on peaceful, nothing can be hurt. */    private String difficulty(String rest) {
         World world = Bukkit.getWorld(rest.trim());
         if (world == null) {
             return "err no such world: " + rest;
@@ -809,12 +860,24 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
-     * Left-clicks the air as a player would, which is how several races use an item - a vampire
-     * jumps and teleports with one, a werewolf calls a wolf and dashes with one, and a bowl is
-     * left-clicked to brew the wolfbane. A fake player has no mouse, so a scenario has to say so.
+     * Left-clicks as a player would, which is how several races use an item - a vampire jumps and
+     * teleports with one, a werewolf calls a wolf and dashes with one, and an angel leaps with a
+     * dandelion. A fake player has no mouse, so a scenario has to say so. Given coordinates the
+     * click lands on that block instead of the air, which is the half of the trick that only
+     * fires when a player is looking at something.
      */
     private String leftClick(String rest) {
-        Player player = player(rest.trim());
+        String[] args = rest.split("\\s+");
+        Player player = player(args[0]);
+        if (args.length >= 4) {
+            Block target = blockAt(rest);
+            aimAt(player, target);
+            PlayerInteractEvent event = new PlayerInteractEvent(player, Action.LEFT_CLICK_BLOCK,
+                    player.getInventory().getItemInMainHand(), target, BlockFace.UP);
+            Bukkit.getPluginManager().callEvent(event);
+            return "ok cancelled=" + event.isCancelled() + " block=" + target.getType()
+                    + " held=" + player.getInventory().getItemInMainHand().getType();
+        }
         PlayerInteractEvent event = new PlayerInteractEvent(player, Action.LEFT_CLICK_AIR,
                 player.getInventory().getItemInMainHand(), null, BlockFace.UP);
         Bukkit.getPluginManager().callEvent(event);
@@ -822,23 +885,62 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " held=" + player.getInventory().getItemInMainHand().getType();
     }
 
-    /** The hall's dummies, so a scenario can tell that every hall has one and where it is. */
+    /**
+     * Kills one player as another, the way a real fight would end.
+     *
+     * <p>A fake player cannot swing, and the prey a witch hunter section puts out are players
+     * rather than monsters - {@code slay} skips anything player-shaped by design. The last damage
+     * cause is set explicitly because that is what the plugin reads to decide who killed whom.
+     */
+    private String execute(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: execute <killer> <victim>";
+        }
+        Player killer = player(args[0]);
+        Player victim = player(args[1]);
+        EntityDamageByEntityEvent hit = new EntityDamageByEntityEvent(killer, victim,
+                DamageCause.ENTITY_ATTACK, 1000);
+        Bukkit.getPluginManager().callEvent(hit);
+        victim.setLastDamageCause(hit);
+        victim.setHealth(0);
+        return "ok " + killer.getName() + " killed " + victim.getName()
+                + " (" + SuperNManager.get(victim).getType() + ")";
+    }
+
+    /**
+     * Has one player attack another with whatever is in hand.
+     *
+     * <p>Every one of the plugin's spells fires on a player hitting a player - that is how a
+     * priest exorcises and how an angel purifies - and a fake player cannot swing, so the hit is
+     * raised here the same way the server would raise it.
+     */
+    private String strike(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: strike <attacker> <victim>";
+        }
+        Player attacker = player(args[0]);
+        Player victim = player(args[1]);
+        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(attacker, victim,
+                DamageCause.ENTITY_ATTACK, 1.0);
+        Bukkit.getPluginManager().callEvent(event);
+        return "ok cancelled=" + event.isCancelled() + " victim=" + victim.getName()
+                + " race=" + SuperNManager.get(victim).getType()
+                + " held=" + attacker.getInventory().getItemInMainHand().getType();
+    }
+
+    /** The hall's stand-in and the marks every damage section asks him to stand on. */
     private String dummies() {
         if (hall == null) {
             return "err no hall on this server";
         }
-        List<String> found = new ArrayList<>();
-        for (Map.Entry<String, org.bukkit.entity.ArmorStand> entry : hall.dummies().entrySet()) {
-            Location at = entry.getValue().getLocation();
-            Location anchor = hall.point("dummy." + entry.getKey());
-            found.add(entry.getKey() + "@" + at.getBlockX() + "," + at.getBlockY() + ","
-                    + at.getBlockZ() + " " + at.getWorld().getName()
-                    + " anchor=" + (anchor == null ? "none"
-                            : anchor.getBlockX() + "," + anchor.getBlockY() + "," + anchor.getBlockZ())
-                    + " drift=" + (anchor == null ? "?" : String.format(Locale.ROOT, "%.3f",
-                            at.distance(anchor))));
-        }
-        return "ok " + found.size() + " " + String.join(" | ", found);
+        Player spar = Bukkit.getPlayerExact("Sparring");
+        String where = spar == null ? "not up"
+                : spar.getWorld().getName() + "@" + spar.getLocation().getBlockX() + ","
+                        + spar.getLocation().getBlockY() + "," + spar.getLocation().getBlockZ()
+                        + " hp=" + spar.getHealth() + " race=" + SuperNManager.get(spar).getType();
+        return "ok spar=" + where + " marks=" + hall.sparMarks().size() + hall.sparReport();
     }
 
     /**
@@ -936,50 +1038,35 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
-     * Swings at the nearest dummy the way a player would, so a scenario can see what the hall
-     * reports and that the dummy survives it: the damage a real attack deals, the number that
-     * appears, and whether the stand moved or lost health.
+     * Swings at the stand-in the way a player would, so a scenario can see what the hall reports
+     * and that he loses health: the damage a real attack deals, the number that appears, and
+     * whether the stand-in went down and was refreshed.
      */
     private String hitDummy(String rest) {
         if (hall == null) {
             return "err no hall on this server";
         }
         Player player = player(rest.trim());
-        org.bukkit.entity.ArmorStand closest = null;
-        double best = Double.MAX_VALUE;
-        for (org.bukkit.entity.ArmorStand stand : hall.dummies().values()) {
-            // Halls live in four worlds, and a distance between two of them is not a distance.
-            if (!stand.getWorld().equals(player.getWorld())) {
-                continue;
-            }
-            double away = stand.getLocation().distanceSquared(player.getLocation());
-            if (away < best) {
-                best = away;
-                closest = stand;
-            }
+        Player spar = Bukkit.getPlayerExact("Sparring");
+        if (spar == null || !spar.getWorld().equals(player.getWorld())) {
+            return "err the stand-in is not up in this world";
         }
-        if (closest == null) {
-            return "err no dummy to hit";
-        }
-        Location before = closest.getLocation();
-        double health = closest.getHealth();
+        double before = spar.getHealth();
         ItemStack held = player.getInventory().getItemInMainHand();
         double swing = held.getType() == Material.AIR ? 1.0 : 7.0;
-        org.bukkit.event.entity.EntityDamageByEntityEvent event =
-                new org.bukkit.event.entity.EntityDamageByEntityEvent(player, closest,
-                        org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_ATTACK, swing);
+        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(player, spar,
+                DamageCause.ENTITY_ATTACK, swing);
         Bukkit.getPluginManager().callEvent(event);
-        int numbers = 0;
-        for (Entity nearby : closest.getNearbyEntities(3, 3, 3)) {
-            if (nearby instanceof org.bukkit.entity.ArmorStand stand
-                    && stand.isMarker() && stand.getCustomName() != null) {
-                numbers++;
-            }
+        // The event only decides; something has to move the health bar, and a scenario cannot
+        // click. This is the same arithmetic the server would have done. A hit the hall refused -
+        // one that would have finished him, which he answers by refreshing - leaves him as he is.
+        double applied = event.isCancelled() ? 0 : Math.max(0, event.getFinalDamage());
+        if (applied > 0) {
+            spar.setHealth((float) Math.max(0, spar.getHealth() - applied));
         }
         return "ok held=" + held.getType() + " cancelled=" + event.isCancelled()
-                + " damage=" + event.getDamage() + " moved=" + (before.distance(closest.getLocation()) > 0.01)
-                + " healthWas=" + health + " healthNow=" + closest.getHealth()
-                + " numbers=" + numbers;
+                + " damage=" + event.getDamage() + " healthWas=" + before
+                + " healthNow=" + spar.getHealth() + " race=" + SuperNManager.get(spar).getType();
     }
 
     /**

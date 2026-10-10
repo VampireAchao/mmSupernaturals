@@ -14,8 +14,10 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Biome;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Chicken;
+import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
@@ -42,13 +44,13 @@ import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntityTeleportEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.potion.PotionEffect;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
@@ -61,14 +63,15 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * The behaviour of the {@link Hall}: what its switches do, what its dummies answer, and the rules
+ * The behaviour of the {@link Hall}: what its switches do, what its stand-in answers, and the rules
  * that keep a test a test - the props cannot be walked off with, the halls cannot be mined, built
  * in, poured on or blown up, and nothing hostile gets to interrupt whoever is trying a race.
  *
- * <p><b>The dummy is the point of a damage section.</b> It is an armour stand that cannot move,
- * cannot be dressed or taken, cannot be destroyed and cannot be knocked about; hitting it prints
- * the damage on the spot, after every modifier the plugin applies, because the number a player
- * wants to see is the number they would really deal.
+ * <p><b>The stand-in is the point of a damage section.</b> He is a player with no client behind
+ * him: a real health bar, a real race, really able to be hit. Hitting him prints the damage on the
+ * spot, after every modifier the plugin applies, because the number a player wants to see is the
+ * number they would really deal - and he is put back to full rather than killed, so a section
+ * always has somebody to hit. An armour stand stood here before him and could do none of it.
  *
  * <p><b>Anything a section lets out is the hall's responsibility.</b> Every mob a switch calls up
  * is remembered, sent back to its own section if it wanders, stopped from teleporting away, and
@@ -91,11 +94,14 @@ final class HallGuard implements Listener {
     private static final String HALL_MOB = "mmhall";
 
     /**
-     * The one monster that is not called up, for the same reason {@link Hall} leaves it out of
-     * its own list: an ender dragon is a boss with a multi-part body, not a mob that can be
-     * asked whether it respects a truce.
+     * Monsters that are not called up at all.
+     *
+     * <p>This used to hold the ender dragon, for the same reason {@link Hall} left it out of its
+     * own list: a boss with a multi-part body is not a mob that can be asked whether it respects
+     * a truce. The truce list does name it, though, and the section is big enough to hold one, so
+     * it is summoned like everything else and the set is left empty rather than removed.
      */
-    private static final Set<String> UNROOMABLE = Set.of("ENDER_DRAGON");
+    private static final Set<String> UNROOMABLE = Set.of();
 
     /** How much a sword does before the plugin has its say. */
     private static final Map<Material, Double> BLADES = Map.of(
@@ -121,6 +127,12 @@ final class HallGuard implements Listener {
 
     /** The floating numbers, so a sweep does not mistake them for something that escaped. */
     private final Set<UUID> marks = new HashSet<>();
+
+    /** The names the hall's test prey answer to, in the order a section asks for them. */
+    private static final List<String> PREY_NAMES = List.of("HallPrey1", "HallPrey2", "HallPrey3");
+
+    /** The stand-ins the hall has brought up as prey, by name, so they can be taken back out. */
+    private final Map<String, Object> prey = new HashMap<>();
 
     HallGuard(HarnessPlugin plugin) {
         this.plugin = plugin;
@@ -171,9 +183,9 @@ final class HallGuard implements Listener {
                     "§a已离开测试大厅，踩返回垫的按钮可以回来");
             case ENTER_AREA -> enter(player, hall, trigger.race());
             case RESET_HUMAN -> {
-                if (restore(player)) {
-                    note(player, "§a已恢复人类，可以留在本区继续试");
-                }
+                restore(player);
+                resetVitals(player);
+                note(player, "§a已恢复人类，状态和血量也一并清好了，可以留在本区继续试");
             }
             case EXIT_TEST -> backToHuman(player, hall, hall.lobbySpawn(),
                     "§a已回到大厅，种族已恢复人类");
@@ -194,7 +206,10 @@ final class HallGuard implements Listener {
             case DIP_WATER -> teleport(player, hall.point("demon.pool"), "§9下池子了，等着淹死");
             case SPAWN_CHICKEN -> spawnChicken(player);
             case SPAWN_MONSTERS -> spawnMonsters(player, trigger.race());
-            case CLEAR_MONSTERS -> clearHallMobs(player, "§a已清空大厅里的怪物");
+            case CLEAR_MONSTERS -> {
+                clearHallMobs(player, "§a已清空大厅里的怪物");
+                clearPrey();
+            }
             case RESET_TELEPORT -> resetTeleport(player);
             case CLEAR_HUNGER -> {
                 player.setFoodLevel(0);
@@ -205,6 +220,8 @@ final class HallGuard implements Listener {
             case TEST_HIT -> testHit(player, trigger.detail());
             case TEST_SPELL -> testSpell(player, trigger.detail());
             case SPAR -> bringSpar(player);
+            case HURT -> hurt(player);
+            case SPAWN_NPCS -> spawnNpcs(player, trigger.detail());
             case SUN_SPOT -> teleport(player, hall.point(trigger.race() + ".sun"),
                     "§6站到露天台上：这一格头顶没有屋顶");
             case RETURN_START -> teleport(player, hall.point("spawn." + trigger.race()),
@@ -347,13 +364,47 @@ final class HallGuard implements Listener {
     /** Empties the props, takes the hall's monsters back, restores humanity and moves the player. */
     private void backToHuman(Player player, Hall hall, Location where, String what) {
         clearHallMobs(player, null);
+        clearPrey();
         player.getInventory().clear();
         restore(player);
+        resetVitals(player);
         if (where != null) {
             player.teleport(where);
             player.setRespawnLocation(where, true);
         }
         note(player, what);
+    }
+
+    /**
+     * Puts a player back the way they walked in: no effects, not on fire, health and hunger full.
+     *
+     * <p>Leaving a test used to keep whatever the test had done to them - poisoned by the truce
+     * section, half a health bar, no food, still burning - and that followed them into the next
+     * race, where it looked like the next race's fault.
+     */
+    private void resetVitals(Player player) {
+        for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+            player.removePotionEffect(effect.getType());
+        }
+        player.setFireTicks(0);
+        AttributeInstance max = player.getAttribute(Attribute.MAX_HEALTH);
+        player.setHealth(max == null ? 20 : max.getValue());
+        player.setFoodLevel(20);
+        player.setSaturation(20f);
+        player.setExhaustion(0f);
+        player.setFallDistance(0f);
+    }
+
+    /**
+     * Takes a bite out of the player, so a section about healing or regeneration has a wound to
+     * work on. Without it the only way to test a heal is to go and get hurt somewhere else, and
+     * a player at twenty health looks exactly like a heal that does not work.
+     */
+    private void hurt(Player player) {
+        AttributeInstance max = player.getAttribute(Attribute.MAX_HEALTH);
+        double full = max == null ? 20 : max.getValue();
+        player.setHealth(Math.max(1, full / 2));
+        note(player, "§c已把你打到半血，现在可以看回血了");
     }
 
     // -- what the hall lets out --------------------------------------------
@@ -422,8 +473,11 @@ final class HallGuard implements Listener {
 
     /**
      * Calls out every monster the plugin lists for this race - the ones it is supposed to be at
-     * peace with - so the truce can be watched instead of taken on faith. The few that cannot be
-     * kept in a room are named in the message rather than spawned.
+     * peace with - so the truce can be watched instead of taken on faith.
+     *
+     * <p>A dragon is the one that needs different treatment: it is sixteen blocks from nose to
+     * tail, so the ring the small monsters go on would bury it in a wall. It goes in the middle
+     * of the section, where there is room, and is left hovering rather than circling.
      */
     private void spawnMonsters(Player player, String race) {
         clearHallMobs(player, null);
@@ -441,6 +495,14 @@ final class HallGuard implements Listener {
                 refused.add(type.name());
                 continue;
             }
+            if (type == EntityType.ENDER_DRAGON) {
+                if (placeDragon(hall, race, centre)) {
+                    placed++;
+                } else {
+                    refused.add(type.name());
+                }
+                continue;
+            }
             double ring = 3 + (placed / 6) * 2;
             double angle = placed * 1.1;
             Location at = clamp(hall, race,
@@ -456,6 +518,21 @@ final class HallGuard implements Listener {
         }
         note(player, "§c召唤了 " + placed + " 只怪物"
                 + (refused.isEmpty() ? "" : "；室内放不下的：" + String.join("、", refused)));
+    }
+
+    /** A dragon, in the middle of the section with room to be a dragon in. */
+    private boolean placeDragon(Hall hall, String race, Location centre) {
+        Location at = clamp(hall, race, centre.clone()).add(0, 6, 0);
+        try {
+            EnderDragon dragon = centre.getWorld().spawn(at, EnderDragon.class);
+            dragon.setPhase(EnderDragon.Phase.HOVER);
+            dragon.setPersistent(true);
+            keepIn(hall, dragon, centre);
+            return true;
+        } catch (RuntimeException | LinkageError notPlaceable) {
+            plugin.getLogger().warning("could not summon the ender dragon: " + notPlaceable);
+            return false;
+        }
     }
 
     /** Keeps a spawn point inside its hall, however many neighbours are already standing there. */
@@ -509,9 +586,84 @@ final class HallGuard implements Listener {
                 entity.remove();
             }
         }
+        // Prey are deliberately *not* cleared here. Taking the hall's monsters back happens on
+        // every death, and a section's prey are players: clearing them from here meant killing one
+        // of the three a witch hunter section puts out took the other two with it.
         if (message != null && player != null) {
             note(player, message);
         }
+    }
+    // -- test prey ---------------------------------------------------------
+
+    /**
+     * Calls up one stand-in player per race named, as prey.
+     *
+     * <p>A witch hunter is made by killing three different kinds of supernatural, and a hall that
+     * only hands out an invitation skips the one rule worth watching. These are real players with
+     * no clients: they can be attacked and killed exactly like anybody else, and the plugin's own
+     * book-keeping does the rest - which is the point, because that book-keeping is the thing
+     * being tested.
+     */
+    private void spawnNpcs(Player player, String races) {
+        clearPrey();
+        if (races == null || races.isBlank()) {
+            return;
+        }
+        String[] wanted = races.split(",");
+        List<String> made = new ArrayList<>();
+        for (int index = 0; index < wanted.length && index < PREY_NAMES.size(); index++) {
+            String race = wanted[index].trim();
+            if (race.isEmpty()) {
+                continue;
+            }
+            String name = PREY_NAMES.get(index);
+            Object ghost = plugin.spawnGhost(name, player.getWorld());
+            Player npc = Bukkit.getPlayerExact(name);
+            if (ghost == null || npc == null) {
+                plugin.dropGhost(name);
+                continue;
+            }
+            prey.put(name, ghost);
+            SuperNManager.convert(SuperNManager.get(npc), race);
+            npc.teleport(spotFor(player));
+            npc.setHealth(npc.getAttribute(Attribute.MAX_HEALTH).getValue());
+            made.add(race);
+        }
+        note(player, made.isEmpty() ? "§c没能放出异族靶子"
+                : "§c放出了 " + made.size() + " 个异族：" + String.join("、", made)
+                        + "，用武器杀掉他们");
+    }
+
+    /** Takes every stand-in the hall brought up as prey back out again. */
+    private void clearPrey() {
+        for (String name : new ArrayList<>(prey.keySet())) {
+            clearPrey(name);
+        }
+    }
+
+    /** Takes one stand-in out, if he is still on the books. */
+    private void clearPrey(String name) {
+        if (prey.remove(name) != null) {
+            plugin.dropGhost(name);
+        }
+    }
+
+    /**
+     * Prey that has been killed is taken out of the world.
+     *
+     * <p>A player who dies stays dead until they respawn, and a fake client never presses the
+     * button - so without this the hall slowly fills with bodies that are still, technically,
+     * online. The kill itself has already been counted by the plugin by this point. He stays on
+     * the books until the moment he is actually taken out, so the death handler can still tell
+     * that this death was a section being used rather than a test ending.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPreyDeath(PlayerDeathEvent event) {
+        String name = event.getEntity().getName();
+        if (!prey.containsKey(name)) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskLater(plugin, () -> clearPrey(name), 20L);
     }
 
     /** Takes a shulker's bullet or a lingering effect with the entity that owned it. */
@@ -545,65 +697,57 @@ final class HallGuard implements Listener {
         }
     }
 
-    // -- the dummy ---------------------------------------------------------
+    // -- the stand-in ------------------------------------------------------
 
     /**
-     * Hitting a dummy reports what the hit did and then takes it back: the stand is a measuring
-     * instrument, so it is never damaged, never dies and never moves - including from the
-     * knockback the hit would have carried, which cancelling the event also removes.
+     * Hitting the stand-in reports what the hit did and keeps him standing.
+     *
+     * <p>The damage is no longer cancelled: a target that cannot lose health can show a number
+     * but cannot show what a section is really about - that the health bar moves, that a wolf in
+     * wolf form loses nothing, that a ghoul's immunity is a zero rather than a statement. What is
+     * still refused is his <em>death</em>: a hit that would finish him puts him back to full
+     * instead, so a damage section has a target for as long as it wants one.
      */
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onDummyHit(EntityDamageEvent event) {
-        ArmorStand dummy = dummyAt(event.getEntity());
-        if (dummy == null) {
+    public void onSparHit(EntityDamageEvent event) {
+        Player spar = sparAt(event.getEntity());
+        if (spar == null) {
             return;
         }
         double damage = Math.max(0, event.getFinalDamage());
-        // Cancel before anything else: an armour stand is destroyed by a single hit that gets
-        // through and drops itself on the floor, which is exactly what a damage section cannot
-        // afford. Reporting is done afterwards so a failure in the reporting cannot let the hit
-        // land.
-        event.setCancelled(true);
-        dummy.setVelocity(new Vector(0, 0, 0));
-        if (!dummy.isDead() && dummy.isValid()) {
-            AttributeInstance max = dummy.getAttribute(Attribute.MAX_HEALTH);
-            if (max != null && dummy.getHealth() < max.getValue()) {
-                dummy.setHealth(max.getValue());
-            }
-        }
         if (event instanceof EntityDamageByEntityEvent byEntity) {
             try {
-                showDamage(dummy, byEntity, damage);
+                showDamage(spar, byEntity, damage);
             } catch (RuntimeException ignored) {
-                // The number is a nicety; the stand surviving is the test.
+                // The number is a nicety; the stand-in staying up is the test.
+            }
+        }
+        spar.setVelocity(new Vector(0, 0, 0));
+        if (event.getFinalDamage() >= spar.getHealth()) {
+            event.setCancelled(true);
+            spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
+            if (event instanceof EntityDamageByEntityEvent byEntity
+                    && byEntity.getDamager() instanceof Player hitter) {
+                hitter.sendMessage("§7陪练被打空了，已经刷新到满血");
             }
         }
     }
 
-    /**
-     * Last line of defence for a dummy. If one is destroyed anyway - a rule the guard does not
-     * know about, an explosion that arrives before the cancel - the remains are cleared off the
-     * floor and a fresh one is put straight back on the mark.
-     */
+    /** If the stand-in does die anyway, he goes without dropping a player's worth of loot. */
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onDummyDeath(EntityDeathEvent event) {
-        ArmorStand dummy = dummyAt(event.getEntity());
-        if (dummy == null) {
-            return;
+    public void onSparDeath(EntityDeathEvent event) {
+        if (sparAt(event.getEntity()) != null) {
+            event.getDrops().clear();
+            event.setDroppedExp(0);
         }
-        event.getDrops().clear();
-        event.setDroppedExp(0);
     }
 
-    private ArmorStand dummyAt(Entity entity) {
-        Hall hall = plugin.hallOrNull();
-        if (hall == null || !(entity instanceof ArmorStand stand)) {
-            return null;
-        }
-        return hall.dummies().containsValue(stand) ? stand : null;
+    /** Whether an entity is the hall's stand-in. */
+    private static Player sparAt(Entity entity) {
+        return entity instanceof Player player && SPAR.equals(player.getName()) ? player : null;
     }
 
-    private void showDamage(ArmorStand dummy, EntityDamageByEntityEvent event, double damage) {
+    private void showDamage(Entity target, EntityDamageByEntityEvent event, double damage) {
         String weapon = "徒手";
         if (event.getDamager() instanceof LivingEntity attacker
                 && attacker.getEquipment() != null) {
@@ -612,9 +756,9 @@ final class HallGuard implements Listener {
                 weapon = item.getType().name();
             }
         }
-        floatNumber(dummy.getLocation().add(0, 1.4, 0), damage);
+        floatNumber(target.getLocation().add(0, 1.4, 0), damage);
         if (event.getDamager() instanceof Player hitter) {
-            hitter.sendMessage("§7" + weapon + " → §f" + trim(damage) + " §7点伤害");
+            note(hitter, "§7" + weapon + " → §f" + trim(damage) + " §7点伤害");
         }
     }
 
@@ -644,59 +788,128 @@ final class HallGuard implements Listener {
                 : String.format(Locale.ROOT, "%.1f", damage);
     }
 
-    /** A dummy cannot be dressed, undressed or carried: the section is about hitting it. */
-    @EventHandler
-    public void onDummyManipulate(PlayerArmorStandManipulateEvent event) {
-        if (dummyAt(event.getRightClicked()) != null) {
-            event.setCancelled(true);
-        }
-    }
-
     // -- the stand-in ------------------------------------------------------
 
     /**
-     * Puts the stand-in in front of the player, where it can be seen and aimed at. It only
-     * exists while a section needs it, and it is left standing (not removed the moment the hit
-     * lands) because half of these tests are "watch what happens to him".
+     * Puts the stand-in in front of the player, where he can be seen and aimed at, and has him
+     * take one swing.
+     *
+     * <p>The swing is the part that was missing: a target that never hits back tests nothing
+     * about a fight, and half these sections are "let him hit you first, then watch". He swings
+     * once and then stops, because a stand-in that keeps swinging is a fight, not a test.
      */
     private void bringSpar(Player player) {
         Player spar = sparring(player);
         if (spar == null) {
             return;
         }
-        spar.teleport(spotInFrontOf(player));
+        SuperNPlayer asPlayer = SuperNManager.get(spar);
+        if (!asPlayer.isHuman()) {
+            // A section that converted him - a priest's spell bench, the angel's cure step -
+            // leaves him something other than a person; the stand-in is meant to be one.
+            SuperNManager.cure(asPlayer);
+        }
+        spar.teleport(spotFor(player));
         spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
-        note(player, "§f陪练就位（他叫 " + SPAR + "）");
+        note(player, "§f陪练就位（他叫 " + SPAR + "），他会砍你一下");
+        Bukkit.getScheduler().runTaskLater(plugin, () -> swingOnce(spar, player), 20L);
     }
 
-    /** The stand-in, created if it is not up yet. Null when the server would not have it. */
+    /**
+     * One real swing from the stand-in, and then he stops.
+     *
+     * <p>A stand-in that never hits back is a target, not an opponent, and half of these sections
+     * are "let him hit you first, then watch". One swing is the whole test; a stand-in that keeps
+     * swinging is a fight.
+     */
+    private void swingOnce(Player spar, Player player) {
+        if (!spar.isValid() || !player.isValid() || !spar.isOnline()) {
+            return;
+        }
+        spar.teleport(spotFor(player));
+        spar.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
+        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(spar, player,
+                EntityDamageEvent.DamageCause.ENTITY_ATTACK,
+                BLADES.getOrDefault(Material.IRON_SWORD, 1.0));
+        Bukkit.getPluginManager().callEvent(event);
+        double lost = event.isCancelled() ? 0 : Math.max(0, event.getFinalDamage());
+        if (lost > 0) {
+            player.setHealth(Math.max(1, player.getHealth() - lost));
+        }
+        floatNumber(player.getLocation().add(0, 1.8, 0), lost);
+        note(player, "§7陪练的剑落在你身上：§f" + trim(lost) + " §7点伤害（他只砍这一下）"
+                + (lost <= 0 ? " §a（免疫）" : ""));
+        spar.getInventory().setItemInMainHand(null);
+    }
+
+    /**
+     * The stand-in for the world the player is in, brought up if he is not there already.
+     *
+     * <p>One per world, deliberately. The server leaves a player with no client invulnerable
+     * after it moves them between worlds - it is waiting for a client to acknowledge a dimension
+     * change that never comes - and an invulnerable stand-in is no stand-in at all. Being brought
+     * up inside the world he is needed in avoids the move entirely.
+     */
     private Player sparring(Player player) {
+        World world = player.getWorld();
         Player spar = Bukkit.getPlayerExact(SPAR);
-        if (spar != null) {
+        if (spar != null && spar.getWorld().equals(world)) {
             return spar;
         }
-        Object ghost = plugin.spawnGhost(SPAR);
-        if (ghost == null) {
-            note(player, "§c陪练起不来，这个环节暂时不能用");
-            return null;
+        if (spar != null) {
+            plugin.dropGhost(SPAR);
         }
+        Object ghost = plugin.spawnGhost(SPAR, world);
         spar = Bukkit.getPlayerExact(SPAR);
         if (spar == null) {
-            plugin.dropGhost(ghost);
+            if (ghost != null) {
+                plugin.dropGhost(SPAR);
+            }
             note(player, "§c陪练起不来，这个环节暂时不能用");
+            return null;
         }
         return spar;
     }
 
-    /** Two blocks in front of the player, so the stand-in is plainly in view. */
-    private Location spotInFrontOf(Player player) {
+    /**
+     * A place in front of the player that a person can actually stand in.
+     *
+     * <p>Two blocks along the player's facing was all this used to do, which put the stand-in
+     * inside the wall whenever the player happened to be looking at one - and a stand-in inside a
+     * wall is one nobody can see or hit. Nearer spots are tried next, then the player's own feet,
+     * then the four sides.
+     */
+    private Location spotFor(Player player) {
         Location at = player.getLocation();
         Vector facing = at.getDirection().setY(0);
         if (facing.lengthSquared() < 0.01) {
             facing = new Vector(0, 0, 1);
         }
-        facing.normalize().multiply(2);
-        return at.clone().add(facing);
+        facing.normalize();
+        for (int distance = 2; distance >= 1; distance--) {
+            Location candidate = at.clone().add(facing.clone().multiply(distance));
+            if (canStand(candidate)) {
+                return candidate;
+            }
+        }
+        if (canStand(at)) {
+            return at;
+        }
+        for (BlockFace side : new BlockFace[] {BlockFace.EAST, BlockFace.WEST,
+                BlockFace.NORTH, BlockFace.SOUTH}) {
+            Location candidate = at.clone().add(side.getModX(), 0, side.getModZ());
+            if (canStand(candidate)) {
+                return candidate;
+            }
+        }
+        return at;
+    }
+
+    /** Somewhere with two blocks of air and something solid underneath. */
+    private static boolean canStand(Location at) {
+        return at.getBlock().isPassable()
+                && at.clone().add(0, 1, 0).getBlock().isPassable()
+                && !at.clone().add(0, -1, 0).getBlock().isPassable();
     }
 
     /**
@@ -718,7 +931,7 @@ final class HallGuard implements Listener {
         if (spar == null) {
             return;
         }
-        spar.teleport(spotInFrontOf(player));
+        spar.teleport(spotFor(player));
         spar.getInventory().setItemInMainHand(new ItemStack(weapon));
         spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
 
@@ -759,7 +972,7 @@ final class HallGuard implements Listener {
         if (spar == null) {
             return;
         }
-        spar.teleport(spotInFrontOf(player));
+        spar.teleport(spotFor(player));
         spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
         boolean guardianAngel = item.name().equalsIgnoreCase(SNConfigHandler.priestSpellGuardianAngel);
         boolean humanOnly = Material.PAPER.equals(item) || guardianAngel;
@@ -794,6 +1007,11 @@ final class HallGuard implements Listener {
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
+        if (prey.containsKey(event.getEntity().getName())) {
+            // The hall's own prey dying is a section being used, not a test ending: nothing about
+            // races or truces applies to them, and the section cleans them up itself.
+            return;
+        }
         Entity killer = damageSource(event.getEntity());
         if (killer != null && hallMobs.containsKey(killer.getUniqueId())) {
             killer.remove();
@@ -956,8 +1174,8 @@ final class HallGuard implements Listener {
     }
 
     /**
-     * The backstop, twice a second: the hall's own furniture goes back, every dummy goes back to
-     * where it was put, and everything a section let out goes back to its own section.
+     * The backstop, twice a second: the hall's own furniture goes back, and everything a section
+     * let out goes back to its own section.
      */
     void tick() {
         Hall hall = plugin.hallOrNull();
@@ -966,8 +1184,7 @@ final class HallGuard implements Listener {
         }
         List<String> before = hall.wrongFixtures();
         if (hall.repair()) {
-            plugin.getLogger().info("put the hall's switches back: " + before
-                    + " dummies=" + hall.dummyReport());
+            plugin.getLogger().info("put the hall's switches back: " + before);
         }
         for (Map.Entry<UUID, Location> entry : new HashMap<>(hallMobs).entrySet()) {
             Entity entity = hallEntities.get(entry.getKey());
@@ -984,15 +1201,6 @@ final class HallGuard implements Listener {
             }
             if (entity != null && entity.getLocation().distanceSquared(entry.getValue()) > 400) {
                 entity.teleport(entry.getValue());
-            }
-        }
-        for (Map.Entry<String, ArmorStand> entry : new HashMap<>(hall.dummies()).entrySet()) {
-            // A dummy that was destroyed anyway - an armour stand drops itself when a hit gets
-            // through - is replaced on its own mark, so a damage section never runs out of one.
-            ArmorStand stand = entry.getValue();
-            Location anchor = hall.point("dummy." + entry.getKey());
-            if (anchor != null && (stand.isDead() || !stand.isValid())) {
-                hall.replaceDummy(entry.getKey(), anchor);
             }
         }
         for (UUID id : new ArrayList<>(marks)) {
