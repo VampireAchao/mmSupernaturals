@@ -330,7 +330,8 @@ public class PriestManager extends HumanManager {
 					event.setCancelled(cancelled);
 				}
 				return;
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.priestSpellGuardianAngel)) {
+			} else if (SNConfigHandler.isItem(itemMaterial,
+					SNConfigHandler.priestSpellGuardianAngel)) {
 				if (SNConfigHandler.debugMode) {
 					SupernaturalsPlugin.log(snplayer.getName()
 							+ " is attempting to cast guardian angel...");
