@@ -14,6 +14,7 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.block.Chest;
 import org.bukkit.block.Sign;
 import org.bukkit.block.data.Directional;
+import org.bukkit.block.data.type.Door;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
@@ -276,6 +277,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return interact(rest);
             case "block":
                 return "ok " + blockAt(rest).getType();
+            case "door":
+                return doorAt(rest);
             case "hall":
                 return hall();
             case "surface":
@@ -292,6 +295,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return facing(rest);
             case "where":
                 return where(rest);
+            case "near":
+                return near(rest);
             case "mine":
                 return mine(rest);
             case "step":
@@ -519,6 +524,28 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok " + total;
     }
 
+    /**
+     * A block that is supposed to be a door, read back the way anything that opens one has to:
+     * which half each of the three cells claims to be, and whether each is open. A fixture whose
+     * two blocks are both the bottom half looks like a door from the outside and is not one, and
+     * a click on the upper block then moves only that one.
+     */
+    private String doorAt(String rest) {
+        Block block = blockAt(rest);
+        StringBuilder out = new StringBuilder();
+        for (int offset = -1; offset <= 1; offset++) {
+            Block at = block.getRelative(0, offset, 0);
+            String detail = " half=- hinge=- open=-";
+            if (at.getBlockData() instanceof Door door) {
+                detail = " half=" + door.getHalf()
+                        + " hinge=" + door.getHinge()
+                        + " open=" + door.isOpen();
+            }
+            out.append(' ').append(at.getY()).append(':').append(at.getType()).append(detail).append(';');
+        }
+        return "ok" + out;
+    }
+
     private Block blockAt(String rest) {
         String[] args = rest.split("\\s+");
         if (args.length < 4) {
@@ -650,6 +677,29 @@ public final class HarnessPlugin extends JavaPlugin {
     private String where(String rest) {
         Location at = player(rest).getLocation();
         return "ok " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ();
+    }
+
+    /**
+     * What is standing near a player, where, and how much health it has left.
+     *
+     * <p>A world's mob counts say nothing about the one a section just conjured - a flat world
+     * spawns its own - and "did it suffocate" is a question about one entity's health, so the
+     * answer has to name the entity.
+     */
+    private String near(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = player(args[0]);
+        double radius = args.length > 1 ? Double.parseDouble(args[1]) : 8;
+        List<String> found = new ArrayList<>();
+        for (Entity entity : player.getNearbyEntities(radius, radius, radius)) {
+            if (!(entity instanceof LivingEntity living) || living instanceof Player) {
+                continue;
+            }
+            found.add(living.getType() + "@" + String.format(Locale.ROOT, "%.1f,%.1f,%.1f",
+                    living.getLocation().getX(), living.getLocation().getY(),
+                    living.getLocation().getZ()) + " hp=" + living.getHealth());
+        }
+        return "ok " + found.size() + ": " + String.join(" | ", found);
     }
 
     /** Breaks a block as a player would, and reports whether anything stopped it. */

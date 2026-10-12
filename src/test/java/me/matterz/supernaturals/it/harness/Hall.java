@@ -15,6 +15,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Chest;
 import org.bukkit.block.Sign;
+import org.bukkit.block.data.Bisected;
 import org.bukkit.block.data.Directional;
 import org.bukkit.block.data.type.Door;
 import org.bukkit.entity.ArmorStand;
@@ -801,7 +802,17 @@ public final class Hall {
                 }, "验证恶魔的两个主世界能力：火球与蜘蛛网束缚",
                         "红石左键射出火球；墨囊左键在目标处生成蜘蛛网并在到期后自己清掉",
                         "拿箱子里的红石左键一次", "拿墨囊对着地面左键一次，看蜘蛛网"));
-                sections.add(section("§b② 溺死 恢复人类", 2, (w, y, x, z, width) -> {
+                sections.add(section("§4② 下界 岩浆转化", 2, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.NETHERRACK, 8)));
+                    switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.GO_NETHER, "demon"),
+                            "§4进入下界大厅", "§7穿着皮革死在里面");
+                    powerButton(w, y, x + 8, z, "demon");
+                }, "验证恶魔必须死在下界的火里才能转化",
+                        "按钮直接把你送进下界的那条长廊，那里有整套皮革和岩浆池",
+                        "点「进入下界大厅」",
+                        "在那边穿上整套皮革，再跳进岩浆（死后即转化）"));
+                sections.add(section("§b③ 溺死 恢复人类", 2, (w, y, x, z, width) -> {
                     // The pool is sunk into the floor and has a bottom of its own. The first
                     // version was a raised basin three blocks high, which nobody could get into;
                     // the version before that was dug one block below the room's own floor,
@@ -822,16 +833,6 @@ public final class Hall {
                         "背包里带够 30 个雪球时溺死才会变成人类；水池是走进去的，不会掉出世界",
                         "先从箱子里拿走至少 30 个雪球",
                         "点「查看生物群系」确认是寒冷群系，再点「跳进水里」等着淹死"));
-                sections.add(section("§4③ 下界 岩浆转化", 2, (w, y, x, z, width) -> {
-                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                            new ItemStack(Material.NETHERRACK, 8)));
-                    switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.GO_NETHER, "demon"),
-                            "§4进入下界大厅", "§7穿着皮革死在里面");
-                    powerButton(w, y, x + 8, z, "demon");
-                }, "验证恶魔必须死在下界的火里才能转化",
-                        "按钮直接把你送进下界的那条长廊，那里有整套皮革和岩浆池",
-                        "点「进入下界大厅」",
-                        "在那边穿上整套皮革，再跳进岩浆（死后即转化）"));
             }
             case "priest" -> {
                 sections.add(section("§f① 入教 教会祭坛", 1, (w, y, x, z, width) -> {
@@ -1004,8 +1005,9 @@ public final class Hall {
                             new ItemStack(Material.DIAMOND_CHESTPLATE, 1)));
                     powerButton(w, y, x + 6, z, "angel");
                 }, "验证天使的召唤能力与护甲限制",
-                        "生牛肉 / 骨头 / 猪肉对方块左键分别召出牛 / 驯服的狼 / 猪（各耗 5000）；金与钻石护甲会被脱掉",
-                        "拿箱子里的三种肉，对着地面对应左键一次",
+                        "生牛肉 / 骨头 / 猪肉左键（空挥或点方块都行）分别召出牛 / 驯服的狼 / 猪（各耗 5000）；金与钻石护甲会被脱掉",
+                        "拿箱子里的三种肉，对着地面或空中左键一次：点方块落在你指的位置，空挥落在你身前",
+                        "等十几秒再看一眼，召唤物必须还活着（以前会生成在方块里憋死）",
                         "再穿一次金胸甲和钻石胸甲，看它们是不是被立刻脱下来"));
                 sections.add(section("§e④ 净化 用纸", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
@@ -1524,18 +1526,33 @@ public final class Hall {
         signBoard(target, x, y + 2, z - 1, BlockFace.SOUTH, wrapAll(lines));
     }
 
+    /**
+     * A door, as two blocks rather than as two blocks that happen to be made of door.
+     *
+     * <p>A door is one structure: the lower block carries {@code half=lower} and the upper one
+     * {@code half=upper}, and everything that reads a door - vanilla, and the plugin under test -
+     * trusts that. Placing two blocks with {@code setType(IRON_DOOR)} leaves both of them at the
+     * material's default, which is the bottom half, so the upper block was a bottom half standing
+     * on the lower one. A click on it still opened a panel, but the "other half" the plugin
+     * looked for was the air above it, and only one of the two moved.
+     *
+     * <p>Deliberately not registered in {@link #fixtures}: a {@link Fixture} remembers a
+     * material, a facing and a sign's lines, and nothing about which half a block is, so the
+     * repair pass would rebuild the door from the default state and undo exactly this fix.
+     */
     private void door(World target, int x, int y, int z) {
-        set(target, Material.IRON_DOOR, x, y, z);
-        set(target, Material.IRON_DOOR, x, y + 1, z);
-        Block lower = target.getBlockAt(x, y, z);
-        if (lower.getBlockData() instanceof Door data) {
+        doorHalf(target.getBlockAt(x, y, z), Bisected.Half.BOTTOM);
+        doorHalf(target.getBlockAt(x, y + 1, z), Bisected.Half.TOP);
+    }
+
+    private static void doorHalf(Block block, Bisected.Half half) {
+        block.setType(Material.IRON_DOOR, false);
+        if (block.getBlockData() instanceof Door data) {
             data.setFacing(BlockFace.NORTH);
-            lower.setBlockData(data, false);
-            Block upper = target.getBlockAt(x, y + 1, z);
-            if (upper.getBlockData() instanceof Door top) {
-                top.setFacing(BlockFace.NORTH);
-                upper.setBlockData(top, false);
-            }
+            data.setHinge(Door.Hinge.LEFT);
+            data.setHalf(half);
+            data.setOpen(false);
+            block.setBlockData(data, false);
         }
     }
 
