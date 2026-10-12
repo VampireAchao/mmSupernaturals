@@ -234,11 +234,7 @@ final class HallGuard implements Listener {
         if (before != GameMode.CREATIVE) {
             attacker.setGameMode(GameMode.CREATIVE);
         }
-        double health = victim.getHealth();
         victim.damage(damage, attacker);
-        if (victim.getHealth() >= health && !victim.isDead()) {
-            victim.setHealth(Math.max(0, health - damage));
-        }
         if (attacker.getGameMode() != before) {
             attacker.setGameMode(before);
         }
