@@ -741,7 +741,7 @@ public final class HarnessPlugin extends JavaPlugin {
      */
     private String hurt(String rest) {
         String[] args = rest.trim().split("\\s+");
-        if (args.length < 3) {
+        if (args.length < 2) {
             return "err usage: hurt <name> <cause> [amount]";
         }
         Player player = player(args[0]);
