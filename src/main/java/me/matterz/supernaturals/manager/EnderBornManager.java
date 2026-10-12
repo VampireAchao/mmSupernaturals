@@ -150,7 +150,7 @@ public class EnderBornManager extends ClassManager {
 
 		int left = DEATHS_UNTIL_HUMAN - deaths;
 		SuperNManager.sendMessage(snplayer, "You have " + left
-				+ (left == 1 ? " death" : " deaths") + " untill you are reborn as human.");
+				+ (left == 1 ? " death" : " deaths") + " until you are reborn as human.");
 	}
 
 	/** How many times this enderborn has died, without the reading changing the answer. */
