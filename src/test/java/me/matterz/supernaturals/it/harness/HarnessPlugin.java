@@ -291,6 +291,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return chestUse(rest);
             case "sign":
                 return signLine(rest);
+            case "signage":
+                return signage();
             case "facing":
                 return facing(rest);
             case "where":
@@ -384,14 +386,26 @@ public final class HarnessPlugin extends JavaPlugin {
 
     // -- requests ----------------------------------------------------------
 
-    private String spawn(String name) {
+    private String spawn(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        String name = args.length == 0 ? "" : args[0];
         if (name.isEmpty()) {
-            return "err usage: spawn <name>";
+            return "err usage: spawn <name> [world]";
         }
         if (Bukkit.getPlayerExact(name) != null) {
             return "err " + name + " is already online";
         }
-        actors.put(name, Nms.spawn(name));
+        World where = null;
+        if (args.length > 1) {
+            where = Bukkit.getWorld(args[1]);
+            if (where == null) {
+                return "err no such world: " + args[1];
+            }
+        }
+        // The world matters: the server keeps a clientless player invulnerable everywhere except
+        // the world it joined in, so a stand-in that has to be hurt by a monster - rather than
+        // only have one swing at it - has to join where that monster lives.
+        actors.put(name, where == null ? Nms.spawn(name) : Nms.spawn(name, where));
 
         Player player = Bukkit.getPlayerExact(name);
         if (player == null) {
@@ -544,6 +558,21 @@ public final class HarnessPlugin extends JavaPlugin {
             out.append(' ').append(at.getY()).append(':').append(at.getType()).append(detail).append(';');
         }
         return "ok" + out;
+    }
+
+    /**
+     * Whether every section's teaching fitted on the wall.
+     *
+     * <p>A board that did not fit is dropped and a board two sections both wanted is written
+     * twice; both leave a person reading a wall that is missing something, and neither shows up
+     * by looking at one sign at a time. Zero and zero means the halls have room to say what they
+     * say.
+     */
+    private String signage() {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        return "ok dropped=" + hall.boardsDropped() + " collisions=" + hall.signCollisions();
     }
 
     private Block blockAt(String rest) {

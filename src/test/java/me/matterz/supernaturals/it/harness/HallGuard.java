@@ -21,9 +21,9 @@ import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.PigZombie;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Wolf;
-import org.bukkit.entity.Zombie;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -214,7 +214,8 @@ final class HallGuard implements Listener {
             }
             case CLIMB -> teleport(player, hall.point("angel.ledge"), "§b上到高台了，走进中间的洞跳下去");
             case DIP -> teleport(player, hall.netherLava(), "§c下池子了");
-            case DIP_WATER -> teleport(player, hall.point("demon.pool"), "§9下池子了，等着淹死");
+            case DIP_WATER -> teleport(player, hall.point(trigger.race() + ".pool"),
+                    "§9下池子了，站着别动");
             case SPAWN_CHICKEN -> spawnChicken(player);
             case SPAWN_MONSTERS -> spawnMonsters(player, trigger.race());
             case CLEAR_MONSTERS -> {
@@ -232,15 +233,17 @@ final class HallGuard implements Listener {
             case TEST_SPELL -> testSpell(player, trigger.detail());
             case SPAR -> bringSpar(player);
             case HURT -> hurt(player);
+            case SELF_KILL -> selfKill(player);
             case SPAWN_NPCS -> spawnNpcs(player, trigger.detail());
             case SUN_SPOT -> teleport(player, hall.point(trigger.race() + ".sun"),
                     "§6站到露天台上：这一格头顶没有屋顶");
             case RETURN_START -> teleport(player, hall.point("spawn." + trigger.race()),
                     "§a回到这一族的入口");
-            case GO_NETHER -> teleport(player, hall.point("spawn.demon_nether"),
-                    "§4这里是下界，穿好皮革再下去");
-            case RETURN_OVERWORLD -> teleport(player, hall.point("spawn.demon"),
-                    "§a回到主世界的恶魔大厅");
+            case GO_NETHER -> teleport(player,
+                    hall.point("spawn." + trigger.race() + "_nether"),
+                    "§4这里是下界：在这里死才算数");
+            case RETURN_OVERWORLD -> teleport(player, hall.point("spawn." + trigger.race()),
+                    "§a回到主世界的那条长廊");
             case LEFT_CLICK -> leftClick(player);
             case BOUNTY -> bounty(player);
         }
@@ -419,24 +422,79 @@ final class HallGuard implements Listener {
         note(player, "§c已把你打到半血，现在可以看回血了");
     }
 
+    /**
+     * Ends the player's life, for a step about what dying does - of which there are now several,
+     * and one of them has to be done five times over. A fake client cannot be relied on to lose a
+     * fight it is not having, and no killer is invented here: the death is handed to the plugin
+     * as what it is, a death with nobody's name on it.
+     */
+    private void selfKill(Player player) {
+        player.setHealth(0);
+        note(player, "§7你已经死了一次，回到出生点后可以继续");
+    }
+
     // -- what the hall lets out --------------------------------------------
 
     /**
-     * The ghoul's way in is dying, and the plugin rolls dice for it in the wild. Here the hall
-     * supplies the killer itself, so the kill is certain to be the last one this human takes.
+     * The wolves a werewolf is supposed to be at peace with.
+     *
+     * <p>A wolf that is not provoked leaves everybody alone, so a pen of calm wolves would prove
+     * nothing. These are angry and pointed at the player: the only reason they will not arrive is
+     * the truce itself, which is the thing the section is asking about. The plugin's truce is a
+     * switch rather than a list, so there is no config list to read here.
+     */
+    private void spawnAngryWolves(Player player) {
+        Hall hall = plugin.hallOrNull();
+        List<Wolf> wolves = new ArrayList<>();
+        for (int index = 0; index < 3; index++) {
+            double angle = index * 2.1;
+            Location at = player.getLocation().clone()
+                    .add(Math.cos(angle) * 4, 0, Math.sin(angle) * 4);
+            try {
+                Wolf wolf = player.getWorld().spawn(at, Wolf.class, spawned -> {
+                    spawned.setAngry(true);
+                    spawned.setPersistent(true);
+                    spawned.setRemoveWhenFarAway(false);
+                    // A target is supplied on purpose. A wild wolf's anger lives in its own anger
+                    // target rather than in the target every monster is asked about, so a wolf
+                    // left to make up its own mind simply stands there - and the section would
+                    // then report "the truce works" without ever having put it to the test.
+                    // With the target set, the wolf really comes, and what stops it is the
+                    // plugin's refusal of its damage.
+                    spawned.setTarget(player);
+                });
+                keepIn(hall, wolf, player.getLocation());
+                wolves.add(wolf);
+            } catch (RuntimeException notPlaceable) {
+                // nowhere to stand; the count below says so
+            }
+        }
+        note(player, "§c放出了 " + wolves.size() + " 只愤怒的野狼"
+                + "——它们会真的扑上来，咬不咬得动才是这一节要看的");
+    }
+
+    /**
+     * The ghoul's way in, which is narrower than it looks: the plugin converts a corpse only when
+     * a Zombie Pigman did the killing <em>and</em> the death happened in the nether. A plain
+     * zombie, or the same pigman anywhere else, produces nothing at all - so this button belongs
+     * to the nether cell, and what it lets out is a pigman.
      */
     private void prepareGhoul(Player player, Hall hall) {
         clearHallMobs(player, null);
         Location at = player.getLocation().add(1.5, 0, 1.5);
-        Zombie zombie = player.getWorld().spawn(at, Zombie.class, spawned -> {
-            spawned.setCustomName("大厅食尸鬼");
+        PigZombie pigman = player.getWorld().spawn(at, PigZombie.class, spawned -> {
+            spawned.setCustomName("大厅僵尸猪人");
             spawned.setCustomNameVisible(true);
             spawned.setRemoveWhenFarAway(false);
             spawned.setPersistent(true);
+            // A zombified piglin is neutral until it is wronged, and no fake client can hit one -
+            // so the hall does the wronging itself, or the pigman would stand there all day
+            // without ever qualifying as anybody's killer.
             spawned.setTarget(player);
+            spawned.setAngry(true);
         });
-        keepIn(hall, zombie, player.getLocation());
-        note(player, "§2僵尸出现了，站着别动");
+        keepIn(hall, pigman, player.getLocation());
+        note(player, "§2僵尸猪人出现了，站着别动");
     }
 
     /**
@@ -493,6 +551,10 @@ final class HallGuard implements Listener {
      */
     private void spawnMonsters(Player player, String race) {
         clearHallMobs(player, null);
+        if ("werewolf".equals(race)) {
+            spawnAngryWolves(player);
+            return;
+        }
         List<EntityType> wanted = new ArrayList<>(
                 "ghoul".equals(race) ? SNConfigHandler.ghoulTruce : SNConfigHandler.vampireTruce);
         Hall hall = plugin.hallOrNull();
@@ -624,7 +686,11 @@ final class HallGuard implements Listener {
         String[] wanted = races.split(",");
         List<String> made = new ArrayList<>();
         for (int index = 0; index < wanted.length && index < PREY_NAMES.size(); index++) {
-            String race = wanted[index].trim();
+            // "vampire" is one; "vampire:NETHERRACK" is one holding netherrack, which is what a
+            // spell that needs both sides to be holding something asks for.
+            String[] spec = wanted[index].trim().split(":", 2);
+            String race = spec[0].trim();
+            Material hand = spec.length > 1 ? Material.matchMaterial(spec[1].trim()) : null;
             if (race.isEmpty()) {
                 continue;
             }
@@ -639,7 +705,8 @@ final class HallGuard implements Listener {
             SuperNManager.convert(SuperNManager.get(npc), race);
             npc.teleport(spotFor(player));
             npc.setHealth(npc.getAttribute(Attribute.MAX_HEALTH).getValue());
-            made.add(race);
+            npc.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
+            made.add(hand == null ? race : race + "(" + hand.name() + ")");
         }
         note(player, made.isEmpty() ? "§c没能放出异族靶子"
                 : "§c放出了 " + made.size() + " 个异族：" + String.join("、", made)
@@ -1147,13 +1214,12 @@ final class HallGuard implements Listener {
         }
         Entity killer = damageSource(event.getEntity());
         if (killer != null && hallMobs.containsKey(killer.getUniqueId())) {
+            // The monster that did the killing is spent. What the death is worth is the plugin's
+            // call, and only the plugin's: this used to hand out a ghoul for any hall monster's
+            // kill, which made two things look true that are not - that a plain zombie can turn
+            // somebody, and that the werewolf hall's wolf cannot do worse than it does.
             killer.remove();
             hallMobs.remove(killer.getUniqueId());
-            SuperNPlayer snplayer = SuperNManager.get(event.getEntity());
-            if (snplayer.isHuman()) {
-                SuperNManager.sendMessage(snplayer, "Your body dies... You feel a deep hatred for the living.");
-                SuperNManager.convert(snplayer, "ghoul", SNConfigHandler.ghoulPowerStart);
-            }
         }
         // A test that ended in death ends with the section cleaned up behind it.
         clearHallMobs(event.getEntity(), null);
