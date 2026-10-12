@@ -217,6 +217,7 @@ public class SNConfigHandler {
 	 * is a place that block belongs to, and there can be as many as the server wants.
 	 */
 	public static List<Location> priestChurches = new ArrayList<Location>();
+	private static List<String> priestChurchEntries = new ArrayList<String>();
 	public static String priestBanishWorld;
 	public static int priestBanishLocationX;
 	public static int priestBanishLocationY;
@@ -1044,8 +1045,9 @@ public class SNConfigHandler {
 		vampireAltarCureMaterialsString = config.getStringList("Vampire.Altar.Cure.Recipe.Materials");
 		vampireAltarCureQuantities = config.getIntegerList("Vampire.Altar.Cure.Recipe.Quantities");
 
+		priestChurchEntries = new ArrayList<String>(config.getStringList("Priest.Church.Locations"));
 		priestChurches = new ArrayList<Location>();
-		for (String entry : config.getStringList("Priest.Church.Locations")) {
+		for (String entry : priestChurchEntries) {
 			Location church = parseChurch(entry);
 			if (church != null) {
 				priestChurches.add(church);
@@ -1061,6 +1063,7 @@ public class SNConfigHandler {
 					config.getInt("Priest.Church.Location.Z", 0));
 			if (legacy.getWorld() != null) {
 				priestChurches.add(legacy);
+				priestChurchEntries.add(describeChurch(legacy));
 			}
 		}
 		storeChurches(config);
@@ -1388,6 +1391,7 @@ public class SNConfigHandler {
 			return;
 		}
 		priestChurches.add(at);
+		priestChurchEntries.add(describeChurch(at));
 		storeChurches(config);
 		saveConfig();
 	}
@@ -1395,6 +1399,7 @@ public class SNConfigHandler {
 	/** Forgets every church, and writes that down. */
 	public static void clearChurches() {
 		priestChurches.clear();
+		priestChurchEntries.clear();
 		storeChurches(config);
 		saveConfig();
 	}
@@ -1421,6 +1426,12 @@ public class SNConfigHandler {
 			return false;
 		}
 		priestChurches.remove(nearest);
+		for (int i = 0; i < priestChurchEntries.size(); i++) {
+			if (sameChurch(priestChurchEntries.get(i), nearest)) {
+				priestChurchEntries.remove(i);
+				break;
+			}
+		}
 		storeChurches(config);
 		saveConfig();
 		return true;
@@ -1457,18 +1468,29 @@ public class SNConfigHandler {
 		}
 	}
 
+	private static boolean sameChurch(String entry, Location church) {
+		if (entry == null || church == null || church.getWorld() == null) {
+			return false;
+		}
+		String[] parts = entry.split(",");
+		if (parts.length != 4 || plugin.getServer().getWorld(parts[0].trim()) != church.getWorld()) {
+			return false;
+		}
+		try {
+			return Integer.parseInt(parts[1].trim()) == church.getBlockX()
+					&& Integer.parseInt(parts[2].trim()) == church.getBlockY()
+					&& Integer.parseInt(parts[3].trim()) == church.getBlockZ();
+		} catch (NumberFormatException notANumber) {
+			return false;
+		}
+	}
+
 	/**
 	 * Writes the churches out, in both forms: the list the plugin now reads, and the four older
 	 * settings, mirrored from the first church so anything still reading those keeps working.
 	 */
 	private static void storeChurches(Configuration config) {
-		List<String> encoded = new ArrayList<String>();
-		for (Location church : priestChurches) {
-			if (church != null && church.getWorld() != null) {
-				encoded.add(describeChurch(church));
-			}
-		}
-		config.set("Priest.Church.Locations", encoded);
+		config.set("Priest.Church.Locations", new ArrayList<String>(priestChurchEntries));
 		if (priestChurches.isEmpty()) {
 			priestChurchLocation = null;
 			return;
