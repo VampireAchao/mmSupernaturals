@@ -379,6 +379,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return zombie(rest);
             case "wear":
                 return wear(rest);
+            case "worn":
+                return worn(rest);
             case "kill":
                 return kill(rest);
             case "respawn":
@@ -882,6 +884,21 @@ public final class HarnessPlugin extends JavaPlugin {
             return "err not armour: " + args[1];
         }
         return "ok wearing " + material;
+    }
+
+    /**
+     * What one player is holding, and what the players watching him were told about it.
+     *
+     * <p>Those two are not the same thing for a stand-in, and the gap is invisible from a
+     * console: the item on his inventory is what the plugin reads and what a blow is worth, and
+     * the announcement is what a client draws. A step that hands him a sword can therefore be
+     * right about the rule and wrong about the picture at the same time, which is the shape of
+     * every "he isn't holding it" report. This makes the announcement and prints both sides, so
+     * the two can be compared without a client.
+     */
+    private String worn(String rest) {
+        Player player = player(rest.trim());
+        return "ok " + player.getName() + " " + Nms.pushEquipment(player);
     }
 
     /**

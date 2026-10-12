@@ -250,6 +250,68 @@ final class Nms {
     }
 
     /**
+     * Tells everybody watching a stand-in what he is holding.
+     *
+     * <p>Nothing else does. The server ticks the connections it accepted; a connection ticks its
+     * packet listener; the listener is the only caller of {@code ServerPlayer#doTick}; that is
+     * the only caller of the ordinary entity tick; and the ordinary entity tick is where a living
+     * entity compares what it holds against what each watcher was last told and sends the
+     * difference. A connection made by hand is not in the list the server ticks, so none of that
+     * runs - which leaves a stand-in's equipment reaching a client exactly once, at the moment
+     * that client starts tracking him, and never again. Every step that hands him a weapon after
+     * he has appeared therefore looked, on screen, like a step that handed him nothing: the
+     * tester saw whatever he happened to be holding when he first turned up.
+     *
+     * <p>So the one step that matters is run by hand: the game's own check, which sends only what
+     * has changed. It is not a re-implementation - an item is put in his hand through the
+     * ordinary inventory, and this only makes the news travel.
+     *
+     * @return what he holds now, what the watchers had been told before this call, and what they
+     *         are told after it - so a console can see what a client would
+     */
+    static String pushEquipment(org.bukkit.entity.Player player) {
+        String hand = player.getInventory().getItemInMainHand().getType().toString();
+        try {
+            Object handle = call(player, "getHandle");
+            String before = toldHeld(handle);
+            Method push = handle.getClass().getMethod("detectEquipmentUpdates");
+            push.setAccessible(true);
+            push.invoke(handle);
+            return "hand=" + hand + " toldBefore=" + before + " toldAfter=" + toldHeld(handle);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return "hand=" + hand + " push failed (" + e + ")";
+        }
+    }
+
+    /** The main-hand item the watchers were last told about, named the way a player says it. */
+    private static String toldHeld(Object handle) {
+        Object sent = fieldOf(handle, "lastEquipmentItems");
+        if (!(sent instanceof java.util.Map<?, ?> slots)) {
+            return "?";
+        }
+        for (java.util.Map.Entry<?, ?> slot : slots.entrySet()) {
+            if (slot.getKey() != null && "MAINHAND".equals(slot.getKey().toString())) {
+                return asName(slot.getValue());
+            }
+        }
+        return "?";
+    }
+
+    /** A server-side item stack, named through the ordinary API. */
+    private static String asName(Object stack) {
+        if (stack == null) {
+            return "?";
+        }
+        try {
+            Class<?> craft = Class.forName("org.bukkit.craftbukkit.inventory.CraftItemStack");
+            Method asBukkit = craft.getMethod("asBukkitCopy", load("net.minecraft.world.item.ItemStack"));
+            return String.valueOf(((org.bukkit.inventory.ItemStack) asBukkit.invoke(null, stack)).getType());
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return String.valueOf(stack);
+        }
+    }
+
+    /**
      * Sets a field by name, wherever along the class chain it is declared.
      *
      * <p>Every name here is a guess about a server build that publishes no API for any of this,

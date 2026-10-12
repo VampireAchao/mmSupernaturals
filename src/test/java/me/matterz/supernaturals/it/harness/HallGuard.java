@@ -181,6 +181,18 @@ final class HallGuard implements Listener {
      */
     private final Map<String, Location> revives = new HashMap<>();
 
+    /**
+     * What each stand-in was when he was put out, and who put him out.
+     *
+     * <p>A section about "kill him until he turns" has exactly one thing to look at: the race the
+     * stand-in is wearing. His label is written once, when he is put out, so a race that changes
+     * underneath it is a race nobody can see - and a roll that comes up looks identical to a roll
+     * that never happens. Keeping what he started as means the change can be recognised, and
+     * keeping who asked for him means the person who is waiting can be told.
+     */
+    private final Map<String, String> preyRace = new HashMap<>();
+    private final Map<String, String> preyOwner = new HashMap<>();
+
     /** The seats taken during the current spawn, so two stand-ins never share one place. */
     private final List<Location> taken = new ArrayList<>();
 
@@ -920,13 +932,21 @@ final class HallGuard implements Listener {
             return null;
         }
         prey.put(name, ghost);
+        preyOwner.put(name, player.getName());
         SuperNManager.convert(SuperNManager.get(npc), race);
         Location spot = seatFor(player, seat, taken);
         taken.add(spot);
+        // Dressed before he is moved, not after. What is in his hand when a watcher starts
+        // tracking him is part of the first thing that watcher is told about him, and being
+        // teleported into somebody's view is where that happens - a sword put in his hand a tick
+        // later has to be announced separately, and only the call below does that.
+        npc.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
         npc.teleport(spot);
         npc.setHealth(npc.getAttribute(Attribute.MAX_HEALTH).getValue());
-        npc.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
-        labelRace(npc, SuperNManager.get(npc).getType());
+        Nms.pushEquipment(npc);
+        String as = SuperNManager.get(npc).getType();
+        labelRace(npc, as);
+        preyRace.put(name, as);
         return npc;
     }
 
@@ -1017,6 +1037,7 @@ final class HallGuard implements Listener {
         double damage = spec == null || spec.isBlank() ? 6.0 : Double.parseDouble(spec.trim());
         attacker.teleport(spotFor(target));
         attacker.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
+        Nms.pushEquipment(attacker);
         faceThe(attacker, target);
         attacker.swingMainHand();
         double before = target.getHealth();
@@ -1148,6 +1169,8 @@ final class HallGuard implements Listener {
     /** Takes one stand-in out, if he is still on the books. */
     private void clearPrey(String name) {
         revives.remove(name);
+        preyRace.remove(name);
+        preyOwner.remove(name);
         if (prey.remove(name) != null) {
             unstamp(name);
             plugin.dropGhost(name);
@@ -1185,10 +1208,44 @@ final class HallGuard implements Listener {
                 again.setHealth(again.getAttribute(Attribute.MAX_HEALTH).getValue());
                 again.setFoodLevel(20);
                 again.setFireTicks(0);
+                turnedOver(name, again);
             }, 2L);
             return;
         }
         Bukkit.getScheduler().runTaskLater(plugin, () -> clearPrey(name), 20L);
+    }
+
+    /**
+     * Says so when a stand-in who was killed comes back as something else.
+     *
+     * <p>Four races turn the human they finish into one of their own, on a roll - and a roll is
+     * invisible. The victim is a player with no client, so the message the plugin sends him goes
+     * nowhere, and the label he wears is the one written when the section put him out: a stand-in
+     * who has just been turned still reads as "human" over his head, in the tab list, and in the
+     * death message of the next kill. Somebody killing him twenty times therefore sees twenty
+     * identical humans and concludes the rule is broken, when what actually happened is that it
+     * worked and nothing said so.
+     *
+     * <p>So the label is rewritten from what the plugin now says he is, and the person who put him
+     * out is told when that is not what he started as. Nothing is rolled or decided here - the
+     * plugin has already done both, on its own death handling - this only stops the result being
+     * the one thing in the hall that nobody can see.
+     */
+    private void turnedOver(String name, Player again) {
+        String now = SuperNManager.get(again).getType();
+        String was = preyRace.get(name);
+        labelRace(again, now);
+        preyRace.put(name, now);
+        if (was == null || was.equalsIgnoreCase(now)) {
+            return;
+        }
+        String who = preyOwner.get(name);
+        Player owner = who == null ? null : Bukkit.getPlayerExact(who);
+        if (owner != null) {
+            note(owner, "§a" + name + " 转化成功了：他现在是 "
+                    + RACE_LABEL.getOrDefault(now, now)
+                    + "§a（连着杀是为了等这一下；想再试一次，点「放出一个人类」会重新放一个）");
+        }
     }
 
     /** Takes a shulker's bullet or a lingering effect with the entity that owned it. */
@@ -1345,6 +1402,11 @@ final class HallGuard implements Listener {
         }
         spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
         spar.getInventory().setItemInMainHand(holds);
+        // Into his hand and out to the people watching, in that order and both needed: the item on
+        // his own inventory is what the plugin reads and what a swing is worth, and the push is
+        // what the person running the test can actually see. Without the second one the section
+        // says "the stand-in holds a wooden sword" and shows an iron one.
+        Nms.pushEquipment(spar);
         Location start = approachFrom(player);
         spar.teleport(facing(start, player.getLocation()));
         return spar;
@@ -1497,6 +1559,7 @@ final class HallGuard implements Listener {
     private void giveBackSword(Player spar) {
         if (spar.isOnline()) {
             spar.getInventory().setItemInMainHand(null);
+            Nms.pushEquipment(spar);
         }
     }
 
@@ -1698,6 +1761,7 @@ final class HallGuard implements Listener {
         }
         if (Material.FLINT.equals(item)) {
             spar.getInventory().setItemInMainHand(new ItemStack(item));
+            Nms.pushEquipment(spar);
         }
         player.getInventory().setItemInMainHand(new ItemStack(item));
         note(player, "§f陪练（现在是 " + SuperNManager.get(spar).getType() + "）从 "
