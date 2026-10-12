@@ -258,7 +258,7 @@ public final class HarnessPlugin extends JavaPlugin {
             case "ping":
                 return "ok pong";
             case "spawn":
-                return spawn(rest);
+                return spawn(rest.trim());
             case "quit":
                 return quit(rest);
             case "online":
@@ -386,26 +386,24 @@ public final class HarnessPlugin extends JavaPlugin {
 
     // -- requests ----------------------------------------------------------
 
-    private String spawn(String rest) {
-        String[] args = rest.trim().split("\\s+");
-        String name = args.length == 0 ? "" : args[0];
+    /**
+     * Brings a stand-in player up.
+     *
+     * <p>Named without a world on purpose. {@code Nms.spawn(name, world)} does take one, and the
+     * player still arrives at the default world's spawn: the login places them there whatever
+     * level the server player was built against. Since a clientless player is invulnerable in
+     * every world but the one it joined, "which world did this stand-in join in" cannot be chosen
+     * - so anything that needs one monster to hurt one person has to be measured in the world the
+     * stand-in already joined, or through the event the plugin decides on.
+     */
+    private String spawn(String name) {
         if (name.isEmpty()) {
-            return "err usage: spawn <name> [world]";
+            return "err usage: spawn <name>";
         }
         if (Bukkit.getPlayerExact(name) != null) {
             return "err " + name + " is already online";
         }
-        World where = null;
-        if (args.length > 1) {
-            where = Bukkit.getWorld(args[1]);
-            if (where == null) {
-                return "err no such world: " + args[1];
-            }
-        }
-        // The world matters: the server keeps a clientless player invulnerable everywhere except
-        // the world it joined in, so a stand-in that has to be hurt by a monster - rather than
-        // only have one swing at it - has to join where that monster lives.
-        actors.put(name, where == null ? Nms.spawn(name) : Nms.spawn(name, where));
+        actors.put(name, Nms.spawn(name));
 
         Player player = Bukkit.getPlayerExact(name);
         if (player == null) {
