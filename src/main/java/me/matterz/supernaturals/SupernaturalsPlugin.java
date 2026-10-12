@@ -309,6 +309,7 @@ public class SupernaturalsPlugin extends JavaPlugin {
 				if (!isPlayer && vampcommand.senderMustBePlayer) {
 					sender.sendMessage("This command, sn " + command
 							+ ", is player-only");
+					return;
 				}
 				vampcommand.execute(sender, parameters);
 				return;
