@@ -158,9 +158,19 @@ public class EnderBornManager extends ClassManager {
 		return deathTimesMap.getOrDefault(snplayer, 0);
 	}
 
-	public void killEvent(SuperNPlayer damager, SuperNPlayer victim) {
+	/**
+	 * What an enderborn takes from a kill.
+	 *
+	 * <p>The signature matters: this was written as {@code killEvent(SuperNPlayer, SuperNPlayer)},
+	 * which is an <em>overload</em> of the base {@code killEvent(Player, SuperNPlayer, SuperNPlayer)}
+	 * and not an override - so nothing ever called it, and an enderborn's kill gave no power and
+	 * never turned anybody. The player is unused here (the two {@link SuperNPlayer}s carry
+	 * everything this needs), but it is part of the signature that is actually invoked.
+	 */
+	@Override
+	public void killEvent(Player pDamager, SuperNPlayer damager, SuperNPlayer victim) {
 		if (victim == null) {
-			SuperNManager.alterPower(damager, SNConfigHandler.enderKillPower, "Stole power");
+			SuperNManager.alterPower(damager, SNConfigHandler.enderKillPower, "Killed a creature");
 		} else {
 			SuperNManager.alterPower(victim, -SNConfigHandler.enderKillPower, damager.getName()
 					+ " stole some of your power!");

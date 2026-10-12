@@ -31,14 +31,20 @@ public class AngelManager extends ClassManager {
 
 	@Override
 	public double damagerEvent(EntityDamageByEntityEvent event, double damage) {
-		Player player = (Player) event.getEntity();
-		SuperNPlayer snplayer = SuperNManager.get(player);
-		if (event.getEntity() instanceof Animals) {
-			if (player.getItemInHand().getType().equals(Material.DIAMOND_SWORD)) {
-				SuperNManager.sendMessage(snplayer, "Angels cannot use diamond swords on animals!");
-				event.setCancelled(true);
-				return 0;
-			}
+		// This is the *attacker's* manager: the caller asks the class manager of the player who
+		// dealt the blow, and only ever for a player. Reading the victim off the event and casting
+		// it to Player threw a ClassCastException the moment the victim was anything else - which
+		// is precisely the case this rule exists for - so "angels cannot use diamond swords on
+		// animals" never actually refused anything.
+		if (!(event.getDamager() instanceof Player player)) {
+			return damage;
+		}
+		if (event.getEntity() instanceof Animals
+				&& player.getItemInHand().getType().equals(Material.DIAMOND_SWORD)) {
+			SuperNManager.sendMessage(SuperNManager.get(player),
+					"Angels cannot use diamond swords on animals!");
+			event.setCancelled(true);
+			return 0;
 		}
 		return damage;
 	}
