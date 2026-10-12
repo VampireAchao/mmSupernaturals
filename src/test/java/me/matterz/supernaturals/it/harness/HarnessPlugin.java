@@ -174,6 +174,9 @@ public final class HarnessPlugin extends JavaPlugin {
         dropGhost(name);
         try {
             Object actor = Nms.spawn(name, world);
+            // Out of transit before anybody tries to hit him: a stand-in nobody can hurt makes
+            // every section that asks for a hit look broken.
+            Nms.arrive(actor);
             ghosts.put(name, actor);
             return actor;
         } catch (RuntimeException alreadyThere) {
@@ -313,6 +316,10 @@ public final class HarnessPlugin extends JavaPlugin {
                 return leftClick(rest);
             case "strike":
                 return strike(rest);
+            case "whack":
+                return whack(rest);
+            case "transit":
+                return transit(rest);
             case "execute":
                 return execute(rest);
             case "food":
@@ -1094,6 +1101,55 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok cancelled=" + event.isCancelled() + " victim=" + victim.getName()
                 + " race=" + SuperNManager.get(victim).getType()
                 + " held=" + attacker.getInventory().getItemInMainHand().getType();
+    }
+
+    /** What is holding a stand-in invulnerable, for working out which field has to be cleared. */
+    private String transit(String rest) {
+        Player player = player(rest.trim());
+        String before = Nms.transit(player);
+        Nms.arrive(player);
+        return "ok " + before + " || after arrive: isInvulnerable=" + player.isInvulnerable()
+                + " fields=" + Nms.transit(player);
+    }
+
+    /**
+     * Attacks with the server's own attack path - the one a real left-click ends up in. Raising
+     * an event by hand is not the same thing: the plugin reads it, so a rule that only reads
+     * damage looks satisfied, but nothing is hit and nobody loses health.
+     *
+     * <p>Whether a stand-in can be hit at all is the question this answers, and it is the one
+     * every step that asks a player to use something on somebody depends on.
+     */
+    private String whack(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length != 2) {
+            return "err usage: whack <attacker> <victim>";
+        }
+        Player attacker = player(args[0]);
+        Player victim = player(args[1]);
+        if (attacker.getWorld() != victim.getWorld()) {
+            return "err different worlds";
+        }
+        double before = victim.getHealth();
+        boolean invulnerable = victim.isInvulnerable();
+        int noDamageTicks = victim.getNoDamageTicks();
+        float cooldown = attacker.getAttackCooldown();
+        attacker.attack(victim);
+        double afterHit = victim.getHealth();
+        // Then the same blow applied directly, so "the attack did nothing" can be told apart
+        // from "this stand-in cannot be hurt at all" - and, when it is hurt, from "the flag the
+        // server leaves on a player it has never heard from is the thing in the way".
+        victim.setInvulnerable(false);
+        Nms.arrive(victim);
+        victim.damage(2.0, attacker);
+        double afterDirect = victim.getHealth();
+        return "ok held=" + attacker.getInventory().getItemInMainHand().getType()
+                + " invulnerable=" + invulnerable + " noDamageTicks=" + noDamageTicks
+                + " cooldown=" + String.format(Locale.ROOT, "%.2f", cooldown)
+                + " attack=" + before + "->" + afterHit
+                + " direct=" + afterHit + "->" + afterDirect
+                + " nowInvulnerable=" + victim.isInvulnerable()
+                + " race=" + SuperNManager.get(victim).getType();
     }
 
     /** The hall's stand-in and the marks every damage section asks him to stand on. */

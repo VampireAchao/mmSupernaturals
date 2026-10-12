@@ -7,6 +7,7 @@ import me.matterz.supernaturals.manager.HunterManager;
 import me.matterz.supernaturals.manager.SuperNManager;
 
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -59,11 +60,13 @@ import org.bukkit.util.Vector;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * The behaviour of the {@link Hall}: what its switches do, what its stand-in answers, and the rules
@@ -161,14 +164,98 @@ final class HallGuard implements Listener {
             "angel", "§e天使",
             "human", "§a人类");
 
-    /** The stand-ins the hall has brought up as prey, by name, so they can be taken back out. */
-    private final Map<String, Object> prey = new HashMap<>();
+    /**
+     * The stand-ins the hall has brought up as prey, by name, so they can be taken back out.
+     *
+     * <p>In the order they were put out: a section that sends one at another means the one that
+     * was put out first, and a hash map's order is nobody's order in particular.
+     */
+    private final Map<String, Object> prey = new LinkedHashMap<>();
+
+    /**
+     * Prey that gets up again where it fell, by name.
+     *
+     * <p>Several races turn the person they kill into one of their own, and a target that stays
+     * down can only be killed once - so the one section that is about a kill gives the stand-in
+     * a mark to come back to.
+     */
+    private final Map<String, Location> revives = new HashMap<>();
+
+    /** The seats taken during the current spawn, so two stand-ins never share one place. */
+    private final List<Location> taken = new ArrayList<>();
+
+    /** The races a stand-in can be when a section asks for "somebody supernatural". */
+    private static final List<String> SUPERNATURAL = List.of(
+            "vampire", "ghoul", "werewolf", "demon", "priest", "witchhunter", "enderborn", "angel");
 
     /** The walk the stand-in is currently on, so a second section cannot start another. */
     private BukkitTask walkTask;
 
     HallGuard(HarnessPlugin plugin) {
         this.plugin = plugin;
+        // A player the server has never heard from is left invulnerable: it is waiting for a
+        // client to confirm it arrived, and a stand-in has no client to confirm anything. That
+        // single flag is why every step where somebody is supposed to be hit did nothing in any
+        // world but the one the server logs into - a hall's stand-in could be seen, walked up to
+        // and swung at, and never lost a point of health. It is cleared every tick rather than
+        // once, because whatever sets it can set it again.
+        Bukkit.getScheduler().runTaskTimer(plugin, this::unfreezeStandIns, 0L, 1L);
+    }
+
+    /**
+     * Lands one real blow from a player onto a stand-in.
+     *
+     * <p>A stand-in cannot normally be hit on this server build. It is a player whose client never
+     * confirms anything, and the server keeps a flag on such a player that refuses damage - a flag
+     * that comes straight back when it is cleared. There is exactly one exception inside the damage
+     * path itself: a blow struck by a creative player is allowed past that flag. So the attacker is
+     * borrowed as creative for the length of a single blow - changed and changed back inside one
+     * tick, which is not something a client is told about - and the blow then travels the ordinary
+     * route: the plugin's handlers, the health bar, the armour, the knockback.
+     *
+     * <p>If the health still does not move, the damage is taken off directly. That is the last
+     * resort rather than the method: it is what a section shows when everything else refused, and
+     * it is better than a switch that reports a spell landed while nobody lost anything.
+     */
+    private static void land(Player attacker, Player victim, double damage) {
+        GameMode before = attacker.getGameMode();
+        if (before != GameMode.CREATIVE) {
+            attacker.setGameMode(GameMode.CREATIVE);
+        }
+        double health = victim.getHealth();
+        victim.damage(damage, attacker);
+        if (victim.getHealth() >= health && !victim.isDead()) {
+            victim.setHealth(Math.max(0, health - damage));
+        }
+        if (attacker.getGameMode() != before) {
+            attacker.setGameMode(before);
+        }
+    }
+
+    /** Lifts the invulnerability the server puts on a player it has never heard from. */
+    private void unfreezeStandIns() {
+        for (Player npc : standIns()) {
+            if (npc.isInvulnerable()) {
+                npc.setInvulnerable(false);
+                Nms.arrive(npc);
+            }
+        }
+    }
+
+    /** Every stand-in the hall has out: the sparring partner and each target it brought up. */
+    private List<Player> standIns() {
+        List<Player> all = new ArrayList<>();
+        Player spar = Bukkit.getPlayerExact(SPAR);
+        if (spar != null) {
+            all.add(spar);
+        }
+        for (String name : new ArrayList<>(prey.keySet())) {
+            Player npc = Bukkit.getPlayerExact(name);
+            if (npc != null) {
+                all.add(npc);
+            }
+        }
+        return all;
     }
 
     /**
@@ -253,6 +340,9 @@ final class HallGuard implements Listener {
             case COLD_BIOME -> coldBiome(player, trigger.race());
             case TEST_HIT -> testHit(player, trigger.detail());
             case TEST_SPELL -> testSpell(player, trigger.detail());
+            case USE_ON_NPC -> useOnNpc(player, trigger.detail());
+            case SPAWN_TARGET -> spawnTarget(player, trigger.detail());
+            case NPC_HITS_NPC -> npcHitsNpc(player, trigger.detail());
             case SPAR -> bringSpar(player);
             case HURT -> hurt(player);
             case SELF_KILL -> selfKill(player);
@@ -393,9 +483,36 @@ final class HallGuard implements Listener {
     private void toggleRain(Player player) {
         World world = player.getWorld();
         boolean raining = !world.hasStorm();
+        // The duration is the point. Setting the flag alone leaves a storm that is over on the
+        // next tick - the sky clears before anybody can look up - which is indistinguishable
+        // from a switch that does nothing at all.
         world.setStorm(raining);
         world.setThundering(false);
-        note(player, raining ? "§9这个大厅开始下雨了" : "§7这个大厅的雨停了");
+        if (raining) {
+            world.setWeatherDuration(20 * 60 * 5);
+        } else {
+            world.setClearWeatherDuration(20 * 60 * 5);
+        }
+        note(player, raining ? "§9这个大厅开始下雨了（下 5 分钟）" : "§7这个大厅的雨停了");
+        if (raining && !openToSky(player)) {
+            note(player, "§7不过你头顶有屋顶，雨落不到你身上 —— 点旁边的「站到露天台」");
+        }
+    }
+
+    /**
+     * Whether the column the player stands in reaches the sky. Rain falls only where it can, so a
+     * person who toggles the weather on from under a ceiling sees nothing and reports a broken
+     * switch.
+     */
+    private static boolean openToSky(Player player) {
+        Location at = player.getLocation();
+        World world = at.getWorld();
+        for (int y = at.getBlockY() + 1; y < world.getMaxHeight(); y++) {
+            if (!world.getBlockAt(at.getBlockX(), y, at.getBlockZ()).getType().isAir()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -752,37 +869,187 @@ final class HallGuard implements Listener {
         }
         String[] wanted = races.split(",");
         List<String> made = new ArrayList<>();
-        List<Location> taken = new ArrayList<>();
+        taken.clear();
         int seat = 0;
-        for (int index = 0; index < wanted.length && index < PREY_NAMES.size(); index++) {
+        for (String one : wanted) {
+            if (seat >= PREY_NAMES.size()) {
+                break;
+            }
             // "vampire" is one; "vampire:NETHERRACK" is one holding netherrack, which is what a
-            // spell that needs both sides to be holding something asks for.
-            String[] spec = wanted[index].trim().split(":", 2);
-            String race = spec[0].trim();
+            // spell that needs both sides to be holding something asks for; "random" is one of
+            // the supernatural races, for a section whose point is that any of them will do.
+            String[] spec = one.trim().split(":", 2);
+            String race = unroll(spec[0].trim());
             Material hand = spec.length > 1 ? Material.matchMaterial(spec[1].trim()) : null;
             if (race.isEmpty()) {
                 continue;
             }
-            String name = PREY_NAMES.get(index);
-            Object ghost = plugin.spawnGhost(name, player.getWorld());
-            Player npc = Bukkit.getPlayerExact(name);
-            if (ghost == null || npc == null) {
-                plugin.dropGhost(name);
+            Player npc = putPrey(player, seat, race, hand);
+            if (npc == null) {
                 continue;
             }
-            prey.put(name, ghost);
-            SuperNManager.convert(SuperNManager.get(npc), race);
-            Location spot = seatFor(player, seat++, taken);
-            taken.add(spot);
-            npc.teleport(spot);
-            npc.setHealth(npc.getAttribute(Attribute.MAX_HEALTH).getValue());
-            npc.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
-            labelRace(npc, race);
-            made.add(describe(npc, race, hand));
+            made.add(describe(npc, SuperNManager.get(npc).getType(), hand));
+            seat++;
         }
         note(player, made.isEmpty() ? "§c没能放出异族靶子"
                 : "§c放出了 " + made.size() + " 个：" + String.join("、", made)
-                        + "（头上和 tab 里有种族名），用武器杀掉他们");
+                        + "（头上和 tab 里有种族名）");
+    }
+
+    /** "random" means one of the supernatural races; anything else is itself. */
+    private static String unroll(String race) {
+        if (race.equalsIgnoreCase("random")) {
+            return SUPERNATURAL.get(ThreadLocalRandom.current().nextInt(SUPERNATURAL.size()));
+        }
+        return race;
+    }
+
+    /**
+     * Puts one stand-in up, in the seat asked for, as the race asked for.
+     *
+     * <p>Shared by every section that needs somebody to hit: the seating, the race, what he holds
+     * and the label over his head are the same wherever he is used, and a section that rolled its
+     * own would be the one that forgets one of them.
+     */
+    private Player putPrey(Player player, int seat, String race, Material hand) {
+        String name = PREY_NAMES.get(seat);
+        Object ghost = plugin.spawnGhost(name, player.getWorld());
+        Player npc = Bukkit.getPlayerExact(name);
+        if (ghost == null || npc == null) {
+            plugin.dropGhost(name);
+            return null;
+        }
+        prey.put(name, ghost);
+        SuperNManager.convert(SuperNManager.get(npc), race);
+        Location spot = seatFor(player, seat, taken);
+        taken.add(spot);
+        npc.teleport(spot);
+        npc.setHealth(npc.getAttribute(Attribute.MAX_HEALTH).getValue());
+        npc.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
+        labelRace(npc, SuperNManager.get(npc).getType());
+        return npc;
+    }
+
+    /**
+     * Puts out one stand-in who will get up again where he falls.
+     *
+     * <p>A kill that turns somebody into something else can only be watched once on a target that
+     * stays dead, and a vampire, a ghoul, a werewolf and an enderborn all work that way. This one
+     * dies like anybody else - the plugin's own death handling runs, dice and all - and is put
+     * back on his mark a moment later, so the next attempt has somewhere to happen. Human unless
+     * the detail says otherwise, because a person is what these races turn.
+     */
+    private void spawnTarget(Player player, String spec) {
+        clearPrey();
+        taken.clear();
+        String[] parts = spec == null || spec.isBlank() ? new String[0] : spec.trim().split(":", 2);
+        String race = parts.length > 0 && !parts[0].isBlank() ? parts[0].trim() : "human";
+        Material hand = parts.length > 1 ? Material.matchMaterial(parts[1].trim()) : null;
+        Player npc = putPrey(player, 0, race, hand);
+        if (npc == null) {
+            note(player, "§c靶子起不来，这个环节暂时不能用");
+            return;
+        }
+        revives.put(npc.getName(), npc.getLocation().clone());
+        note(player, "§c放出了一个" + describe(npc, SuperNManager.get(npc).getType(), hand)
+                + "：他可以被杀死，死后会在原地复活，所以能反复试");
+    }
+
+    /**
+     * Swings the player's own item at the nearest stand-in, with the server applying the damage.
+     *
+     * <p>An event raised by hand is read by the plugin and hits nobody: the rule looks tested
+     * while no health moves and nothing is knocked back. This goes through the server's damage
+     * path instead - the same handlers, the same health bar, the same armour - and the arm goes
+     * back, which is what a client draws. The detail is {@code MATERIAL[:DAMAGE]}; with no
+     * material the player swings whatever is already in their hand.
+     */
+    private void useOnNpc(Player player, String spec) {
+        // The first one, not the nearest: the switch that sends somebody at a target also hits the
+        // first, and a section where "hit him" and "send somebody at him" land on different people
+        // shows the tester a split that was not the one they set up.
+        List<Player> here = preyOnline(player);
+        if (here.isEmpty()) {
+            note(player, "§c这一格还没有同伴：先点旁边那个「放出一个」按钮");
+            return;
+        }
+        Player npc = here.get(0);
+        String[] parts = spec == null || spec.isBlank() ? new String[0] : spec.trim().split(":", 2);
+        Material item = parts.length > 0 ? Material.matchMaterial(parts[0].trim()) : null;
+        double damage = parts.length > 1 ? Double.parseDouble(parts[1].trim()) : 1.0;
+        if (item != null) {
+            player.getInventory().setItemInMainHand(new ItemStack(item));
+        }
+        if (!npc.getWorld().equals(player.getWorld())
+                || npc.getLocation().distance(player.getLocation()) > 4) {
+            npc.teleport(spotFor(player));
+        }
+        faceThe(player, npc);
+        player.swingMainHand();
+        land(player, npc, damage);
+        note(player, "§7你拿" + (item == null ? "手里的东西" : item.name()) + "打在 "
+                + npc.getName() + " 身上"
+                + (npc.isDead() ? "§c（他倒了，稍后会在原地复活）"
+                        : "§7（他还剩 " + trim(npc.getHealth()) + " 点血）"));
+    }
+
+    /**
+     * Sends one stand-in at another and lets him land one blow.
+     *
+     * <p>Some rules only show when a second person takes the hit. The ghoul's bond is the clearest
+     * one: it halves what its target is about to lose and moves the other half onto the ghoul,
+     * who also pays power for the privilege - and none of that is visible until somebody other
+     * than the player is being hit. The blow is the server's, so the ordinary handler runs and
+     * the split happens exactly as it would between two people.
+     */
+    private void npcHitsNpc(Player player, String spec) {
+        List<Player> here = preyOnline(player);
+        if (here.isEmpty()) {
+            note(player, "§c这一格还没有同伴：先点旁边那个「放出一个」按钮");
+            return;
+        }
+        Player target = here.get(0);
+        Player attacker = here.size() > 1 ? here.get(1) : sparring(player);
+        if (attacker == null || attacker.equals(target)) {
+            note(player, "§c需要两个人才看得到分担：再点一次「放出一个」放第二个");
+            return;
+        }
+        double damage = spec == null || spec.isBlank() ? 6.0 : Double.parseDouble(spec.trim());
+        attacker.teleport(spotFor(target));
+        attacker.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
+        faceThe(attacker, target);
+        attacker.swingMainHand();
+        double before = target.getHealth();
+        land(attacker, target, damage);
+        note(player, "§7" + attacker.getName() + "砍了 " + target.getName() + " 一下："
+                + trim(before) + " → " + trim(target.getHealth())
+                + " §7（看你自己掉了多少血、能量少了多少）");
+    }
+
+    /** The living stand-ins this player's section brought up, in the world they are standing in. */
+    private List<Player> preyOnline(Player player) {
+        List<Player> found = new ArrayList<>();
+        for (String name : prey.keySet()) {
+            Player npc = Bukkit.getPlayerExact(name);
+            if (npc != null && npc.isOnline() && !npc.isDead()
+                    && npc.getWorld().equals(player.getWorld())) {
+                found.add(npc);
+            }
+        }
+        return found;
+    }
+
+    private Player nearestPrey(Player player) {
+        Player best = null;
+        double shortest = Double.MAX_VALUE;
+        for (Player npc : preyOnline(player)) {
+            double away = npc.getLocation().distanceSquared(player.getLocation());
+            if (away < shortest) {
+                shortest = away;
+                best = npc;
+            }
+        }
+        return best;
     }
 
     /**
@@ -880,6 +1147,7 @@ final class HallGuard implements Listener {
 
     /** Takes one stand-in out, if he is still on the books. */
     private void clearPrey(String name) {
+        revives.remove(name);
         if (prey.remove(name) != null) {
             unstamp(name);
             plugin.dropGhost(name);
@@ -899,6 +1167,25 @@ final class HallGuard implements Listener {
     public void onPreyDeath(PlayerDeathEvent event) {
         String name = event.getEntity().getName();
         if (!prey.containsKey(name)) {
+            return;
+        }
+        Location home = revives.get(name);
+        if (home != null) {
+            // One of the targets that is meant to be killed again. Nothing puts a player back on
+            // their feet but the respawn button on a client, and there is no client - so it is
+            // pressed here, and he is put back on his mark with it. By this point the plugin has
+            // already run its own death handling, which is the point of the section.
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                Player again = Bukkit.getPlayerExact(name);
+                if (again == null || !again.isOnline()) {
+                    return;
+                }
+                again.spigot().respawn();
+                again.teleport(home);
+                again.setHealth(again.getAttribute(Attribute.MAX_HEALTH).getValue());
+                again.setFoodLevel(20);
+                again.setFireTicks(0);
+            }, 2L);
             return;
         }
         Bukkit.getScheduler().runTaskLater(plugin, () -> clearPrey(name), 20L);
@@ -938,13 +1225,14 @@ final class HallGuard implements Listener {
     // -- the stand-in ------------------------------------------------------
 
     /**
-     * Hitting the stand-in reports what the hit did and keeps him standing.
+     * Hitting the stand-in reports what the hit did and keeps him on his feet while it lands.
      *
-     * <p>The damage is no longer cancelled: a target that cannot lose health can show a number
-     * but cannot show what a section is really about - that the health bar moves, that a wolf in
-     * wolf form loses nothing, that a ghoul's immunity is a zero rather than a statement. What is
-     * still refused is his <em>death</em>: a hit that would finish him puts him back to full
-     * instead, so a damage section has a target for as long as it wants one.
+     * <p>Nothing is refused any more, not even the blow that finishes him. A target that cannot
+     * die cannot show the thing half these sections are about - that a ghoul's immunity is a zero
+     * rather than a statement, that a race which shrugs off a sword really does, that a kill is a
+     * kill - and a stand-in who is topped up every time he is about to fall cannot be used to
+     * test anything that begins with somebody dying. He dies like anybody else and stays down;
+     * pressing the section's switch again is what puts a fresh one on his mark.
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onSparHit(EntityDamageEvent event) {
@@ -957,21 +1245,14 @@ final class HallGuard implements Listener {
             try {
                 showDamage(spar, byEntity, damage);
             } catch (RuntimeException ignored) {
-                // The number is a nicety; the stand-in staying up is the test.
+                // The number is a nicety; the stand-in taking the hit is the test.
             }
         }
+        // Held still, so a hit reports a damage number instead of launching him down the hall.
         spar.setVelocity(new Vector(0, 0, 0));
-        if (event.getFinalDamage() >= spar.getHealth()) {
-            event.setCancelled(true);
-            spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
-            if (event instanceof EntityDamageByEntityEvent byEntity
-                    && byEntity.getDamager() instanceof Player hitter) {
-                hitter.sendMessage("§7陪练被打空了，已经刷新到满血");
-            }
-        }
     }
 
-    /** If the stand-in does die anyway, he goes without dropping a player's worth of loot. */
+    /** If the stand-in does die, he goes without dropping a player's worth of loot. */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onSparDeath(EntityDeathEvent event) {
         if (sparAt(event.getEntity()) != null) {
@@ -1182,7 +1463,9 @@ final class HallGuard implements Listener {
                 + " §7点伤害（他只砍这一下，血就这么少了）"
                 + (lost <= 0 ? " §a（免疫）" : "")
                 + (clipped ? " §7（你血不多了，这一下只算到剩 2 点）" : ""));
-        giveBackSword(spar);
+        // The weapon stays in his hand. A section that asks what a particular weapon does to you
+        // is unreadable if the weapon is taken away the moment the blow lands: the tester looks
+        // at him again and sees an empty hand, and concludes he never had it.
     }
 
     /** Turns him to look at the player without moving him. */
@@ -1283,20 +1566,27 @@ final class HallGuard implements Listener {
     private Player sparring(Player player) {
         World world = player.getWorld();
         Player spar = Bukkit.getPlayerExact(SPAR);
-        if (spar != null && spar.getWorld().equals(world)) {
-            return spar;
-        }
-        if (spar != null) {
-            plugin.dropGhost(SPAR);
-        }
-        Object ghost = plugin.spawnGhost(SPAR, world);
-        spar = Bukkit.getPlayerExact(SPAR);
-        if (spar == null) {
-            if (ghost != null) {
+        if (spar == null || !spar.getWorld().equals(world)) {
+            if (spar != null) {
                 plugin.dropGhost(SPAR);
             }
-            note(player, "§c陪练起不来，这个环节暂时不能用");
-            return null;
+            Object ghost = plugin.spawnGhost(SPAR, world);
+            spar = Bukkit.getPlayerExact(SPAR);
+            if (spar == null) {
+                if (ghost != null) {
+                    plugin.dropGhost(SPAR);
+                }
+                note(player, "§c陪练起不来，这个环节暂时不能用");
+                return null;
+            }
+        }
+        if (spar.isDead()) {
+            // He died where a section needed somebody to die, and nothing puts a stand-in back on
+            // his feet: respawning is a button on a client, and there is no client. Pressing the
+            // section's switch is that button - and a fresh press is also a fresh state, which is
+            // what a section that changes his race or his health is asking for.
+            spar.spigot().respawn();
+            spar.teleport(player.getLocation());
         }
         return spar;
     }
@@ -1417,14 +1707,22 @@ final class HallGuard implements Listener {
     }
 
     /** One attack from the priest at the stand-in, which is how every spell fires. */
+    /**
+     * Lands the spell on the stand-in through the server's own damage path.
+     *
+     * <p>A priest's spells are triggered by attacking somebody with the item, and the handler that
+     * decides what happens reads a damage event. Raising that event by hand makes the handler run
+     * while nothing is actually hit - the target's health never moves, nothing is knocked back,
+     * and a spell that turned out to be broken would still look as though it worked. This deals
+     * real damage, so the same handler runs off the same kind of event a real blow produces.
+     */
     private void castAt(Player player, Player spar, Material item) {
         faceThe(player, spar);
         player.swingMainHand();
-        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(player, spar,
-                EntityDamageEvent.DamageCause.ENTITY_ATTACK, 1.0);
-        Bukkit.getPluginManager().callEvent(event);
-        note(player, "§7施法：" + item.name() + " → §f" + spar.getName()
-                + " §7（" + SuperNManager.get(spar).getType() + "）");
+        land(player, spar, 1.0);
+        note(player, "§7" + item.name() + " 打在 " + spar.getName() + " 身上（"
+                + SuperNManager.get(spar).getType() + "，血 " + trim(spar.getHealth())
+                + "）：看聊天栏和对方种族变成了什么");
     }
 
     // -- keeping the tests honest ------------------------------------------

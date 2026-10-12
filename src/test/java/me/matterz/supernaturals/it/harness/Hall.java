@@ -20,8 +20,10 @@ import org.bukkit.block.data.Directional;
 import org.bukkit.block.data.type.Door;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Tameable;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -127,6 +129,29 @@ public final class Hall {
 
         /** Casts one of a priest's spells at the stand-in. The trigger names the item. */
         TEST_SPELL,
+
+        /**
+         * Uses the player's own item on a stand-in, with the damage applied by the server.
+         *
+         * <p>The detail is {@code MATERIAL[:DAMAGE]}, both optional. An event raised by hand is
+         * read by the plugin and hits nobody - the rule looks tested while nothing loses health -
+         * so a section about a skill that has to land on somebody swings for real.
+         */
+        USE_ON_NPC,
+
+        /**
+         * Puts out a stand-in who gets up again where he fell.
+         *
+         * <p>Several races turn the person they kill into one of their own, and a target that
+         * stays dead can only be killed once. The detail is {@code RACE[:MATERIAL]}.
+         */
+        SPAWN_TARGET,
+
+        /**
+         * Sends one stand-in at another, for the things that only show when somebody else takes
+         * the blow - the ghoul's bond splits damage with the person it is bound to.
+         */
+        NPC_HITS_NPC,
 
         /** Brings the stand-in over to the player, so a section about hitting it has a target. */
         SPAR,
@@ -772,6 +797,55 @@ public final class Hall {
                 "点井壁上的「回到地面」按钮回大厅，继续后面的环节");
     }
 
+    /**
+     * The races that turn the human they finish into one of their own, by a roll.
+     *
+     * <p>Everything else either has no such rule or reaches its race another way - a demon turns
+     * people with netherrack rather than with a kill - so these four are the ones that need a
+     * target who can be killed more than once.
+     */
+    private static final Set<String> KILL_CONVERTS =
+            Set.of("vampire", "ghoul", "werewolf", "enderborn");
+
+    /**
+     * What the race does to the person it kills.
+     *
+     * <p>Four races have a chance to turn a human they finish into one of their own, and it is a
+     * roll - a third for three of them, a tenth for the enderborn - so a single kill proves
+     * nothing either way. The stand-in this brings up therefore comes back where he fell, and the
+     * section is about watching the race change rather than about the kill.
+     */
+    private Section convertSection(String race) {
+        String chance = switch (race) {
+            case "enderborn" -> "10%（代码里写死的 0.10，没有配置项）";
+            default -> "35%（Supernatural.SpreadChance 默认 0.35）";
+        };
+        String extra = switch (race) {
+            case "werewolf" -> "，而且狼人只在夜里才算——白天杀了也白杀，先点旁边的「夜晚」";
+            default -> "";
+        };
+        return section("§5转化 杀死人类", 2, (w, y, x, z, width) -> {
+            switchpoint(w, y, x + 3, z + 3,
+                    Trigger.with(Kind.SPAWN_TARGET, race, "human"),
+                    "§f放出一个人类", "§7他能被反复杀死");
+            switchpoint(w, y, x + 7, z + 3,
+                    Trigger.with(Kind.USE_ON_NPC, race, "DIAMOND_SWORD:100"),
+                    "§c一击打死他", "§7看他的种族变不变");
+            switchpoint(w, y, x + 11, z + 3,
+                    Trigger.with(Kind.USE_ON_NPC, race, "DIAMOND_SWORD:100"),
+                    "§c再打一次", "§7概率的东西要多试");
+            powerButton(w, y, x + 15, z, race);
+        }, "验证击杀人类时的「感染」概率",
+                "这一族的感染是概率：" + chance + extra
+                        + "。转化发生时对方会收到一条提示，种族当场变成这一族。"
+                        + "被转化的人是你杀的那个人——所以这里放的是一个普通人类",
+                "多打几次之后，那个人的种族会变成这一族（头顶的标签也会跟着变）",
+                "点「放出一个人类」，他就站在你面前",
+                "点「一击打死他」——他倒下，两 tick 后原地复活",
+                "连着点「再打一次」，直到他的标签变成这一族",
+                "没变是正常的：这是概率，不是必定；他每次都会复活，可以一直试");
+    }
+
     // -- the sections ------------------------------------------------------
 
     /** The steps of one race's flow, in the order a player should meet them. */
@@ -956,22 +1030,20 @@ public final class Hall {
                         "先变成食尸鬼（回第①节）",
                         "走到发光柱子下的钻石块旁边，右键它，看聊天栏",
                         "没变回人类就点「净化 · 恢复人类」，那走的是插件自己的治愈代码"));
-                sections.add(section("§b③ 道具 召唤与羁绊", 2, (w, y, x, z, width) -> {
+                sections.add(section("§b③ 道具 猪肉与骨头", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.PORKCHOP, 8),
                             new ItemStack(Material.BONE, 8),
                             new ItemStack(Material.IRON_SWORD, 1)));
-                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.SPAR),
-                            "§f叫陪练过来", "§7羁绊要有对象才能建立");
                     powerButton(w, y, x + 9, z, "ghoul");
-                }, "验证食尸鬼的两个耗能能力：召唤僵尸与不洁纽带",
-                        "猪排左键召唤一只僵尸，耗 1000 能量。骨头攻击一个非人类的超自然玩家建立"
-                                + "不洁纽带：他之后受伤时，一半伤害转给你、你替他吃，每次分担扣你 50 能量。"
-                                + "纽带要求双方在同一世界、相距不超过 10 格，而且你只能同时绑一个人",
-                        "猪排召出一只僵尸；拿骨头打陪练会在聊天栏出现羁绊提示",
-                        "点「叫陪练过来」，站到他面前",
-                        "拿骨头打他一下，建起纽带，看聊天栏",
-                        "换一件武器再打他，看你自己是不是也跟着掉血"));
+                }, "把这一族的两样耗能道具发到手里",
+                        "猪排左键召唤一只僵尸，耗 1000 能量；骨头左键攻击一个非人类的超自然玩家"
+                                + "可以建立「不洁纽带」——那条能力有自己的环节，这里只是发道具。"
+                                + "铁剑是给后面武器禁令那一节比对照用的",
+                        "猪排能召出僵尸；骨头和铁剑留着后面几节用",
+                        "先点一次「能量 +1000」",
+                        "拿猪排左键空气，看有没有僵尸出现",
+                        "骨头和铁剑收进背包，后面几节要用"));
                 sections.add(section("§5④ 休战 僵尸系怪物", 4, true, (w, y, x, z, width) -> {
                     box(w, Material.MOSS_BLOCK, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "ghoul"),
@@ -1044,40 +1116,54 @@ public final class Hall {
                             x + 15, y, z + 12);
                     box(w, Material.WATER, x + 9, y - 1, z + 8, x + 13, y, z + 10);
                     points.put("ghoul.pool", new Location(w, x + 11.5, y, z + 9.5));
+                    // A boat floating on the pool. Sitting in one is the only thing that exempts a
+                    // ghoul from the water, and an exemption nobody can try is an exemption nobody
+                    // has tested - this keeps the line on the sign from being just a claim.
+                    // Spawned by type, not by class: Boat is an abstract base on this server and
+                    // asking for one by class throws while the plugin is still enabling.
+                    Entity boat = w.spawnEntity(new Location(w, x + 10.5, y, z + 9.5),
+                            EntityType.OAK_BOAT);
+                    boat.setPersistent(true);
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.DIP_WATER, "ghoul"),
-                            "§9跳进水里", "§7站着别动，等 10 秒一次");
+                            "§9跳进水里", "§7站着别动，等它掉血");
                     switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.HURT),
                             "§c先回满血再看", "§7免得死在池子里");
                     powerButton(w, y, x + 8, z, "ghoul");
-                }, "验证食尸鬼在水里会持续溶解",
-                        "脚下方块是水时，**每秒**掉 4 点血（不是溺水，是碰到水就掉；判定每 1 秒跑一次、"
+                }, "验证食尸鬼在水里会持续溶解，以及船里为什么不会",
+                        "脚下方块是水时，每秒掉 4 点血（不是溺水，是碰到水就掉；判定每 1 秒跑一次、"
                                 + "没有节流）。所以满血 20 点也只撑得住 5 秒——这一条比看上去凶得多。"
-                                + "坐在船里不算；有 supernatural.player.preventwaterdamage 权限则免疫",
-                        "站在水里血条每秒掉 4 点，几秒钟就见底；上岸之后立刻停止",
+                                + "坐上池子里那条船就完全不掉血；有 "
+                                + "supernatural.player.preventwaterdamage 权限也免疫",
+                        "站在水里血条每秒掉 4 点，几秒钟就见底；上岸立刻停；坐进船里一点不掉",
                         "先点「先回满血再看」，半血进去根本来不及看",
                         "点「跳进水里」，数到 3 就自己上岸，看血条少了多少",
-                        "再跳一次数满 5 秒，确认会被溺死（这就是「溶解」）"));
+                        "捡起池子里那条船坐上（对着水面右键），再泡 10 秒，确认血条一点不动",
+                        "下船再泡一次，几秒就会被「溶解」死"));
                 sections.add(section("§2⑨ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BONE, 6),
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 6, z + 3,
-                            Trigger.with(Kind.SPAWN_NPCS, "ghoul", "vampire"),
-                            "§c放出一个吸血鬼", "§7他不还手，随便打");
-                    switchpoint(w, y, x + 10, z + 3, Trigger.of(Kind.POWER_READ),
-                            "§b查看能量", "§7每次触发扣 50");
-                }, "验证「不洁纽带」到底替对方做了什么",
-                        "手持骨头攻击一个超自然玩家就会建立纽带；普通人类不行，会提示 "
-                                + "\"You cannot form a bond with a human.\"。建立之后，对方每次挨打，"
-                                + "伤害先减半，另一半按食尸鬼自己的 0.65 减伤算完从你身上扣——"
-                                + "你替他挨一半，每次触发再扣你 50 能量。同世界、距离 10 格以内才维持得住；"
-                                + "一个食尸鬼同时只能绑一个对象",
-                        "绑上之后再打那个吸血鬼：他掉一半血，你自己的血条也跟着掉一截。"
-                                + "这就是纽带的全部作用——它不是吸血，也不是共享，是分担",
-                        "从箱子里拿骨头，点「放出一个吸血鬼」",
-                        "手持骨头打他一下，聊天栏出现建立纽带的提示",
-                        "换成箱子里的铁剑再打他一下：他掉血，你的血也同时掉",
-                        "点「查看能量」，看得见一次 50 的消耗"));
+                            Trigger.with(Kind.SPAWN_NPCS, "ghoul", "random,random"),
+                            "§c放出两个同伴", "§7随机超自然种族");
+                    switchpoint(w, y, x + 10, z + 3,
+                            Trigger.with(Kind.USE_ON_NPC, "ghoul", "BONE"),
+                            "§2用骨头建立纽带", "§7打其中一个");
+                    switchpoint(w, y, x + 14, z + 3,
+                            Trigger.with(Kind.NPC_HITS_NPC, "ghoul", "6"),
+                            "§4让另一个同伴打他", "§7对比两边的血");
+                    powerButton(w, y, x + 18, z, "ghoul");
+                }, "看清「不洁纽带」到底替对方做了什么",
+                        "拿骨头左键攻击一个非人类的超自然玩家就能建立纽带，消耗 1 根骨头；"
+                                + "对人类不成立（会提示 form a bond with a human）。建立之后他每次挨打："
+                                + "最终伤害先减半，另一半点数按你自己的 0.65 减伤算完，从你身上扣掉，"
+                                + "并且每分担一次再扣你 50 点能量。双方必须同一世界、相距 ≤10 格，"
+                                + "你能量要够；一个食尸鬼同时只能绑一个人",
+                        "第二个同伴砍第一个的那一下：被打的只掉一半血，你自己同时掉一截，能量 −50",
+                        "点「放出两个同伴」——他们是随机一个超自然种族，人类不行",
+                        "点「用骨头建立纽带」，聊天栏出现羁绊提示",
+                        "点「让另一个同伴打他」，对比被打的人掉了多少、你掉了多少",
+                        "想自己动手也行：拿武器打其中一个，效果一样"));
             }
             case "werewolf" -> {
                 sections.add(section("§6① 转化 夜里被狼咬死", 1, (w, y, x, z, width) -> {
@@ -1100,10 +1186,10 @@ public final class Hall {
                             "§e白天", "§7狼毒只能在白天做");
                     powerButton(w, y, x + 6, z, "werewolf");
                 }, "验证狼毒解药：只能在白天做，做完直接恢复人类",
-                        "配方不止常见的那几样——默认是 **20 种**：蒲公英、虞美人、红蘑菇、棕蘑菇各 10 个，"
+                        "配方不止常见的那几样——默认是 20 种：蒲公英、虞美人、红蘑菇、棕蘑菇各 10 个，"
                                 + "另加 15 种花（绒球葱、蓝花美耳草、兰花、闭眼绒球花、矢车菊、金蒲公英、"
                                 + "铃兰、睁眼绒球花、橙色郁金香、滨菊、粉色郁金香、红色郁金香、火把花、"
-                                + "白色郁金香、凋灵玫瑰）和 1 个碗，各 1 个。箱子里的东西是**直接照插件配置生成的**，"
+                                + "白色郁金香、凋灵玫瑰）和 1 个碗，各 1 个。箱子里的东西是直接照插件配置生成的，"
                                 + "所以永远不会和配方对不上。手持碗左键，材料齐了才生效，"
                                 + "并需要 supernatural.player.wolfbane 权限。只能白天做——夜里左键不会被受理",
                         "材料被扣掉，人立刻变回人类",
@@ -1238,17 +1324,23 @@ public final class Hall {
                 sections.add(section("§5④ 转化他人 地狱岩", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.NETHERRACK, 8)));
-                    switchpoint(w, y, x + 5, z + 3,
+                    switchpoint(w, y, x + 4, z + 3,
                             Trigger.with(Kind.SPAWN_NPCS, "demon", "vampire:NETHERRACK"),
-                            "§a放出一个持地狱岩的异族", "§7他手上也得拿着地狱岩");
-                    powerButton(w, y, x + 9, z, "demon");
+                            "§a放出持地狱岩的异族", "§7他手上真的拿着");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.USE_ON_NPC, "demon", "NETHERRACK"),
+                            "§c用地狱岩打他", "§7一下就会转化");
+                    powerButton(w, y, x + 12, z, "demon");
                 }, "验证恶魔能把别人变成恶魔",
-                        "手持地狱岩攻击另一名同样手持地狱岩的玩家，耗 2000 能量，"
-                                + "会把对方直接转成恶魔。两边都得拿着地狱岩，缺一边就只是普通一击",
-                        "打完那一下，对方的种族变成恶魔，聊天栏有提示",
-                        "点「放出一个持地狱岩的异族」",
-                        "拿箱子里的地狱岩打他一下",
-                        "看他的种族是不是变成了 demon"));
+                        "手持地狱岩攻击另一名同样手持地狱岩的玩家，耗 2000 能量，会把对方直接"
+                                + "转成恶魔。两边都得拿着地狱岩，缺一边就只是普通一击——"
+                                + "所以你自己也得从箱子里拿一块。注意地狱岩不是武器，"
+                                + "拿它砍人几乎不掉血，这里要的也不是伤害",
+                        "打完之后对方的种族变成 demon，头顶标签和聊天栏都会变",
+                        "点「放出持地狱岩的异族」——他手上真的拿着地狱岩",
+                        "从箱子拿一块地狱岩拿在手上",
+                        "点「用地狱岩打他」（自己走过去打一下也行），看他的种族",
+                        "没变就再打一下：能量不够会提示，先点「能量 +1000」"));
                 sections.add(section("§4⑤ 免疫 火与爆炸", 2, (w, y, x, z, width) -> {
                     box(w, Material.POLISHED_BLACKSTONE, x + 5, y, z + 5, x + 13, y, z + 11);
                     set(w, Material.FIRE, x + 7, y + 1, z + 7);
@@ -1370,9 +1462,10 @@ public final class Hall {
                                 + "把异族变回人类；燧石＝治愈诅咒，耗 1000，要求对方手上也拿着燧石；"
                                 + "纸＝治疗，耗 1000，给非超自然目标回 10 点血。"
                                 + "另外牧师打超自然目标会点燃对方、伤害翻倍，打普通动物则完全无效（狼除外）",
-                        "每个法术都在陪练身上生效：放逐把他传走、驱魔和治愈诅咒把他变回人类、"
-                                + "纸给他加 10 点血",
-                        "点「叫陪练过来」，他会先变成异族",
+                        "每个法术都在那个陪练身上真实生效：他先变成吸血鬼（一个真的超自然"
+                                + "单位），法术按普通攻击的路径打上去，掉血、变身、传送都是真的，"
+                                + "不是播一条消息。你也可以自己拿物品去打他，效果完全一样",
+                        "点「叫陪练过来」，他会先变成异族，然后走过来站到你面前",
                         "手持箱子里的法术物品打他一下，看陪练的变化和聊天栏",
                         "四件物品逐个试，每个法术的按钮只放一次"));
                 sections.add(section("§5⑤ 法术 汲取与守护", 2, (w, y, x, z, width) -> {
@@ -1480,16 +1573,17 @@ public final class Hall {
                                 + "③triple 三连箭，100，一次射出三支；"
                                 + "④power 强化箭，1000，伤害额外 +200%，用完进入 15 秒冷却，"
                                 + "冷却中射不出去；"
-                                + "⑤grapple 抓钩箭，500，命中方块后把你拉向命中点。"
+                                + "⑤grapple 抓钩箭，500 —— 要对着头顶那层石砖平台射，箭必须命中方块，"
+                                + "命中后你会被拽向命中点；离得太近（3 格内）或者箭什么都没打到就不会拉。"
                                 + "除 normal 以外，特殊箭只允许在 PvP 区域使用",
                         "左键一次换一种，聊天栏报出当前箭种；对着陪练射 power 箭伤害明显更高，"
                                 + "紧接着再射一箭会被 15 秒冷却挡下；fire 箭会让陪练身上着火；"
-                                + "triple 一箭射出三支；grapple 打中那层石砖会把你自己拽上去",
-                        "点「切换箭矢模式」选一种，聊天栏会报当前箭种",
-                        "点「叫陪练过来」，对着他射一箭看效果",
+                                + "triple 一箭射出三支；grapple 打中头顶那层石砖会把你整个人拽上去",
+                        "点「切换箭矢模式」切到 grapple（聊天栏会报当前箭种）",
+                        "站远一点，抬头对着那层石砖平台射一箭，看自己是不是被拽过去",
+                        "再切回别的箭种，对着陪练射一箭看伤害",
                         "换 fire 再射一箭，看陪练身上着火",
                         "换 triple 射一箭，数一下是不是三支",
-                        "换 grapple 对着头顶那层石砖射，你会被拉上去",
                         "切到 power 连射两次，第二次会因为冷却射不出去"
                                 + "（注意：火只点得着人身，点不着方块——大厅里是禁止点燃的）"));
                 sections.add(section("§6④ 悬赏", 1, (w, y, x, z, width) -> {
@@ -1756,6 +1850,9 @@ public final class Hall {
         }
         // Every race gets these four, built by the same code, at the end of its row.
         sections.add(fallSection(race, headroom));
+        if (KILL_CONVERTS.contains(race)) {
+            sections.add(convertSection(race));
+        }
         sections.add(sparSection(race));
         sections.add(powerSection(race));
         sections.add(endSection(race));
@@ -2005,10 +2102,19 @@ public final class Hall {
             double ry = (box.y2() - box.y1()) / 2.0 + 4;
             double rz = (box.z2() - box.z1()) / 2.0 + 2;
             for (Entity entity : target.getNearbyEntities(middle, rx, ry, rz)) {
-                if (entity instanceof LivingEntity && !(entity instanceof Player)
-                        && !(entity instanceof ArmorStand)) {
-                    found.add(entity);
+                if (!(entity instanceof LivingEntity living) || entity instanceof Player
+                        || entity instanceof ArmorStand) {
+                    continue;
                 }
+                // Something a player owns - the wolf a werewolf called, the one an angel tamed -
+                // belongs to them, not to the hall. Clearing it along with the hall's own
+                // monsters both loses their pet and, because the plugin only hears about a
+                // tamed animal dying, leaves it counted against their control limit for good.
+                if (living instanceof Tameable tameable && tameable.isTamed()
+                        && tameable.getOwner() instanceof Player) {
+                    continue;
+                }
+                found.add(living);
             }
         }
         return found;
