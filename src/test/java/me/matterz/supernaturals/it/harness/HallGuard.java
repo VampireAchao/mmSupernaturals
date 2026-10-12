@@ -1037,38 +1037,56 @@ final class HallGuard implements Listener {
      * once and then stops, because a stand-in that keeps swinging is a fight, not a test.
      */
     private void bringSpar(Player player) {
-        Player spar = sparring(player);
+        Player spar = stageSpar(player, new ItemStack(Material.IRON_SWORD));
         if (spar == null) {
             return;
         }
-        SuperNPlayer asPlayer = SuperNManager.get(spar);
-        if (!asPlayer.isHuman()) {
-            // A section that converted him - a priest's spell bench, the angel's cure step -
-            // leaves him something other than a person; the stand-in is meant to be one.
-            SuperNManager.cure(asPlayer);
-        }
-        spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
-        spar.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
-        // He walks in from a clear spot rather than appearing on top of the player, because a
-        // target that materialises and then announces a hit in chat is not a fight - and that is
-        // exactly what this looked like: the number arrived with nobody swinging.
-        Location start = approachFrom(player);
-        spar.teleport(facing(start, player.getLocation()));
-        note(player, "§f陪练从 " + Math.round(start.distance(player.getLocation()))
+        humanise(spar);
+        note(player, "§f陪练从 " + Math.round(spar.getLocation().distance(player.getLocation()))
                 + " 格外走过来（他叫 " + SPAR + "），他会砍你一下");
-        walkIn(spar, player);
+        walkIn(spar, player, () -> strike(spar, player));
     }
 
     /**
-     * The stand-in closes the distance a step at a time, then strikes once and stops.
+     * Gets the stand-in ready and puts him down a few blocks away, facing the player.
+     *
+     * <p>He is put where the walk starts, not next to the player: what follows is a walk, and a
+     * stand-in that appears on top of somebody and then announces a hit in chat is not a fight -
+     * which is what every section that skipped this step looked like.
+     *
+     * <p>Not a note is written here: every caller has something different to say about what he is
+     * about to do, and two notes for one switch is noise.
+     */
+    private Player stageSpar(Player player, ItemStack holds) {
+        Player spar = sparring(player);
+        if (spar == null) {
+            return null;
+        }
+        spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
+        spar.getInventory().setItemInMainHand(holds);
+        Location start = approachFrom(player);
+        spar.teleport(facing(start, player.getLocation()));
+        return spar;
+    }
+
+    /** Puts the stand-in back to being a person; a spell may have left him something else. */
+    private static void humanise(Player spar) {
+        SuperNPlayer asPlayer = SuperNManager.get(spar);
+        if (!asPlayer.isHuman()) {
+            SuperNManager.cure(asPlayer);
+        }
+    }
+
+    /**
+     * The stand-in closes the distance a step at a time, then does whatever the section is about.
      *
      * <p>A player entity has no monster AI - there is nothing that walks a {@code ServerPlayer}
      * towards anybody - so he is moved a fraction of a block every other tick. Clients interpolate
      * between the position updates they are sent and swing the legs off the movement they see, so
-     * this reads as a person walking over. One strike, and then he stays where he is: a stand-in
-     * that keeps swinging is a fight, not a test.
+     * this reads as a person walking over. One action when he arrives, and then he stays where he
+     * is: a stand-in that keeps swinging is a fight, not a test.
      */
-    private void walkIn(Player spar, Player player) {
+    private void walkIn(Player spar, Player player, Runnable onArrival) {
         cancelWalk();
         final double reach = 2.4;
         final int[] steps = {40};
@@ -1089,14 +1107,14 @@ final class HallGuard implements Listener {
             }
             if (away <= reach) {
                 cancelWalk();
-                strike(spar, player);
+                onArrival.run();
                 return;
             }
             Vector step = target.toVector().subtract(spar.getLocation().toVector());
             step.setY(0);
             if (step.lengthSquared() < 1.0e-6) {
                 cancelWalk();
-                strike(spar, player);
+                onArrival.run();
                 return;
             }
             Location at = spar.getLocation();
@@ -1106,8 +1124,8 @@ final class HallGuard implements Listener {
             next.setY(target.getY());
             if (!canStand(next)) {
                 // Something is in the way. Slide along it rather than walking into it - and if
-                // there is no way past at all, strike from where he stands instead of burying
-                // himself in a wall.
+                // there is no way past at all, do the thing from where he stands instead of
+                // burying himself in a wall.
                 Location alongX = new Location(next.getWorld(), next.getX(), next.getY(), at.getZ());
                 Location alongZ = new Location(next.getWorld(), at.getX(), next.getY(), next.getZ());
                 if (canStand(alongX)) {
@@ -1116,7 +1134,7 @@ final class HallGuard implements Listener {
                     next = alongZ;
                 } else {
                     cancelWalk();
-                    strike(spar, player);
+                    onArrival.run();
                     return;
                 }
             }
@@ -1134,18 +1152,62 @@ final class HallGuard implements Listener {
      * read. Raising the event by hand and moving the health bar afterwards, which is what this
      * did before, produced a number with nothing behind it.
      */
+    /**
+     * One real blow from the stand-in: the arm goes back, the victim is damaged by him, and the
+     * health that actually left the bar is what gets reported.
+     *
+     * <p>No teleport: he is already inside the three-block reach a player has, and moving him at
+     * the moment of the swing is what made a lunge look like a pop-in. He only turns to face.
+     *
+     * <p>The damage is left where it landed - the point of these sections is comparing what two
+     * weapons do, and a tester who is healed to full the instant they are hit cannot see the
+     * difference. It is clipped so it can never take the last two points: a section that kills the
+     * person running it has ended the test instead of showing them something, and the same button
+     * is meant to be pressed over and over.
+     */
     private void strike(Player spar, Player player) {
         ItemStack held = spar.getInventory().getItemInMainHand();
         double raw = BLADES.getOrDefault(held.getType(), 1.0);
-        spar.teleport(facing(spotFor(player), player.getLocation()));
+        boolean clipped = player.getHealth() - raw < 2;
+        if (clipped) {
+            raw = Math.max(1.0, player.getHealth() - 2);
+        }
+        faceThe(spar, player);
         spar.swingMainHand();
         double before = player.getHealth();
         player.damage(raw, spar);
         double lost = Math.max(0, before - player.getHealth());
         floatNumber(player.getLocation().add(0, 1.8, 0), lost);
-        note(player, "§7陪练的剑落在你身上：§f" + trim(lost) + " §7点伤害（他只砍这一下）"
-                + (lost <= 0 ? " §a（免疫）" : ""));
+        note(player, "§7陪练的" + bladeName(held.getType()) + "落在你身上：§f" + trim(lost)
+                + " §7点伤害（他只砍这一下，血就这么少了）"
+                + (lost <= 0 ? " §a（免疫）" : "")
+                + (clipped ? " §7（你血不多了，这一下只算到剩 2 点）" : ""));
         giveBackSword(spar);
+    }
+
+    /** Turns him to look at the player without moving him. */
+    private static void faceThe(Player spar, Player player) {
+        Location at = spar.getLocation();
+        Vector to = player.getLocation().toVector().subtract(at.toVector());
+        to.setY(0);
+        if (to.lengthSquared() > 1.0e-6) {
+            Location look = at.clone().setDirection(to);
+            spar.setRotation(look.getYaw(), look.getPitch());
+        }
+    }
+
+    /** What a weapon is called in the messages a tester reads. */
+    private static String bladeName(Material type) {
+        return switch (type) {
+            case WOODEN_SWORD -> "木剑";
+            case STONE_SWORD -> "石剑";
+            case IRON_SWORD -> "铁剑";
+            case GOLDEN_SWORD -> "金剑";
+            case DIAMOND_SWORD -> "钻石剑";
+            case NETHERITE_SWORD -> "下界合金剑";
+            case BOW -> "弓";
+            default -> "剑";
+        };
     }
 
     /** He puts the sword away when the test is over, so he is not left holding a weapon. */
@@ -1290,28 +1352,32 @@ final class HallGuard implements Listener {
      * bar, so an immunity reads as a zero because there was nothing to read. The player is put
      * back to full afterwards so the section can be run again without a death in between.
      */
+    /**
+     * Has the stand-in walk in and hit the player with one particular weapon.
+     *
+     * <p>This used to put him down next to the player and take the swing from there, with no walk
+     * at all: the number appeared, but nobody had moved - which is what made these two switches
+     * look broken. He walks in now and swings when he gets there, the same way the shared spar step
+     * does, so what the player sees first is somebody coming at them.
+     *
+     * <p>The blow is the server's own - the arm goes back and {@code player.damage} runs - so the
+     * number on the health bar is the plugin's answer, not a figure this code decided on.
+     */
     private void testHit(Player player, String weaponName) {
         Material weapon = weaponName == null ? null : Material.matchMaterial(weaponName);
         if (weapon == null) {
             note(player, "§c这个环节没有配置武器");
             return;
         }
-        Player spar = sparring(player);
+        Player spar = stageSpar(player, new ItemStack(weapon));
         if (spar == null) {
             return;
         }
-        spar.teleport(spotFor(player));
-        spar.getInventory().setItemInMainHand(new ItemStack(weapon));
-        spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
-        spar.swingMainHand();
-        double before = player.getHealth();
-        player.damage(BLADES.getOrDefault(weapon, 1.0), spar);
-        double lost = Math.max(0, before - player.getHealth());
-        floatNumber(player.getLocation().add(0, 1.8, 0), lost);
-        note(player, "§7" + weapon.name() + " 打在你身上：§f" + trim(lost) + " §7点伤害"
-                + (lost <= 0 ? " §a（免疫）" : ""));
-        giveBackSword(spar);
-        player.setHealth(player.getAttribute(Attribute.MAX_HEALTH).getValue());
+        humanise(spar);
+        note(player, "§f陪练拿着" + bladeName(weapon) + "从 "
+                + Math.round(spar.getLocation().distance(player.getLocation()))
+                + " 格外走过来，他会砍你这一下");
+        walkIn(spar, player, () -> strike(spar, player));
     }
 
     /**
@@ -1327,19 +1393,14 @@ final class HallGuard implements Listener {
             note(player, "§c这个环节没有配置法术物品");
             return;
         }
-        Player spar = sparring(player);
+        Player spar = stageSpar(player, null);
         if (spar == null) {
             return;
         }
-        spar.teleport(spotFor(player));
-        spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
         boolean guardianAngel = item.name().equalsIgnoreCase(SNConfigHandler.priestSpellGuardianAngel);
         boolean humanOnly = Material.PAPER.equals(item) || guardianAngel;
         if (humanOnly) {
-            SuperNPlayer target = SuperNManager.get(spar);
-            if (!target.isHuman()) {
-                SuperNManager.cure(target);
-            }
+            humanise(spar);
         } else {
             SuperNManager.convert(SuperNManager.get(spar), "vampire",
                     SNConfigHandler.vampirePowerStart);
@@ -1349,6 +1410,16 @@ final class HallGuard implements Listener {
             spar.getInventory().setItemInMainHand(new ItemStack(item));
         }
         player.getInventory().setItemInMainHand(new ItemStack(item));
+        note(player, "§f陪练（现在是 " + SuperNManager.get(spar).getType() + "）从 "
+                + Math.round(spar.getLocation().distance(player.getLocation()))
+                + " 格外走过来，走近了就打他一下施法");
+        walkIn(spar, player, () -> castAt(player, spar, item));
+    }
+
+    /** One attack from the priest at the stand-in, which is how every spell fires. */
+    private void castAt(Player player, Player spar, Material item) {
+        faceThe(player, spar);
+        player.swingMainHand();
         EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(player, spar,
                 EntityDamageEvent.DamageCause.ENTITY_ATTACK, 1.0);
         Bukkit.getPluginManager().callEvent(event);
