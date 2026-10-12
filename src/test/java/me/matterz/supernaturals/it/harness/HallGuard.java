@@ -52,6 +52,8 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
@@ -138,6 +140,26 @@ final class HallGuard implements Listener {
 
     /** The names the hall's test prey answer to, in the order a section asks for them. */
     private static final List<String> PREY_NAMES = List.of("HallPrey1", "HallPrey2", "HallPrey3");
+
+    /**
+     * What each race is called on screen.
+     *
+     * <p>A stand-in's account name is fixed - it has to be, the account is what makes him a player -
+     * and a section that puts three different races in front of somebody is useless if all three
+     * answer to "HallPrey2". Every stand-in therefore joins a scoreboard team named for his race,
+     * and the team's prefix is what shows above his head and beside his name in the tab list. That
+     * is the one place a server may write next to a player's name, so it is the one used.
+     */
+    private static final Map<String, String> RACE_LABEL = Map.of(
+            "vampire", "§c吸血鬼",
+            "ghoul", "§2食尸鬼",
+            "werewolf", "§6狼人",
+            "demon", "§4恶魔",
+            "priest", "§f牧师",
+            "witchhunter", "§7猎巫人",
+            "enderborn", "§5末影族",
+            "angel", "§e天使",
+            "human", "§a人类");
 
     /** The stand-ins the hall has brought up as prey, by name, so they can be taken back out. */
     private final Map<String, Object> prey = new HashMap<>();
@@ -246,7 +268,52 @@ final class HallGuard implements Listener {
                     "§a回到主世界的那条长廊");
             case LEFT_CLICK -> leftClick(player);
             case BOUNTY -> bounty(player);
+            case FALL_TEST -> teleport(player, hall.point("fall." + trigger.race()),
+                    "§6放开手：落点是一块石板，摔完点旁边的「回到地面」");
+            case BACK_DOWN -> teleport(player, hall.point("fall.ground." + trigger.race()),
+                    "§a回到地面了");
+            case SET_FIRE -> setFire(player);
+            case DIP_LAVA -> teleport(player, hall.point("lava." + trigger.race()),
+                    "§4下池子了：恶魔在岩浆里回血回能，别的种族会被烧、还会掉进去");
+            case POWER_READ -> readPower(player);
+            case SPAWN_MOB -> spawnMob(player, trigger.detail());
         }
+    }
+
+    /**
+     * Lets out one mob of a named type, for a step whose answer depends on what kind of creature it
+     * is - an angel gains power from a monster and nothing from an animal, so a section about that
+     * has to put a monster in front of them, not a chicken.
+     */
+    private void spawnMob(Player player, String typeName) {
+        EntityType type = typeName == null ? null : EntityType.fromName(typeName);
+        if (type == null) {
+            note(player, "§c这个环节没有配置怪物类型");
+            return;
+        }
+        clearHallMobs(player, null);
+        Location at = player.getLocation().add(2.5, 0, 0.5);
+        try {
+            Entity spawned = player.getWorld().spawnEntity(at, type);
+            spawned.setPersistent(true);
+            keepIn(plugin.hallOrNull(), spawned, player.getLocation());
+            note(player, "§c放出了一只 " + type.name() + "，杀掉它看能量");
+        } catch (RuntimeException notPlaceable) {
+            note(player, "§c这里放不下 " + type.name());
+        }
+    }
+
+    /** Sets the player alight, which is what several races claim not to care about. */
+    private void setFire(Player player) {
+        player.setFireTicks(200);
+        note(player, "§c你被点着了——免疫火焰的种族不会掉血，也不该真的烧起来");
+    }
+
+    /** Reads a player's power back, because a step about loss or gain has to be measurable. */
+    private void readPower(Player player) {
+        SuperNPlayer snplayer = SuperNManager.get(player);
+        note(player, "§b当前能量 §f" + ((int) snplayer.getPower())
+                + "§7（种族 " + snplayer.getType() + "）");
     }
 
     /** Swings whatever is in hand at nothing, which is how a hunter cycles its arrow mode. */
@@ -685,6 +752,8 @@ final class HallGuard implements Listener {
         }
         String[] wanted = races.split(",");
         List<String> made = new ArrayList<>();
+        List<Location> taken = new ArrayList<>();
+        int seat = 0;
         for (int index = 0; index < wanted.length && index < PREY_NAMES.size(); index++) {
             // "vampire" is one; "vampire:NETHERRACK" is one holding netherrack, which is what a
             // spell that needs both sides to be holding something asks for.
@@ -703,14 +772,103 @@ final class HallGuard implements Listener {
             }
             prey.put(name, ghost);
             SuperNManager.convert(SuperNManager.get(npc), race);
-            npc.teleport(spotFor(player));
+            Location spot = seatFor(player, seat++, taken);
+            taken.add(spot);
+            npc.teleport(spot);
             npc.setHealth(npc.getAttribute(Attribute.MAX_HEALTH).getValue());
             npc.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
-            made.add(hand == null ? race : race + "(" + hand.name() + ")");
+            labelRace(npc, race);
+            made.add(describe(npc, race, hand));
         }
         note(player, made.isEmpty() ? "§c没能放出异族靶子"
-                : "§c放出了 " + made.size() + " 个异族：" + String.join("、", made)
-                        + "，用武器杀掉他们");
+                : "§c放出了 " + made.size() + " 个：" + String.join("、", made)
+                        + "（头上和 tab 里有种族名），用武器杀掉他们");
+    }
+
+    /**
+     * A place for the nth stand-in to stand, clear of the ones already placed.
+     *
+     * <p>Every one of them used to be teleported to the same spot in front of the player, so three
+     * different races arrived inside each other and there was nobody to tell apart. They now take
+     * an arc: left, centre and right in front, and further back beyond the third - each position
+     * checked for a floor and two clear blocks, and checked against the stand-ins already put
+     * down, so a spot that is taken is not handed out twice.
+     */
+    private Location seatFor(Player player, int seat, List<Location> taken) {
+        Location centre = player.getLocation();
+        Vector facing = centre.getDirection().setY(0);
+        if (facing.lengthSquared() < 0.01) {
+            facing = new Vector(0, 0, 1);
+        }
+        facing.normalize();
+        Vector right = new Vector(-facing.getZ(), 0, facing.getX());
+        for (int attempt = 0; attempt < 9; attempt++) {
+            double across = ((seat + attempt) % 3 - 1) * 1.8;
+            double ahead = 3.0 + ((seat + attempt) / 3) * 2.2;
+            Location at = centre.clone()
+                    .add(facing.clone().multiply(ahead))
+                    .add(right.clone().multiply(across));
+            if (canStand(at) && clearOf(at, taken)) {
+                return at;
+            }
+        }
+        return spotFor(player);
+    }
+
+    /** True when nothing has already been put down within a block of that spot. */
+    private static boolean clearOf(Location at, List<Location> taken) {
+        for (Location other : taken) {
+            if (other.getWorld().equals(at.getWorld())
+                    && other.distanceSquared(at) < 1.0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Writes the stand-in's race beside his name, where everybody can see it.
+     *
+     * <p>His account name cannot be changed, so it is the scoreboard that does the talking: one
+     * team per race, whose prefix is shown above his head and in the tab list. A section that hands
+     * the player three races has to let them see which is which before they can use them.
+     */
+    private void labelRace(Player npc, String race) {
+        String label = RACE_LABEL.getOrDefault(race, "§7" + race);
+        Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
+        Team team = board.getTeam("mmr_" + race);
+        if (team == null) {
+            team = board.registerNewTeam("mmr_" + race);
+            team.setPrefix(label + "§r ");
+        }
+        for (Team other : new ArrayList<>(board.getTeams())) {
+            if (!other.equals(team) && other.hasEntry(npc.getName())) {
+                other.removeEntry(npc.getName());
+            }
+        }
+        team.addEntry(npc.getName());
+    }
+
+    /** What one stand-in is, for the message that says who turned up. */
+    private String describe(Player npc, String race, Material hand) {
+        String shown = RACE_LABEL.getOrDefault(race, race);
+        return shown + "§7(" + npc.getName() + (hand == null ? "" : " 拿 " + hand.name()) + ")";
+    }
+
+    /**
+     * Takes a stand-in's race label off him.
+     *
+     * <p>A team entry outlives the player: the account name goes back on the board the next time
+     * somebody plays under it, and a stale prefix would have a human wearing "vampire". The label
+     * is removed with him, not with the team - the team is the label, and it is worth keeping.
+     */
+    private static void unstamp(String name) {
+        Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
+        for (Team team : new ArrayList<>(board.getTeams())) {
+            if (team.hasEntry(name)) {
+                team.removeEntry(name);
+            }
+        }
     }
 
     /** Takes every stand-in the hall brought up as prey back out again. */
@@ -723,6 +881,7 @@ final class HallGuard implements Listener {
     /** Takes one stand-in out, if he is still on the books. */
     private void clearPrey(String name) {
         if (prey.remove(name) != null) {
+            unstamp(name);
             plugin.dropGhost(name);
         }
     }

@@ -35,6 +35,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
@@ -299,6 +301,10 @@ public final class HarnessPlugin extends JavaPlugin {
                 return where(rest);
             case "near":
                 return near(rest);
+            case "fall":
+                return fall(rest);
+            case "hurt":
+                return hurt(rest);
             case "mine":
                 return mine(rest);
             case "step":
@@ -713,20 +719,101 @@ public final class HarnessPlugin extends JavaPlugin {
      * spawns its own - and "did it suffocate" is a question about one entity's health, so the
      * answer has to name the entity.
      */
+    /**
+     * Runs one damage event of a named kind through the plugin, and reports what it decided.
+     *
+     * <p>The server hands out a great deal of damage on its own - lava, fire, drowning, cactus -
+     * and it only does so to a player it believes is being moved by a client. A stand-in is not,
+     * so half the passive rules about those damage kinds cannot be reached by arranging the world
+     * and waiting. The events can be raised directly, which is what this does and what {@link
+     * #fall} does for the one kind with arithmetic worth copying.
+     */
+    private String hurt(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length < 3) {
+            return "err usage: hurt <name> <cause> [amount]";
+        }
+        Player player = player(args[0]);
+        DamageCause cause;
+        try {
+            cause = DamageCause.valueOf(args[1].toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            return "err not a damage cause: " + args[1];
+        }
+        double amount = args.length > 2 ? Double.parseDouble(args[2]) : 1;
+        double before = player.getHealth();
+        double powerBefore = SuperNManager.get(player).getPower();
+        EntityDamageEvent event = new EntityDamageEvent(player, cause, amount);
+        Bukkit.getPluginManager().callEvent(event);
+        if (!event.isCancelled() && event.getDamage() > 0) {
+            player.setHealth(Math.max(0, before - event.getDamage()));
+        }
+        return "ok cause=" + cause + " raw=" + amount + " cancelled=" + event.isCancelled()
+                + " damage=" + event.getDamage() + " health=" + before + "->" + player.getHealth()
+                + " power=" + (int) powerBefore + "->" + (int) SuperNManager.get(player).getPower()
+                + " race=" + SuperNManager.get(player).getType();
+    }
+
+    /**
+     * Runs a fall of a given height through the plugin's own path, and reports what it decided.
+     *
+     * <p>A player with no client does not fall: the server moves players from the client's input,
+     * so gravity never runs for a stand-in and a section about fall damage cannot be driven by
+     * teleporting one into the air and waiting. What the plugin actually answers is the damage
+     * event, and that can be raised directly - which is what this does, with the vanilla
+     * arithmetic (one point a block past the third) for the height asked for.
+     */
+    private String fall(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length < 2) {
+            return "err usage: fall <name> <blocks>";
+        }
+        Player player = player(args[0]);
+        int blocks = Integer.parseInt(args[1].trim());
+        double damage = Math.max(0, blocks - 3);
+        EntityDamageEvent event = new EntityDamageEvent(player, DamageCause.FALL, damage);
+        Bukkit.getPluginManager().callEvent(event);
+        return "ok blocks=" + blocks + " raw=" + damage + " cancelled=" + event.isCancelled()
+                + " damage=" + event.getDamage() + " race=" + SuperNManager.get(player).getType();
+    }
+
     private String near(String rest) {
         String[] args = rest.trim().split("\\s+");
         Player player = player(args[0]);
         double radius = args.length > 1 ? Double.parseDouble(args[1]) : 8;
         List<String> found = new ArrayList<>();
         for (Entity entity : player.getNearbyEntities(radius, radius, radius)) {
-            if (!(entity instanceof LivingEntity living) || living instanceof Player) {
+            if (!(entity instanceof LivingEntity living)
+                    || living.getUniqueId().equals(player.getUniqueId())) {
                 continue;
             }
-            found.add(living.getType() + "@" + String.format(Locale.ROOT, "%.1f,%.1f,%.1f",
+            // A stand-in is a player, and for one of those the interesting part is not its name but
+            // what race it was given and whether a player could tell: the race is the plugin's own
+            // record, the label is what the scoreboard writes next to the name.
+            String who;
+            if (living instanceof Player standIn) {
+                who = "player:" + standIn.getName()
+                        + " race=" + SuperNManager.get(standIn).getType()
+                        + " label=" + labelOf(standIn.getName());
+            } else {
+                who = living.getType().toString();
+            }
+            found.add(who + "@" + String.format(Locale.ROOT, "%.1f,%.1f,%.1f",
                     living.getLocation().getX(), living.getLocation().getY(),
                     living.getLocation().getZ()) + " hp=" + living.getHealth());
         }
         return "ok " + found.size() + ": " + String.join(" | ", found);
+    }
+
+    /** What the scoreboard currently shows beside a name, if anything. */
+    private static String labelOf(String name) {
+        Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
+        for (Team team : board.getTeams()) {
+            if (team.hasEntry(name)) {
+                return "'" + team.getPrefix() + "'";
+            }
+        }
+        return "none";
     }
 
     /** Breaks a block as a player would, and reports whether anything stopped it. */
@@ -1295,7 +1382,8 @@ public final class HarnessPlugin extends JavaPlugin {
         // applied - which a hand-made event does not do. Say it out loud before killing it.
         closest.setLastDamageCause(hit);
         closest.setHealth(0);
-        return "ok " + player.getName() + " killed the " + type;
+        return "ok " + player.getName() + " killed the " + type
+                + " cancelled=" + hit.isCancelled() + " damage=" + hit.getDamage();
     }
 
     /**
