@@ -80,6 +80,10 @@ public class ArrowUtil implements Runnable {
 			// set travel speed
 			travelVector = travelVector.multiply(1.0);
 			player.setVelocity(travelVector);
+			// Pulled through the air and let go at the end of it: without this the fall damage
+			// arrives the moment the grapple releases, and the ability reads as hurting the
+			// person who used it.
+			player.setFallDistance(0);
 			ArrowUtil gh = new ArrowUtil(player, targetLocation, startTime, grappleDistance);
 			SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(SupernaturalsPlugin.instance, gh);
 		}

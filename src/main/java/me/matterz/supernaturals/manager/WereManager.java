@@ -305,10 +305,20 @@ public class WereManager extends ClassManager {
 		if (SuperNManager.worldTimeIsNight(player)) {
 			if (snplayer.getPower() >= SNConfigHandler.werePowerSummonCost) {
 				int i = 0;
-				for (Wolf wolf : wolvesMap.keySet()) {
-					if (wolvesMap.get(wolf).equals(snplayer)) {
-						i++;
+				for (Wolf wolf : new ArrayList<Wolf>(wolvesMap.keySet())) {
+					if (!wolvesMap.get(wolf).equals(snplayer)) {
+						continue;
 					}
+					// A wolf that left the world without dying - a world edit, another plugin, or
+					// the chunk it stood in going away for good - never fires a death event, so
+					// nothing ever takes it off this list. Left on it, it keeps counting towards
+					// the limit, and the owner is told they have all the wolves they can control
+					// while owning none at all.
+					if (!wolf.isValid() || wolf.isDead()) {
+						wolvesMap.remove(wolf);
+						continue;
+					}
+					i++;
 				}
 				if (i <= 4) {
 					Wolf wolf = (Wolf) player.getWorld().spawnEntity(player.getLocation(), EntityType.WOLF);
