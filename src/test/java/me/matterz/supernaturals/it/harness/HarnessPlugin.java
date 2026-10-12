@@ -326,6 +326,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return buttons(rest);
             case "section":
                 return section(rest);
+            case "point":
+                return point(rest);
             case "mobs":
                 return mobs(rest);
             case "weather":
@@ -1186,6 +1188,23 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /** Where a numbered section of a hall starts, as {@code x y z}. */
+    /**
+     * A named place a section put down, by key - the same map the hall's own switches are wired to.
+     * Asking for one is how a scenario checks where a section actually put something, rather than
+     * working it out from the section's origin and the arithmetic that was supposed to happen.
+     */
+    private String point(String rest) {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        Location at = hall.point(rest.trim());
+        if (at == null) {
+            return "err no such point: " + rest.trim();
+        }
+        return "ok " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ()
+                + " " + at.getWorld().getName();
+    }
+
     private String section(String rest) {        if (hall == null) {
             return "err no hall on this server";
         }

@@ -269,9 +269,9 @@ final class HallGuard implements Listener {
             case LEFT_CLICK -> leftClick(player);
             case BOUNTY -> bounty(player);
             case FALL_TEST -> teleport(player, hall.point("fall." + trigger.race()),
-                    "§6放开手：落点是一块石板，摔完点旁边的「回到地面」");
+                    "§6放开手：掉到井底，再点井壁上的「回到地面」回大厅");
             case BACK_DOWN -> teleport(player, hall.point("fall.ground." + trigger.race()),
-                    "§a回到地面了");
+                    "§a回到大厅地面了");
             case SET_FIRE -> setFire(player);
             case DIP_LAVA -> teleport(player, hall.point("lava." + trigger.race()),
                     "§4下池子了：恶魔在岩浆里回血回能，别的种族会被烧、还会掉进去");

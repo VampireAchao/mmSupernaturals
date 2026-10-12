@@ -489,7 +489,7 @@ public final class Hall {
         int z0 = centreZ - DEPTH / 2;
         int headroom = cell[2];
 
-        List<Section> sections = sectionsFor(race);
+        List<Section> sections = sectionsFor(race, headroom);
         int length = 0;
         for (Section section : sections) {
             length += section.slots() * SLOT;
@@ -702,7 +702,7 @@ public final class Hall {
      * <p>A second switch is needed because a fall is as one-way as it sounds: the player is on a
      * roof thirteen blocks above the ground, and the way back down is another fall.
      */
-    private Section fallSection(String race) {
+    private Section fallSection(String race, int headroom) {
         String ability = switch (race) {
             case "vampire", "ghoul", "angel" ->
                     "免疫摔落伤害：FALL 伤害被直接取消，从任意高度落地都不掉血";
@@ -724,29 +724,58 @@ public final class Hall {
             default -> "按高度正常掉血（十三格大约掉 10 点），这就是没有减免的样子";
         };
         return section("§6摔落 从高处落下", 2, (w, y, x, z, width) -> {
-            int top = w.getHighestBlockYAt(x + 6, z + DEPTH / 2) + 1;
-            box(w, Material.STONE, x + 5, top - 1, z + DEPTH / 2 - 1,
-                    x + 7, top - 1, z + DEPTH / 2 + 1);
-            points.put("fall." + race, new Location(w, x + 6.5, top + 13, z + DEPTH / 2.0 + 0.5));
-            points.put("fall.ground." + race,
-                    new Location(w, x + 6.5, y + 1, z + DEPTH / 2.0 + 0.5));
+            int cx = x + 6;
+            int cz = z + DEPTH / 2;
+            // The drop happens inside a shaft that stands on the hall's own roof: four walls and
+            // a lid around a three-by-three well, the landing pad at the bottom, and everything
+            // the fall needs on the inside of it. This used to be a patch of stone laid flat on
+            // the roof, which has no answer for a player who lands half a block wide of it or
+            // takes a step afterwards: they end up on the ground outside a hall they cannot get
+            // back into, with the switch that would have brought them back on a wall inside the
+            // room they can no longer reach. A well is its own little room. There is nowhere to
+            // fall to but the pad, and the way out is on the wall beside it.
+            // The height is worked out from the room's own numbers, never asked of the world.
+            // `getHighestBlockYAt` looks right and is not: the heightmap is rebuilt lazily, so
+            // during the build it still describes whatever stood here before - the ground - and
+            // the previous version of this step put its landing pad on the landscape outside the
+            // hall, which is exactly where the player ended up, with the way back on a wall
+            // inside a room they could no longer reach. The ceiling is at y + headroom + 1.
+            int roof = y + headroom + 1;
+            int floorY = roof + 1;      // where the player stands after the fall
+            int drop = 13;              // ten points of damage for a race with no help
+            int legTop = floorY + drop; // where they are put, to let go
+            int lid = legTop + 2;
+
+            for (int up = floorY; up <= lid; up++) {
+                box(w, Material.STONE_BRICKS, cx - 2, up, cz - 2, cx + 2, up, cz + 2);
+            }
+            box(w, Material.AIR, cx - 1, floorY, cz - 1, cx + 1, legTop + 1, cz + 1);
+            box(w, Material.STONE, cx - 1, floorY - 1, cz - 1, cx + 1, floorY - 1, cz + 1);
+            // Fifteen blocks of shaft with no light in it is a hole you cannot find the switch in.
+            set(w, Material.SEA_LANTERN, cx, lid, cz);
+            set(w, Material.SEA_LANTERN, cx + 2, floorY + 2, cz + 2);
+            set(w, Material.SEA_LANTERN, cx - 2, floorY + 2, cz - 2);
+
+            points.put("fall." + race, new Location(w, cx + 0.5, legTop, cz + 0.5));
+            points.put("fall.ground." + race, new Location(w, cx + 0.5, y + 1, cz + 0.5));
             switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.FALL_TEST, race),
                     "§6站到高处", "§7然后放开手落下来");
-            switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.BACK_DOWN, race),
-                    "§a回到地面", "§7摔完了再点这个");
+            // The way back sits inside the well, because that is where the fall leaves you.
+            button(w, cx + 1, floorY + 1, cz, BlockFace.WEST, Trigger.of(Kind.BACK_DOWN, race));
+            signOn(w, cx + 2, floorY + 2, cz, BlockFace.WEST, "§a回到地面", "§7点一下回大厅");
         }, "用一次真实坠落，验这一族的摔落减免",
                 ability,
                 expect,
                 "先确认自己是满血（上一节受过伤就点点「恢复人类」再回来）",
-                "点「站到高处」——你会被送到大厅外面地面上方十三格",
-                "放开手落到那块石板上，看血条掉了多少",
-                "点「回到地面」继续后面的环节");
+                "点「站到高处」——你会被送进大厅屋顶上的那口石井里",
+                "放开手落到井底，看血条掉了多少",
+                "点井壁上的「回到地面」按钮回大厅，继续后面的环节");
     }
 
     // -- the sections ------------------------------------------------------
 
     /** The steps of one race's flow, in the order a player should meet them. */
-    private List<Section> sectionsFor(String race) {
+    private List<Section> sectionsFor(String race, int headroom) {
         List<Section> sections = new ArrayList<>();
         switch (race) {
             case "vampire" -> {
@@ -1726,7 +1755,7 @@ public final class Hall {
             default -> throw new IllegalStateException("no hall for " + race);
         }
         // Every race gets these four, built by the same code, at the end of its row.
-        sections.add(fallSection(race));
+        sections.add(fallSection(race, headroom));
         sections.add(sparSection(race));
         sections.add(powerSection(race));
         sections.add(endSection(race));
