@@ -74,6 +74,11 @@ public class SNCommandChurch extends SNCommand {
 	}
 
 	private void list() {
+		if (sender instanceof Player player
+				&& !SupernaturalsPlugin.hasPermissions(player, permissions)) {
+			sendMessage("You do not have permissions to use this command.");
+			return;
+		}
 		if (SNConfigHandler.priestChurches.isEmpty()) {
 			sendMessage("No churches are registered.");
 			return;
