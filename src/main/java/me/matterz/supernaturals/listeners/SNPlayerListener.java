@@ -39,7 +39,6 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.material.Door;
 
 public class SNPlayerListener implements Listener {
 
@@ -139,8 +138,7 @@ public class SNPlayerListener implements Listener {
 											event.setCancelled(true);
 											return;
 										}
-										Door door = (Door) block.getState().getData();
-										boolean open = plugin.getHunterManager().doorEvent(player, block, door);
+										boolean open = plugin.getHunterManager().doorEvent(player, block);
 										event.setCancelled(open);
 										return;
 									}

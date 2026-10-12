@@ -8,6 +8,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Animals;
 import org.bukkit.entity.Boat;
 import org.bukkit.entity.EntityType;
@@ -99,31 +100,29 @@ public class AngelManager extends ClassManager {
 		// click actions - so an angel could never call a cow, a wolf or a pig, whatever it was
 		// holding, and every summon looked like a dead ability. Reaching it is the fix; the
 		// calls themselves are the ones that were always here.
-		if (!action.equals(Action.LEFT_CLICK_BLOCK)) {
-			return false;
-		}
+		//
+		// Both kinds of swing summon now. A swing at a block puts the animal where the player
+		// pointed; a swing at the air - which is what most of them are, since there is usually
+		// nothing to point at - puts it on clear ground in front of them, the same way a
+		// werewolf calls a wolf.
 		if (!itemInHandMaterial.equals(Material.BEEF)
 				&& !itemInHandMaterial.equals(Material.BONE)
 				&& !itemInHandMaterial.equals(Material.PORKCHOP)) {
 			return false;
 		}
-		Block targetBlock = player.getTargetBlock(null, 20);
-		if (targetBlock == null) {
-			return false;
-		}
-		Location targetBlockLocation = targetBlock.getLocation();
 		if (snplayer.getPower() <= SNConfigHandler.angelSummonPowerCost) {
 			SuperNManager.sendMessage(snplayer, "Not enough power to summon!");
 			return false;
 		}
+		Location spot = summonSpot(player, event.getClickedBlock(), event.getBlockFace());
 		if (itemInHandMaterial.equals(Material.BEEF)) {
-			player.getWorld().spawnEntity(targetBlockLocation, EntityType.COW);
+			player.getWorld().spawnEntity(spot, EntityType.COW);
 			event.setCancelled(true);
 			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned cow.");
 			return true;
 		}
 		if (itemInHandMaterial.equals(Material.BONE)) {
-			Wolf spawnedWolf = (Wolf) player.getWorld().spawnEntity(targetBlockLocation, EntityType.WOLF);
+			Wolf spawnedWolf = (Wolf) player.getWorld().spawnEntity(spot, EntityType.WOLF);
 			spawnedWolf.setTamed(true);
 			spawnedWolf.setOwner(player);
 			spawnedWolf.setHealth(20);
@@ -131,7 +130,7 @@ public class AngelManager extends ClassManager {
 			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned wolf.");
 			return true;
 		}
-		player.getWorld().spawnEntity(targetBlockLocation, EntityType.PIG);
+		player.getWorld().spawnEntity(spot, EntityType.PIG);
 		event.setCancelled(true);
 		SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned pig.");
 		return true;
@@ -144,6 +143,62 @@ public class AngelManager extends ClassManager {
 			return 0;
 		}
 		return damage;
+	}
+
+	/**
+	 * Where a summoned animal should stand.
+	 *
+	 * <p>An animal conjured at the block a player aimed at used to appear at that block's own
+	 * corner - which is inside the block - and suffocated where it stood. It belongs in the open
+	 * cell on the far side of the face that was struck, or on top of the block. A swing at the
+	 * air has no block at all, so it goes straight to clear ground in front of the player.
+	 */
+	private static Location summonSpot(Player player, Block target, BlockFace face) {
+		if (target != null) {
+			if (face != null && !face.equals(BlockFace.SELF) && face.getModY() == 0) {
+				Location beside = roomAt(target.getRelative(face));
+				if (beside != null) {
+					return beside;
+				}
+			}
+			Location above = roomAt(target.getRelative(BlockFace.UP));
+			if (above != null) {
+				return above;
+			}
+		}
+		Location front = inFront(player);
+		return front != null ? front : player.getLocation();
+	}
+
+	/** Clear floor in front of the player, two blocks out and then one, or null if both are walled. */
+	private static Location inFront(Player player) {
+		Vector facing = player.getLocation().getDirection().setY(0);
+		if (facing.lengthSquared() < 1.0E-6) {
+			facing = new Vector(0, 0, 1);
+		}
+		facing.normalize();
+		for (int distance = 2; distance >= 1; distance--) {
+			Location ahead = player.getLocation().clone().add(facing.clone().multiply(distance));
+			Location spot = roomAt(ahead.getBlock());
+			if (spot != null) {
+				return spot;
+			}
+		}
+		return null;
+	}
+
+	/** The middle of a cell an animal can stand in: two passable cells with floor under them. */
+	private static Location roomAt(Block block) {
+		if (!block.isPassable() || !block.getRelative(BlockFace.UP).isPassable()) {
+			return null;
+		}
+		if (block.getRelative(BlockFace.DOWN).isPassable()) {
+			// Something to stand on, or the animal would drop down a hole the moment it
+			// appeared. Drowning it inside a wall was the bug; dropping it into a mine shaft
+			// would be the same bug wearing a hat.
+			return null;
+		}
+		return block.getLocation().add(0.5, 0, 0.5);
 	}
 
 	public static boolean jump(Player player, double deltaSpeed) {
