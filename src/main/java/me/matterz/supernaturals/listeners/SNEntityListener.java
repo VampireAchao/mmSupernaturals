@@ -114,6 +114,8 @@ public class SNEntityListener implements Listener {
 		// - the creaking is the one that made this visible - never raises the target event that
 		// cancelling a truce depends on. So the damage is refused here too, on the same terms.
 		if (event instanceof EntityDamageByEntityEvent hit && victim instanceof Player holder
+				&& (!SNConfigHandler.multiworld
+						|| SupernaturalsPlugin.hasPermissions(holder, worldPermission))
 				&& sharesTruce(holder, hit.getDamager())) {
 			event.setCancelled(true);
 			return;
