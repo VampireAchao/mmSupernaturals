@@ -1051,7 +1051,7 @@ public class SNConfigHandler {
 				priestChurches.add(church);
 			}
 		}
-		if (priestChurches.isEmpty()) {
+		if (priestChurches.isEmpty() && !config.contains("Priest.Church.Locations")) {
 			// A server that has been running since before churches came in a list still has its
 			// one church in the four settings below, and it has to keep working.
 			Location legacy = new Location(
