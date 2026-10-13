@@ -151,7 +151,7 @@ public class GhoulManager extends ClassManager {
 
 		if ((SNConfigHandler.ghoulRightClickSummon && (action.equals(Action.RIGHT_CLICK_AIR) || action.equals(Action.RIGHT_CLICK_BLOCK)))
 				|| (!SNConfigHandler.ghoulRightClickSummon && (action.equals(Action.LEFT_CLICK_AIR) || action.equals(Action.LEFT_CLICK_BLOCK)))) {
-			if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.ghoulMaterial)) {
+			if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.ghoulMaterial)) {
 				summon(player);
 				event.setCancelled(true);
 				return true;
@@ -244,7 +244,7 @@ public class GhoulManager extends ClassManager {
 			return;
 		}
 
-		if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.ghoulBondMaterial)) {
+		if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.ghoulBondMaterial)) {
 			if (SNConfigHandler.debugMode) {
 				SupernaturalsPlugin.log(snplayer.getName()
 						+ " is attempting to bond...");

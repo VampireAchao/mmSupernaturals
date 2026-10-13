@@ -310,6 +310,12 @@ public class SuperNManager {
 
 		// Untarget the player.
 		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
+		if (player == null) {
+			// There is nobody to untarget: they are not on the server. This used to be a crash -
+			// the lookup answers null for anybody who has left, and calling getWorld() on it is
+			// the null dereference rather than the guard.
+			return;
+		}
 		for (LivingEntity entity : player.getWorld().getLivingEntities()) {
 			// Mob (not Creature) so that hostile mobs without the Creature interface
 			// (Ghast, Phantom, EnderDragon, ...) are untargeted as well.
@@ -448,7 +454,9 @@ public class SuperNManager {
 
 	public static void sendMessage(SuperNPlayer snplayer, String message) {
 		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
-		if (!player.isOnline()) {
+		// The lookup answers null for anybody who is not on the server, and asking that null
+		// whether it is online is the crash rather than the guard.
+		if (player == null) {
 			return;
 		}
 		player.sendMessage(ChatColor.RED + message);
@@ -462,6 +470,9 @@ public class SuperNManager {
 
 	public static void updateName(SuperNPlayer snplayer) {
 		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
+		if (player == null) {
+			return;
+		}
 		String name = player.getName();
 		String displayname = player.getDisplayName().trim();
 		String updatedname;

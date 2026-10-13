@@ -14,6 +14,7 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.block.Chest;
 import org.bukkit.block.Sign;
 import org.bukkit.block.data.Directional;
+import org.bukkit.block.data.type.Door;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
@@ -33,6 +34,9 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
@@ -75,6 +79,9 @@ public final class HarnessPlugin extends JavaPlugin {
 
     /** Server-side player objects, so {@code quit} can remove exactly what was added. */
     private final Map<String, Object> actors = new LinkedHashMap<>();
+
+    /** The stand-ins brought up for a hall section, by handle name, so they can be taken back. */
+    private final Map<String, Object> ghosts = new LinkedHashMap<>();
     private ControlSocket socket;
     private Hall hall;
     private HallGuard guard;
@@ -111,9 +118,9 @@ public final class HarnessPlugin extends JavaPlugin {
         guard = new HallGuard(this);
         getServer().getPluginManager().registerEvents(guard, this);
         // Every way out of the hall is a switch the hall placed, so the hall watches its own
-        // furniture: whatever manages to move a button is back a moment later, every dummy is
-        // back where it was put, and everything a section let out goes home. Anything that
-        // changes a block inside the hall also repairs on the spot; this is the backstop.
+        // furniture: whatever manages to move a button is back a moment later, and everything a
+        // section let out goes home. Anything that changes a block inside the hall also repairs
+        // on the spot; this is the backstop.
         getServer().getScheduler().runTaskTimer(this, guard::tick, 40L, 40L);
         // The priest's altar only answers within ten blocks of the church in the plugin's
         // configuration, and writing that file ourselves would stop the plugin generating its
@@ -132,18 +139,26 @@ public final class HarnessPlugin extends JavaPlugin {
                 + hall.lobbySpawn().getBlockZ() + " - joining puts you there");
     }
 
+    /**
+     * Registers every altar the hall built as a church.
+     *
+     * <p>Every one of them, not just one: the ghoul's altar is in the ghoul's own world and the
+     * priest's is in the overworld, and a church used to be a single point in the config. A
+     * hall whose altar is not a church is a hall where the one thing that undoes a ghoul does
+     * nothing at all.
+     */
     private void pointTheChurchAtTheHall() {
-        if (hall == null || hall.priestAltar() == null) {
+        if (hall == null || hall.priestAltars().isEmpty()) {
             return;
         }
-        SNConfigHandler.priestChurchWorld = hall.priestAltar().getWorld().getName();
-        SNConfigHandler.priestChurchLocationX = hall.priestAltar().getBlockX();
-        SNConfigHandler.priestChurchLocationY = hall.priestAltar().getBlockY();
-        SNConfigHandler.priestChurchLocationZ = hall.priestAltar().getBlockZ();
-        getLogger().info("priest church pointed at " + String.join(",",
-                String.valueOf(SNConfigHandler.priestChurchLocationX),
-                String.valueOf(SNConfigHandler.priestChurchLocationY),
-                String.valueOf(SNConfigHandler.priestChurchLocationZ)));
+        SNConfigHandler.clearChurches();
+        for (Location altar : hall.priestAltars()) {
+            SNConfigHandler.addChurch(altar);
+        }
+        getLogger().info("priest churches pointed at " + String.join(", ",
+                hall.priestAltars().stream().map(altar -> altar.getWorld().getName() + " "
+                        + altar.getBlockX() + "," + altar.getBlockY() + "," + altar.getBlockZ())
+                        .toList()));
     }
 
     /** The hall, or null on a server that was not asked for one. */
@@ -152,19 +167,29 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
-     * Brings a stand-in player up, for the few sections that need somebody to do the hitting: a
-     * rule decided on the victim's side cannot be shown any other way than by hitting the victim.
+     * Brings a stand-in up in the world it is needed in, and remembers its handle so it can be
+     * taken back out. Any older one of the same name goes first - two players cannot share a name.
      */
-    Object spawnGhost(String name) {
+    Object spawnGhost(String name, World world) {
+        dropGhost(name);
         try {
-            return Nms.spawn(name);
+            Object actor = Nms.spawn(name, world);
+            // Out of transit before anybody tries to hit him: a stand-in nobody can hurt makes
+            // every section that asks for a hit look broken.
+            Nms.arrive(actor);
+            ghosts.put(name, actor);
+            return actor;
         } catch (RuntimeException alreadyThere) {
             return null;
         }
     }
 
-    /** Takes the stand-in away again, so it is not left in the tab list between tests. */
-    void dropGhost(Object actor) {
+    /**
+     * Takes a stand-in away again, so it is not left in the tab list between tests. One that was
+     * never brought up - a section that failed before it could - is simply nothing to do.
+     */
+    void dropGhost(String name) {
+        Object actor = ghosts.remove(name);
         if (actor != null) {
             Nms.disconnect(actor);
         }
@@ -183,6 +208,14 @@ public final class HarnessPlugin extends JavaPlugin {
             }
         }
         actors.clear();
+        for (Map.Entry<String, Object> ghost : new ArrayList<>(ghosts.entrySet())) {
+            try {
+                Nms.disconnect(ghost.getValue());
+            } catch (RuntimeException e) {
+                getLogger().warning("leaving " + ghost.getKey() + " behind: " + e);
+            }
+        }
+        ghosts.clear();
     }
 
     // -- the two front ends ------------------------------------------------
@@ -230,7 +263,7 @@ public final class HarnessPlugin extends JavaPlugin {
             case "ping":
                 return "ok pong";
             case "spawn":
-                return spawn(rest);
+                return spawn(rest.trim());
             case "quit":
                 return quit(rest);
             case "online":
@@ -249,6 +282,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return interact(rest);
             case "block":
                 return "ok " + blockAt(rest).getType();
+            case "door":
+                return doorAt(rest);
             case "hall":
                 return hall();
             case "surface":
@@ -261,32 +296,52 @@ public final class HarnessPlugin extends JavaPlugin {
                 return chestUse(rest);
             case "sign":
                 return signLine(rest);
+            case "signage":
+                return signage();
             case "facing":
                 return facing(rest);
             case "where":
                 return where(rest);
+            case "near":
+                return near(rest);
+            case "fall":
+                return fall(rest);
+            case "hurt":
+                return hurt(rest);
             case "mine":
                 return mine(rest);
             case "step":
                 return step(rest);
             case "leftclick":
                 return leftClick(rest);
+            case "strike":
+                return strike(rest);
+            case "whack":
+                return whack(rest);
+            case "transit":
+                return transit(rest);
+            case "execute":
+                return execute(rest);
             case "food":
                 return "ok " + player(rest.trim()).getFoodLevel();
             case "power":
                 return "ok " + (int) SuperNManager.get(player(rest.trim())).getPower();
+            case "spar":
             case "dummies":
                 return dummies();
             case "buttons":
                 return buttons(rest);
             case "section":
                 return section(rest);
+            case "point":
+                return point(rest);
             case "mobs":
                 return mobs(rest);
             case "weather":
                 return weather(rest);
             case "repairs":
                 return repairs();
+            case "hitspar":
             case "hitdummy":
                 return hitDummy(rest);
             case "tppoint":
@@ -324,6 +379,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return zombie(rest);
             case "wear":
                 return wear(rest);
+            case "worn":
+                return worn(rest);
             case "kill":
                 return kill(rest);
             case "respawn":
@@ -334,6 +391,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return "ok " + player(rest).getFireTicks();
             case "health":
                 return "ok " + player(rest).getHealth();
+            case "effects":
+                return effects(rest.trim());
             case "stop":
                 Bukkit.getScheduler().runTask(this, Bukkit::shutdown);
                 return "ok stopping";
@@ -344,6 +403,16 @@ public final class HarnessPlugin extends JavaPlugin {
 
     // -- requests ----------------------------------------------------------
 
+    /**
+     * Brings a stand-in player up.
+     *
+     * <p>Named without a world on purpose. {@code Nms.spawn(name, world)} does take one, and the
+     * player still arrives at the default world's spawn: the login places them there whatever
+     * level the server player was built against. Since a clientless player is invulnerable in
+     * every world but the one it joined, "which world did this stand-in join in" cannot be chosen
+     * - so anything that needs one monster to hurt one person has to be measured in the world the
+     * stand-in already joined, or through the event the plugin decides on.
+     */
     private String spawn(String name) {
         if (name.isEmpty()) {
             return "err usage: spawn <name>";
@@ -484,6 +553,43 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok " + total;
     }
 
+    /**
+     * A block that is supposed to be a door, read back the way anything that opens one has to:
+     * which half each of the three cells claims to be, and whether each is open. A fixture whose
+     * two blocks are both the bottom half looks like a door from the outside and is not one, and
+     * a click on the upper block then moves only that one.
+     */
+    private String doorAt(String rest) {
+        Block block = blockAt(rest);
+        StringBuilder out = new StringBuilder();
+        for (int offset = -1; offset <= 1; offset++) {
+            Block at = block.getRelative(0, offset, 0);
+            String detail = " half=- hinge=- open=-";
+            if (at.getBlockData() instanceof Door door) {
+                detail = " half=" + door.getHalf()
+                        + " hinge=" + door.getHinge()
+                        + " open=" + door.isOpen();
+            }
+            out.append(' ').append(at.getY()).append(':').append(at.getType()).append(detail).append(';');
+        }
+        return "ok" + out;
+    }
+
+    /**
+     * Whether every section's teaching fitted on the wall.
+     *
+     * <p>A board that did not fit is dropped and a board two sections both wanted is written
+     * twice; both leave a person reading a wall that is missing something, and neither shows up
+     * by looking at one sign at a time. Zero and zero means the halls have room to say what they
+     * say.
+     */
+    private String signage() {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        return "ok dropped=" + hall.boardsDropped() + " collisions=" + hall.signCollisions();
+    }
+
     private Block blockAt(String rest) {
         String[] args = rest.split("\\s+");
         if (args.length < 4) {
@@ -617,6 +723,110 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ();
     }
 
+    /**
+     * What is standing near a player, where, and how much health it has left.
+     *
+     * <p>A world's mob counts say nothing about the one a section just conjured - a flat world
+     * spawns its own - and "did it suffocate" is a question about one entity's health, so the
+     * answer has to name the entity.
+     */
+    /**
+     * Runs one damage event of a named kind through the plugin, and reports what it decided.
+     *
+     * <p>The server hands out a great deal of damage on its own - lava, fire, drowning, cactus -
+     * and it only does so to a player it believes is being moved by a client. A stand-in is not,
+     * so half the passive rules about those damage kinds cannot be reached by arranging the world
+     * and waiting. The events can be raised directly, which is what this does and what {@link
+     * #fall} does for the one kind with arithmetic worth copying.
+     */
+    private String hurt(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length < 2) {
+            return "err usage: hurt <name> <cause> [amount]";
+        }
+        Player player = player(args[0]);
+        DamageCause cause;
+        try {
+            cause = DamageCause.valueOf(args[1].toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            return "err not a damage cause: " + args[1];
+        }
+        double amount = args.length > 2 ? Double.parseDouble(args[2]) : 1;
+        double before = player.getHealth();
+        double powerBefore = SuperNManager.get(player).getPower();
+        EntityDamageEvent event = new EntityDamageEvent(player, cause, amount);
+        Bukkit.getPluginManager().callEvent(event);
+        if (!event.isCancelled() && event.getDamage() > 0) {
+            player.setHealth(Math.max(0, before - event.getDamage()));
+        }
+        return "ok cause=" + cause + " raw=" + amount + " cancelled=" + event.isCancelled()
+                + " damage=" + event.getDamage() + " health=" + before + "->" + player.getHealth()
+                + " power=" + (int) powerBefore + "->" + (int) SuperNManager.get(player).getPower()
+                + " race=" + SuperNManager.get(player).getType();
+    }
+
+    /**
+     * Runs a fall of a given height through the plugin's own path, and reports what it decided.
+     *
+     * <p>A player with no client does not fall: the server moves players from the client's input,
+     * so gravity never runs for a stand-in and a section about fall damage cannot be driven by
+     * teleporting one into the air and waiting. What the plugin actually answers is the damage
+     * event, and that can be raised directly - which is what this does, with the vanilla
+     * arithmetic (one point a block past the third) for the height asked for.
+     */
+    private String fall(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length < 2) {
+            return "err usage: fall <name> <blocks>";
+        }
+        Player player = player(args[0]);
+        int blocks = Integer.parseInt(args[1].trim());
+        double damage = Math.max(0, blocks - 3);
+        EntityDamageEvent event = new EntityDamageEvent(player, DamageCause.FALL, damage);
+        Bukkit.getPluginManager().callEvent(event);
+        return "ok blocks=" + blocks + " raw=" + damage + " cancelled=" + event.isCancelled()
+                + " damage=" + event.getDamage() + " race=" + SuperNManager.get(player).getType();
+    }
+
+    private String near(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = player(args[0]);
+        double radius = args.length > 1 ? Double.parseDouble(args[1]) : 8;
+        List<String> found = new ArrayList<>();
+        for (Entity entity : player.getNearbyEntities(radius, radius, radius)) {
+            if (!(entity instanceof LivingEntity living)
+                    || living.getUniqueId().equals(player.getUniqueId())) {
+                continue;
+            }
+            // A stand-in is a player, and for one of those the interesting part is not its name but
+            // what race it was given and whether a player could tell: the race is the plugin's own
+            // record, the label is what the scoreboard writes next to the name.
+            String who;
+            if (living instanceof Player standIn) {
+                who = "player:" + standIn.getName()
+                        + " race=" + SuperNManager.get(standIn).getType()
+                        + " label=" + labelOf(standIn.getName());
+            } else {
+                who = living.getType().toString();
+            }
+            found.add(who + "@" + String.format(Locale.ROOT, "%.1f,%.1f,%.1f",
+                    living.getLocation().getX(), living.getLocation().getY(),
+                    living.getLocation().getZ()) + " hp=" + living.getHealth());
+        }
+        return "ok " + found.size() + ": " + String.join(" | ", found);
+    }
+
+    /** What the scoreboard currently shows beside a name, if anything. */
+    private static String labelOf(String name) {
+        Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
+        for (Team team : board.getTeams()) {
+            if (team.hasEntry(name)) {
+                return "'" + team.getPrefix() + "'";
+            }
+        }
+        return "none";
+    }
+
     /** Breaks a block as a player would, and reports whether anything stopped it. */
     private String mine(String rest) {
         String[] args = rest.split("\\s+");
@@ -677,6 +887,21 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
+     * What one player is holding, and what the players watching him were told about it.
+     *
+     * <p>Those two are not the same thing for a stand-in, and the gap is invisible from a
+     * console: the item on his inventory is what the plugin reads and what a blow is worth, and
+     * the announcement is what a client draws. A step that hands him a sword can therefore be
+     * right about the rule and wrong about the picture at the same time, which is the shape of
+     * every "he isn't holding it" report. This makes the announcement and prints both sides, so
+     * the two can be compared without a client.
+     */
+    private String worn(String rest) {
+        Player player = player(rest.trim());
+        return "ok " + player.getName() + " " + Nms.pushEquipment(player);
+    }
+
+    /**
      * Kills a player with a given damage cause. Half the races only turn on death, and a fake
      * player has no client to walk off a ledge or swim in lava - so the cause is set and the
      * last hit taken, which is the same thing the plugin does to itself when it wants a death.
@@ -721,8 +946,24 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " night=" + (time < 0 || time > 12400);
     }
 
-    /** A world's difficulty, which is per world - and on peaceful, nothing can be hurt. */
-    private String difficulty(String rest) {
+    /**
+     * Everything a section could have left on a player: their health, their hunger, whether they
+     * are on fire, and every effect still running. Leaving a test is supposed to clear all of it,
+     * and none of it can be read back off a fake player any other way.
+     */
+    private String effects(String name) {
+        Player player = player(name);
+        List<String> running = new ArrayList<>();
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            running.add(effect.getType().getKey().getKey() + "x" + effect.getAmplifier()
+                    + "(" + effect.getDuration() + ")");
+        }
+        return "ok health=" + player.getHealth() + " food=" + player.getFoodLevel()
+                + " saturation=" + player.getSaturation() + " fire=" + player.getFireTicks()
+                + " effects=" + (running.isEmpty() ? "none" : String.join(" ", running));
+    }
+
+    /** A world's difficulty, which is per world - and on peaceful, nothing can be hurt. */    private String difficulty(String rest) {
         World world = Bukkit.getWorld(rest.trim());
         if (world == null) {
             return "err no such world: " + rest;
@@ -809,12 +1050,24 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
-     * Left-clicks the air as a player would, which is how several races use an item - a vampire
-     * jumps and teleports with one, a werewolf calls a wolf and dashes with one, and a bowl is
-     * left-clicked to brew the wolfbane. A fake player has no mouse, so a scenario has to say so.
+     * Left-clicks as a player would, which is how several races use an item - a vampire jumps and
+     * teleports with one, a werewolf calls a wolf and dashes with one, and an angel leaps with a
+     * dandelion. A fake player has no mouse, so a scenario has to say so. Given coordinates the
+     * click lands on that block instead of the air, which is the half of the trick that only
+     * fires when a player is looking at something.
      */
     private String leftClick(String rest) {
-        Player player = player(rest.trim());
+        String[] args = rest.split("\\s+");
+        Player player = player(args[0]);
+        if (args.length >= 4) {
+            Block target = blockAt(rest);
+            aimAt(player, target);
+            PlayerInteractEvent event = new PlayerInteractEvent(player, Action.LEFT_CLICK_BLOCK,
+                    player.getInventory().getItemInMainHand(), target, BlockFace.UP);
+            Bukkit.getPluginManager().callEvent(event);
+            return "ok cancelled=" + event.isCancelled() + " block=" + target.getType()
+                    + " held=" + player.getInventory().getItemInMainHand().getType();
+        }
         PlayerInteractEvent event = new PlayerInteractEvent(player, Action.LEFT_CLICK_AIR,
                 player.getInventory().getItemInMainHand(), null, BlockFace.UP);
         Bukkit.getPluginManager().callEvent(event);
@@ -822,23 +1075,111 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " held=" + player.getInventory().getItemInMainHand().getType();
     }
 
-    /** The hall's dummies, so a scenario can tell that every hall has one and where it is. */
+    /**
+     * Kills one player as another, the way a real fight would end.
+     *
+     * <p>A fake player cannot swing, and the prey a witch hunter section puts out are players
+     * rather than monsters - {@code slay} skips anything player-shaped by design. The last damage
+     * cause is set explicitly because that is what the plugin reads to decide who killed whom.
+     */
+    private String execute(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: execute <killer> <victim>";
+        }
+        Player killer = player(args[0]);
+        Player victim = player(args[1]);
+        EntityDamageByEntityEvent hit = new EntityDamageByEntityEvent(killer, victim,
+                DamageCause.ENTITY_ATTACK, 1000);
+        Bukkit.getPluginManager().callEvent(hit);
+        victim.setLastDamageCause(hit);
+        victim.setHealth(0);
+        return "ok " + killer.getName() + " killed " + victim.getName()
+                + " (" + SuperNManager.get(victim).getType() + ")";
+    }
+
+    /**
+     * Has one player attack another with whatever is in hand.
+     *
+     * <p>Every one of the plugin's spells fires on a player hitting a player - that is how a
+     * priest exorcises and how an angel purifies - and a fake player cannot swing, so the hit is
+     * raised here the same way the server would raise it.
+     */
+    private String strike(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: strike <attacker> <victim>";
+        }
+        Player attacker = player(args[0]);
+        Player victim = player(args[1]);
+        EntityDamageByEntityEvent event = new EntityDamageByEntityEvent(attacker, victim,
+                DamageCause.ENTITY_ATTACK, 1.0);
+        Bukkit.getPluginManager().callEvent(event);
+        return "ok cancelled=" + event.isCancelled() + " victim=" + victim.getName()
+                + " race=" + SuperNManager.get(victim).getType()
+                + " held=" + attacker.getInventory().getItemInMainHand().getType();
+    }
+
+    /** What is holding a stand-in invulnerable, for working out which field has to be cleared. */
+    private String transit(String rest) {
+        Player player = player(rest.trim());
+        String before = Nms.transit(player);
+        Nms.arrive(player);
+        return "ok " + before + " || after arrive: isInvulnerable=" + player.isInvulnerable()
+                + " fields=" + Nms.transit(player);
+    }
+
+    /**
+     * Attacks with the server's own attack path - the one a real left-click ends up in. Raising
+     * an event by hand is not the same thing: the plugin reads it, so a rule that only reads
+     * damage looks satisfied, but nothing is hit and nobody loses health.
+     *
+     * <p>Whether a stand-in can be hit at all is the question this answers, and it is the one
+     * every step that asks a player to use something on somebody depends on.
+     */
+    private String whack(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length != 2) {
+            return "err usage: whack <attacker> <victim>";
+        }
+        Player attacker = player(args[0]);
+        Player victim = player(args[1]);
+        if (attacker.getWorld() != victim.getWorld()) {
+            return "err different worlds";
+        }
+        double before = victim.getHealth();
+        boolean invulnerable = victim.isInvulnerable();
+        int noDamageTicks = victim.getNoDamageTicks();
+        float cooldown = attacker.getAttackCooldown();
+        attacker.attack(victim);
+        double afterHit = victim.getHealth();
+        // Then the same blow applied directly, so "the attack did nothing" can be told apart
+        // from "this stand-in cannot be hurt at all" - and, when it is hurt, from "the flag the
+        // server leaves on a player it has never heard from is the thing in the way".
+        victim.setInvulnerable(false);
+        Nms.arrive(victim);
+        victim.damage(2.0, attacker);
+        double afterDirect = victim.getHealth();
+        return "ok held=" + attacker.getInventory().getItemInMainHand().getType()
+                + " invulnerable=" + invulnerable + " noDamageTicks=" + noDamageTicks
+                + " cooldown=" + String.format(Locale.ROOT, "%.2f", cooldown)
+                + " attack=" + before + "->" + afterHit
+                + " direct=" + afterHit + "->" + afterDirect
+                + " nowInvulnerable=" + victim.isInvulnerable()
+                + " race=" + SuperNManager.get(victim).getType();
+    }
+
+    /** The hall's stand-in and the marks every damage section asks him to stand on. */
     private String dummies() {
         if (hall == null) {
             return "err no hall on this server";
         }
-        List<String> found = new ArrayList<>();
-        for (Map.Entry<String, org.bukkit.entity.ArmorStand> entry : hall.dummies().entrySet()) {
-            Location at = entry.getValue().getLocation();
-            Location anchor = hall.point("dummy." + entry.getKey());
-            found.add(entry.getKey() + "@" + at.getBlockX() + "," + at.getBlockY() + ","
-                    + at.getBlockZ() + " " + at.getWorld().getName()
-                    + " anchor=" + (anchor == null ? "none"
-                            : anchor.getBlockX() + "," + anchor.getBlockY() + "," + anchor.getBlockZ())
-                    + " drift=" + (anchor == null ? "?" : String.format(Locale.ROOT, "%.3f",
-                            at.distance(anchor))));
-        }
-        return "ok " + found.size() + " " + String.join(" | ", found);
+        Player spar = Bukkit.getPlayerExact("Sparring");
+        String where = spar == null ? "not up"
+                : spar.getWorld().getName() + "@" + spar.getLocation().getBlockX() + ","
+                        + spar.getLocation().getBlockY() + "," + spar.getLocation().getBlockZ()
+                        + " hp=" + spar.getHealth() + " race=" + SuperNManager.get(spar).getType();
+        return "ok spar=" + where + " marks=" + hall.sparMarks().size() + hall.sparReport();
     }
 
     /**
@@ -920,6 +1261,23 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /** Where a numbered section of a hall starts, as {@code x y z}. */
+    /**
+     * A named place a section put down, by key - the same map the hall's own switches are wired to.
+     * Asking for one is how a scenario checks where a section actually put something, rather than
+     * working it out from the section's origin and the arithmetic that was supposed to happen.
+     */
+    private String point(String rest) {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        Location at = hall.point(rest.trim());
+        if (at == null) {
+            return "err no such point: " + rest.trim();
+        }
+        return "ok " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ()
+                + " " + at.getWorld().getName();
+    }
+
     private String section(String rest) {        if (hall == null) {
             return "err no hall on this server";
         }
@@ -936,50 +1294,28 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
-     * Swings at the nearest dummy the way a player would, so a scenario can see what the hall
-     * reports and that the dummy survives it: the damage a real attack deals, the number that
-     * appears, and whether the stand moved or lost health.
+     * Swings at the stand-in the way a player would, so a scenario can see what the hall reports
+     * and that he loses health: the damage a real attack deals, the number that appears, and
+     * whether the stand-in went down and was refreshed.
      */
     private String hitDummy(String rest) {
         if (hall == null) {
             return "err no hall on this server";
         }
         Player player = player(rest.trim());
-        org.bukkit.entity.ArmorStand closest = null;
-        double best = Double.MAX_VALUE;
-        for (org.bukkit.entity.ArmorStand stand : hall.dummies().values()) {
-            // Halls live in four worlds, and a distance between two of them is not a distance.
-            if (!stand.getWorld().equals(player.getWorld())) {
-                continue;
-            }
-            double away = stand.getLocation().distanceSquared(player.getLocation());
-            if (away < best) {
-                best = away;
-                closest = stand;
-            }
+        Player spar = Bukkit.getPlayerExact("Sparring");
+        if (spar == null || !spar.getWorld().equals(player.getWorld())) {
+            return "err the stand-in is not up in this world";
         }
-        if (closest == null) {
-            return "err no dummy to hit";
-        }
-        Location before = closest.getLocation();
-        double health = closest.getHealth();
+        double before = spar.getHealth();
         ItemStack held = player.getInventory().getItemInMainHand();
         double swing = held.getType() == Material.AIR ? 1.0 : 7.0;
-        org.bukkit.event.entity.EntityDamageByEntityEvent event =
-                new org.bukkit.event.entity.EntityDamageByEntityEvent(player, closest,
-                        org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_ATTACK, swing);
-        Bukkit.getPluginManager().callEvent(event);
-        int numbers = 0;
-        for (Entity nearby : closest.getNearbyEntities(3, 3, 3)) {
-            if (nearby instanceof org.bukkit.entity.ArmorStand stand
-                    && stand.isMarker() && stand.getCustomName() != null) {
-                numbers++;
-            }
-        }
-        return "ok held=" + held.getType() + " cancelled=" + event.isCancelled()
-                + " damage=" + event.getDamage() + " moved=" + (before.distance(closest.getLocation()) > 0.01)
-                + " healthWas=" + health + " healthNow=" + closest.getHealth()
-                + " numbers=" + numbers;
+        // The real path: the server runs the hit and the plugin decides what it is worth, exactly
+        // as it would for a client that swung. Raising the event and moving the health bar by hand
+        // said nothing about whether the stand-in can be hurt at all.
+        spar.damage(swing, player);
+        return "ok held=" + held.getType() + " damage=" + swing + " healthWas=" + before
+                + " healthNow=" + spar.getHealth() + " race=" + SuperNManager.get(spar).getType();
     }
 
     /**
@@ -990,10 +1326,12 @@ public final class HarnessPlugin extends JavaPlugin {
     private String teleportPoint(String rest) {
         SuperNPlayer snplayer = SuperNManager.get(player(rest.trim()));
         var data = SupernaturalsPlugin.instance.getDataHandler();
-        if (!data.checkPlayer(snplayer)) {
-            return "ok none";
-        }
+        // The saved point, not the question of whether one was saved: a point whose world is not
+        // loaded has been saved and cannot be read back, and this asks for the reading.
         Location at = data.getTeleport(snplayer);
+        if (at == null) {
+            return data.checkPlayer(snplayer) ? "ok set-in-an-unloaded-world" : "ok none";
+        }
         return "ok " + at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ()
                 + " " + at.getWorld().getName();
     }
@@ -1138,7 +1476,8 @@ public final class HarnessPlugin extends JavaPlugin {
         // applied - which a hand-made event does not do. Say it out loud before killing it.
         closest.setLastDamageCause(hit);
         closest.setHealth(0);
-        return "ok " + player.getName() + " killed the " + type;
+        return "ok " + player.getName() + " killed the " + type
+                + " cancelled=" + hit.isCancelled() + " damage=" + hit.getDamage();
     }
 
     /**

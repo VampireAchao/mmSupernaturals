@@ -188,7 +188,7 @@ public final class TestServer implements AutoCloseable {
                     + " Each race hall is");
             System.out.println("                  a corridor of numbered sections, read left to"
                     + " right; every row ends");
-            System.out.println("                  with a damage dummy, a +1000 power switch, and"
+            System.out.println("                  with a sparring stand-in, a +1000 power switch, and"
                     + " switches back to");
             System.out.println("                  the start or out of the test");
         }

@@ -140,7 +140,7 @@ public class WereManager extends ClassManager {
 				return false;
 			}
 
-			if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.wolfMaterial)) {
+			if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.wolfMaterial)) {
 				if (SuperNManager.worldTimeIsNight(player)) {
 					summon(player);
 					event.setCancelled(true);
@@ -149,7 +149,7 @@ public class WereManager extends ClassManager {
 					SuperNManager.sendMessage(snplayer, "Cannot use this ability during the day.");
 					return false;
 				}
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.wolfbaneMaterial)) {
+			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.wolfbaneMaterial)) {
 				if (!SupernaturalsPlugin.hasPermissions(player, permissions2)) {
 					return false;
 				}
@@ -161,7 +161,7 @@ public class WereManager extends ClassManager {
 					event.setCancelled(true);
 					return true;
 				}
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.dashMaterial)) {
+			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.dashMaterial)) {
 				if (SuperNManager.worldTimeIsNight(player)) {
 					SuperNManager.jump(event.getPlayer(), SNConfigHandler.dashDeltaSpeed, false);
 					event.setCancelled(true);
@@ -305,10 +305,20 @@ public class WereManager extends ClassManager {
 		if (SuperNManager.worldTimeIsNight(player)) {
 			if (snplayer.getPower() >= SNConfigHandler.werePowerSummonCost) {
 				int i = 0;
-				for (Wolf wolf : wolvesMap.keySet()) {
-					if (wolvesMap.get(wolf).equals(snplayer)) {
-						i++;
+				for (Wolf wolf : new ArrayList<Wolf>(wolvesMap.keySet())) {
+					if (!wolvesMap.get(wolf).equals(snplayer)) {
+						continue;
 					}
+					// A wolf that left the world without dying - a world edit, another plugin, or
+					// the chunk it stood in going away for good - never fires a death event, so
+					// nothing ever takes it off this list. Left on it, it keeps counting towards
+					// the limit, and the owner is told they have all the wolves they can control
+					// while owning none at all.
+					if (!wolf.isValid() || wolf.isDead()) {
+						wolvesMap.remove(wolf);
+						continue;
+					}
+					i++;
 				}
 				if (i <= 4) {
 					Wolf wolf = (Wolf) player.getWorld().spawnEntity(player.getLocation(), EntityType.WOLF);

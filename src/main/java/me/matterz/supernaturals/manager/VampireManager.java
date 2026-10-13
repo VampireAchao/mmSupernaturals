@@ -170,11 +170,11 @@ public class VampireManager extends ClassManager {
 				return false;
 			}
 
-			if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.jumpMaterial)) {
+			if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.jumpMaterial)) {
 				SuperNManager.jump(player, SNConfigHandler.jumpDeltaSpeed, true);
 				event.setCancelled(true);
 				return true;
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.vampireMaterial)) {
+			} else if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.vampireMaterial)) {
 				teleport(player);
 				event.setCancelled(true);
 				return true;
@@ -186,15 +186,12 @@ public class VampireManager extends ClassManager {
 		}
 
 		if (itemMaterial != null) {
-			if (SNConfigHandler.foodMaterials.contains(itemMaterial)) {
-				if (SNConfigHandler.debugMode) {
-					SupernaturalsPlugin.log(snplayer.getName()
-							+ " attempted to eat " + itemMaterial.toString());
-				}
-				SuperNManager.sendMessage(snplayer, "Vampires can't eat food. You must drink blood instead.");
-				event.setCancelled(true);
-				return true;
-			} else if (itemMaterial.toString().equalsIgnoreCase(SNConfigHandler.vampireTeleportMaterial)) {
+			// Food is *not* refused here any more. Refusing the right-click took the whole
+			// interaction with it: a vampire holding a loaf could not open a chest, pull a
+			// lever or use a door, because the click never reached the block. The meal itself
+			// is refused where a meal is actually eaten, in the consume event - the bite plays,
+			// and nothing comes of it.
+			if (SNConfigHandler.isItem(itemMaterial, SNConfigHandler.vampireTeleportMaterial)) {
 				setTeleport(player);
 				return true;
 			}
@@ -270,9 +267,28 @@ public class VampireManager extends ClassManager {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		ItemStack item = player.getItemInHand();
 		if (SupernaturalsPlugin.instance.getDataHandler().checkPlayer(snplayer)) {
+			org.bukkit.Location destination = SupernaturalsPlugin.instance.getDataHandler()
+					.getTeleport(snplayer);
+			if (destination == null) {
+				// Saved, but not usable: the world it was saved in is not loaded this session.
+				// It is still their point and it comes back with that world, so this is not the
+				// same answer as "you never set one" - which is what asking whether the point
+				// exists, and being told no, used to say instead.
+				SuperNManager.sendMessage(snplayer,
+						"Your teleport location is in a world that is not loaded right now.");
+				return false;
+			}
+			if (!destination.getWorld().equals(player.getWorld())) {
+				// A saved point belongs to the world it was saved in. Carrying it across worlds
+				// is how somebody teleports out of an area they were sealed into - the point is
+				// kept, so going back to that world still uses it.
+				SuperNManager.sendMessage(snplayer,
+						"Your teleport location is in another world. Save a new one here.");
+				return false;
+			}
 			if (snplayer.getPower() > SNConfigHandler.vampireTeleportCost) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.vampireTeleportCost, "Teleport!");
-				player.teleport(SupernaturalsPlugin.instance.getDataHandler().getTeleport(snplayer));
+				player.teleport(destination);
 				if (item.getAmount() == 1) {
 					player.setItemInHand(null);
 				} else {
@@ -476,7 +492,8 @@ public class VampireManager extends ClassManager {
 
 	public boolean hasHelmet(Player player) {
 		if (player.getInventory().getHelmet() != null) {
-			if(player.getInventory().getHelmet().getType().toString().equalsIgnoreCase(SNConfigHandler.vampireHelmet)) {
+			if (SNConfigHandler.isItem(player.getInventory().getHelmet().getType(),
+					SNConfigHandler.vampireHelmet)) {
 				return true;
 			}
 		}

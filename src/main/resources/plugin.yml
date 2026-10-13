@@ -34,6 +34,7 @@ permissions:
             supernatural.admin.command.reload: true
             supernatural.admin.command.save: true
             supernatural.admin.command.setchurch: true
+            supernatural.admin.command.church: true
             supernatural.admin.command.setbanish: true
     supernatural.command.*:
         description: Gives access to all player-commands
@@ -70,6 +71,7 @@ permissions:
             supernatural.admin.command.reload: true
             supernatural.admin.command.save: true
             supernatural.admin.command.setchurch: true
+            supernatural.admin.command.church: true
             supernatural.admin.command.setbanish: true
     supernatural.command.help:
         default: true
@@ -114,6 +116,8 @@ permissions:
     supernatural.admin.command.save:
         default: op
     supernatural.admin.command.setchurch:
+        default: op
+    supernatural.admin.command.church:
         default: op
     supernatural.admin.command.setbanish:
         default: op

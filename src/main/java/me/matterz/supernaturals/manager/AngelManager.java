@@ -8,6 +8,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Animals;
 import org.bukkit.entity.Boat;
 import org.bukkit.entity.EntityType;
@@ -30,14 +31,20 @@ public class AngelManager extends ClassManager {
 
 	@Override
 	public double damagerEvent(EntityDamageByEntityEvent event, double damage) {
-		Player player = (Player) event.getEntity();
-		SuperNPlayer snplayer = SuperNManager.get(player);
-		if (event.getEntity() instanceof Animals) {
-			if (player.getItemInHand().getType().equals(Material.DIAMOND_SWORD)) {
-				SuperNManager.sendMessage(snplayer, "Angels cannot use diamond swords on animals!");
-				event.setCancelled(true);
-				return 0;
-			}
+		// This is the *attacker's* manager: the caller asks the class manager of the player who
+		// dealt the blow, and only ever for a player. Reading the victim off the event and casting
+		// it to Player threw a ClassCastException the moment the victim was anything else - which
+		// is precisely the case this rule exists for - so "angels cannot use diamond swords on
+		// animals" never actually refused anything.
+		if (!(event.getDamager() instanceof Player player)) {
+			return damage;
+		}
+		if (event.getEntity() instanceof Animals
+				&& player.getItemInHand().getType().equals(Material.DIAMOND_SWORD)) {
+			SuperNManager.sendMessage(SuperNManager.get(player),
+					"Angels cannot use diamond swords on animals!");
+			event.setCancelled(true);
+			return 0;
 		}
 		return damage;
 	}
@@ -49,8 +56,11 @@ public class AngelManager extends ClassManager {
 		SuperNPlayer sntarget = SuperNManager.get(target);
 		if (player.getItemInHand().getType().equals(Material.FEATHER)) {
 			if (snplayer.getPower() > SNConfigHandler.angelHealPowerCost) {
-				target.setHealth(target.getHealth()
-						+ SNConfigHandler.angelHealHealthGain);
+				// Healing adds to whatever the target has, so a target that is already full gets
+				// asked for more than its bar can hold. The server clamps that, but the plugin
+				// should not be the one asking for an impossible number.
+				target.setHealth(Math.min(target.getMaxHealth(),
+						target.getHealth() + SNConfigHandler.angelHealHealthGain));
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.angelHealPowerCost, "Healing "
 						+ target.getName());
 				target.sendMessage(ChatColor.RED + "Healed by "
@@ -82,49 +92,57 @@ public class AngelManager extends ClassManager {
 		Action action = event.getAction();
 		Material itemInHandMaterial = player.getItemInHand().getType();
 		SuperNPlayer snplayer = SuperNManager.get(player);
-		if (action.equals(Action.LEFT_CLICK_AIR)
-				|| action.equals(Action.LEFT_CLICK_BLOCK)) {
-			if (itemInHandMaterial.equals(Material.DANDELION)) {
-				if (snplayer.getPower() > SNConfigHandler.angelJumpPowerCost) {
-					jump(player, SNConfigHandler.angelJumpDeltaSpeed);
-				} else {
-					SuperNManager.sendMessage(snplayer, "Not enough power to jump!");
-				}
+		if (!action.equals(Action.LEFT_CLICK_AIR)
+				&& !action.equals(Action.LEFT_CLICK_BLOCK)) {
+			return false;
+		}
+		if (itemInHandMaterial.equals(Material.DANDELION)) {
+			if (snplayer.getPower() > SNConfigHandler.angelJumpPowerCost) {
+				jump(player, SNConfigHandler.angelJumpDeltaSpeed);
+			} else {
+				SuperNManager.sendMessage(snplayer, "Not enough power to jump!");
 			}
 			return false;
 		}
-		if (action.equals(Action.LEFT_CLICK_BLOCK)) {
-			Block targetBlock = player.getTargetBlock(null, 20);
-			Location targetBlockLocation = targetBlock.getLocation();
-			if (itemInHandMaterial.equals(Material.BEEF)
-					|| itemInHandMaterial.equals(Material.BONE)
-					|| itemInHandMaterial.equals(Material.PORKCHOP)) {
-				if (snplayer.getPower() > SNConfigHandler.angelSummonPowerCost) {
-					if (itemInHandMaterial.equals(Material.BEEF)) {
-						player.getWorld().spawnEntity(targetBlockLocation, EntityType.COW);
-						event.setCancelled(true);
-						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned cow.");
-						return true;
-					}
-					if (itemInHandMaterial.equals(Material.BONE)) {
-						Wolf spawnedWolf = (Wolf) player.getWorld().spawnEntity(targetBlockLocation, EntityType.WOLF);
-						spawnedWolf.setTamed(true);
-						spawnedWolf.setOwner(player);
-						spawnedWolf.setHealth(20);
-						event.setCancelled(true);
-						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned wolf.");
-						return true;
-					}
-					if (itemInHandMaterial.equals(Material.PORKCHOP)) {
-						player.getWorld().spawnEntity(targetBlockLocation, EntityType.PIG);
-						event.setCancelled(true);
-						SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned pig.");
-						return true;
-					}
-				}
-			}
+		// This is the branch that used to be unreachable. The summoning sat in its own
+		// `if (LEFT_CLICK_BLOCK)` *below* the one above, which had already returned for both
+		// click actions - so an angel could never call a cow, a wolf or a pig, whatever it was
+		// holding, and every summon looked like a dead ability. Reaching it is the fix; the
+		// calls themselves are the ones that were always here.
+		//
+		// Both kinds of swing summon now. A swing at a block puts the animal where the player
+		// pointed; a swing at the air - which is what most of them are, since there is usually
+		// nothing to point at - puts it on clear ground in front of them, the same way a
+		// werewolf calls a wolf.
+		if (!itemInHandMaterial.equals(Material.BEEF)
+				&& !itemInHandMaterial.equals(Material.BONE)
+				&& !itemInHandMaterial.equals(Material.PORKCHOP)) {
+			return false;
 		}
-		return false;
+		if (snplayer.getPower() <= SNConfigHandler.angelSummonPowerCost) {
+			SuperNManager.sendMessage(snplayer, "Not enough power to summon!");
+			return false;
+		}
+		Location spot = summonSpot(player, event.getClickedBlock(), event.getBlockFace());
+		if (itemInHandMaterial.equals(Material.BEEF)) {
+			player.getWorld().spawnEntity(spot, EntityType.COW);
+			event.setCancelled(true);
+			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned cow.");
+			return true;
+		}
+		if (itemInHandMaterial.equals(Material.BONE)) {
+			Wolf spawnedWolf = (Wolf) player.getWorld().spawnEntity(spot, EntityType.WOLF);
+			spawnedWolf.setTamed(true);
+			spawnedWolf.setOwner(player);
+			spawnedWolf.setHealth(20);
+			event.setCancelled(true);
+			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned wolf.");
+			return true;
+		}
+		player.getWorld().spawnEntity(spot, EntityType.PIG);
+		event.setCancelled(true);
+		SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned pig.");
+		return true;
 	}
 
 	@Override
@@ -134,6 +152,62 @@ public class AngelManager extends ClassManager {
 			return 0;
 		}
 		return damage;
+	}
+
+	/**
+	 * Where a summoned animal should stand.
+	 *
+	 * <p>An animal conjured at the block a player aimed at used to appear at that block's own
+	 * corner - which is inside the block - and suffocated where it stood. It belongs in the open
+	 * cell on the far side of the face that was struck, or on top of the block. A swing at the
+	 * air has no block at all, so it goes straight to clear ground in front of the player.
+	 */
+	private static Location summonSpot(Player player, Block target, BlockFace face) {
+		if (target != null) {
+			if (face != null && !face.equals(BlockFace.SELF) && face.getModY() == 0) {
+				Location beside = roomAt(target.getRelative(face));
+				if (beside != null) {
+					return beside;
+				}
+			}
+			Location above = roomAt(target.getRelative(BlockFace.UP));
+			if (above != null) {
+				return above;
+			}
+		}
+		Location front = inFront(player);
+		return front != null ? front : player.getLocation();
+	}
+
+	/** Clear floor in front of the player, two blocks out and then one, or null if both are walled. */
+	private static Location inFront(Player player) {
+		Vector facing = player.getLocation().getDirection().setY(0);
+		if (facing.lengthSquared() < 1.0E-6) {
+			facing = new Vector(0, 0, 1);
+		}
+		facing.normalize();
+		for (int distance = 2; distance >= 1; distance--) {
+			Location ahead = player.getLocation().clone().add(facing.clone().multiply(distance));
+			Location spot = roomAt(ahead.getBlock());
+			if (spot != null) {
+				return spot;
+			}
+		}
+		return null;
+	}
+
+	/** The middle of a cell an animal can stand in: two passable cells with floor under them. */
+	private static Location roomAt(Block block) {
+		if (!block.isPassable() || !block.getRelative(BlockFace.UP).isPassable()) {
+			return null;
+		}
+		if (block.getRelative(BlockFace.DOWN).isPassable()) {
+			// Something to stand on, or the animal would drop down a hole the moment it
+			// appeared. Drowning it inside a wall was the bug; dropping it into a mine shaft
+			// would be the same bug wearing a hat.
+			return null;
+		}
+		return block.getLocation().add(0.5, 0, 0.5);
 	}
 
 	public static boolean jump(Player player, double deltaSpeed) {

@@ -27,9 +27,11 @@ import me.matterz.supernaturals.util.Armor;
 import me.matterz.supernaturals.util.EntityUtil;
 
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Fireball;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Wolf;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -106,6 +108,18 @@ public class SNEntityListener implements Listener {
 
 		Entity victim = event.getEntity();
 		double damage = event.getDamage();
+
+		// Refusing the target is not the same as refusing the hit. A monster that was already
+		// locked on keeps swinging, and one whose attack does not go through a target goal at all
+		// - the creaking is the one that made this visible - never raises the target event that
+		// cancelling a truce depends on. So the damage is refused here too, on the same terms.
+		if (event instanceof EntityDamageByEntityEvent hit && victim instanceof Player holder
+				&& (!SNConfigHandler.multiworld
+						|| SupernaturalsPlugin.hasPermissions(holder, worldPermission))
+				&& sharesTruce(holder, hit.getDamager())) {
+			event.setCancelled(true);
+			return;
+		}
 
 		// New spells event
 		if (event instanceof EntityDamageByEntityEvent) {
@@ -226,5 +240,38 @@ public class SNEntityListener implements Listener {
 				&& event.getEntity() instanceof Wolf) {
 			event.setCancelled(true);
 		}
+	}
+
+	/**
+	 * Whether one monster's hit has to be refused because of a truce.
+	 *
+	 * <p>The same lists the target event reads, so the two cannot drift apart. A shot is decided
+	 * by whoever fired it rather than by the arrow, and only the races that have a truce at all
+	 * are asked.
+	 */
+	private boolean sharesTruce(Player victim, Entity damager) {
+		SuperNPlayer snplayer = SuperNManager.get(victim);
+		if (!snplayer.getTruce()) {
+			return false;
+		}
+		Entity source = damager;
+		if (damager instanceof Projectile projectile
+				&& projectile.getShooter() instanceof Entity shooter) {
+			source = shooter;
+		}
+		EntityType type = EntityUtil.entityTypeFromEntity(source);
+		if (type == null) {
+			return false;
+		}
+		if (snplayer.isVampire()) {
+			return SNConfigHandler.vampireTruce.contains(type);
+		}
+		if (snplayer.isGhoul()) {
+			return SNConfigHandler.ghoulTruce.contains(type);
+		}
+		if (snplayer.isWere() && SNConfigHandler.wolfTruce) {
+			return source instanceof Wolf;
+		}
+		return false;
 	}
 }

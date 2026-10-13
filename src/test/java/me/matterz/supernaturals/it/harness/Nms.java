@@ -10,6 +10,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -46,10 +47,21 @@ final class Nms {
 
     /** Places a player of that name into the first world, through the normal join path. */
     static Object spawn(String name) {
+        return spawn(name, Bukkit.getWorlds().get(0));
+    }
+
+    /**
+     * Places a player of that name into one particular world.
+     *
+     * <p>The world is worth choosing. The server leaves a clientless player invulnerable after
+     * it moves them between worlds - it is waiting for a client to acknowledge a dimension
+     * change that never arrives - so a stand-in that is going to be hit has to be created in the
+     * world the hitting happens in, not wherever the first world is.
+     */
+    static Object spawn(String name, World world) {
         try {
             Object bukkit = Bukkit.getServer();
             Object minecraftServer = call(bukkit, "getServer");
-            World world = Bukkit.getWorlds().get(0);
             Object serverLevel = call(world, "getHandle");
 
             Class<?> profileClass = load("com.mojang.authlib.GameProfile");
@@ -177,6 +189,199 @@ final class Nms {
         Method found = target.getClass().getMethod(method);
         found.setAccessible(true);
         return found.invoke(target);
+    }
+
+    /**
+     * Takes the "you have not arrived yet" state off a player.
+     *
+     * <p>A player whose client has not confirmed the position it was put at is treated as still
+     * in transit, and a player in transit cannot be hurt - which is why every step that asks
+     * somebody to hit a stand-in did nothing in any world but the one the server logs players
+     * into. A stand-in has no client, so nothing ever confirms anything and the state stays on it
+     * for good. The fields are cleared by name and each is optional: the ones that do not exist
+     * on a build are the ones whose problem that build does not have.
+     */
+    static void arrive(Object serverPlayer) {
+        Object connection = null;
+        try {
+            connection = call(serverPlayer, "connection");
+        } catch (ReflectiveOperationException ignored) {
+            // No connection to clear; the fields below are still worth clearing.
+        }
+        // The name matters and every obvious guess is wrong: on this build the flag that makes a
+        // player untouchable is the one that says it is still changing dimension, and it is called
+        // isChangingDimension. A stand-in is put straight into the world it belongs in and never
+        // changes anything, so nothing ever clears it - and a player mid-change cannot be hurt.
+        plant(serverPlayer, "isChangingDimension", false);
+        plant(serverPlayer, "changingDimension", false);
+        plant(serverPlayer, "permanentlyInvulnerable", false);
+        plant(serverPlayer, "invulnerable", false);
+        Object abilities = fieldOf(serverPlayer, "abilities");
+        if (abilities != null) {
+            plant(abilities, "invulnerable", false);
+        }
+        if (connection != null) {
+            plant(connection, "awaitingPositionFromClient", null);
+            plant(connection, "awaitingTeleportTime", 0);
+        }
+    }
+
+    /** The value of a field by name, wherever along the class chain it is declared. */
+    private static Object fieldOf(Object target, String field) {
+        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field found = type.getDeclaredField(field);
+                found.setAccessible(true);
+                return found.get(target);
+            } catch (NoSuchFieldException | IllegalAccessException ignored) {
+                // Declared further up, or not at all.
+            }
+        }
+        return null;
+    }
+
+    /** The same, for a player the harness is holding as a {@code CraftPlayer}. */
+    static void arrive(org.bukkit.entity.Player player) {
+        try {
+            arrive(call(player, "getHandle"));
+        } catch (ReflectiveOperationException ignored) {
+            // CraftPlayer always has getHandle; if it somehow does not, there is nothing to do.
+        }
+    }
+
+    /**
+     * Tells everybody watching a stand-in what he is holding.
+     *
+     * <p>Nothing else does. The server ticks the connections it accepted; a connection ticks its
+     * packet listener; the listener is the only caller of {@code ServerPlayer#doTick}; that is
+     * the only caller of the ordinary entity tick; and the ordinary entity tick is where a living
+     * entity compares what it holds against what each watcher was last told and sends the
+     * difference. A connection made by hand is not in the list the server ticks, so none of that
+     * runs - which leaves a stand-in's equipment reaching a client exactly once, at the moment
+     * that client starts tracking him, and never again. Every step that hands him a weapon after
+     * he has appeared therefore looked, on screen, like a step that handed him nothing: the
+     * tester saw whatever he happened to be holding when he first turned up.
+     *
+     * <p>So the one step that matters is run by hand: the game's own check, which sends only what
+     * has changed. It is not a re-implementation - an item is put in his hand through the
+     * ordinary inventory, and this only makes the news travel.
+     *
+     * @return what he holds now, what the watchers had been told before this call, and what they
+     *         are told after it - so a console can see what a client would
+     */
+    static String pushEquipment(org.bukkit.entity.Player player) {
+        String hand = player.getInventory().getItemInMainHand().getType().toString();
+        try {
+            Object handle = call(player, "getHandle");
+            String before = toldHeld(handle);
+            Method push = handle.getClass().getMethod("detectEquipmentUpdates");
+            push.setAccessible(true);
+            push.invoke(handle);
+            return "hand=" + hand + " toldBefore=" + before + " toldAfter=" + toldHeld(handle);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return "hand=" + hand + " push failed (" + e + ")";
+        }
+    }
+
+    /** The main-hand item the watchers were last told about, named the way a player says it. */
+    private static String toldHeld(Object handle) {
+        Object sent = fieldOf(handle, "lastEquipmentItems");
+        if (!(sent instanceof java.util.Map<?, ?> slots)) {
+            return "?";
+        }
+        for (java.util.Map.Entry<?, ?> slot : slots.entrySet()) {
+            if (slot.getKey() != null && "MAINHAND".equals(slot.getKey().toString())) {
+                return asName(slot.getValue());
+            }
+        }
+        return "?";
+    }
+
+    /** A server-side item stack, named through the ordinary API. */
+    private static String asName(Object stack) {
+        if (stack == null) {
+            return "?";
+        }
+        try {
+            Class<?> craft = Class.forName("org.bukkit.craftbukkit.inventory.CraftItemStack");
+            Method asBukkit = craft.getMethod("asBukkitCopy", load("net.minecraft.world.item.ItemStack"));
+            return String.valueOf(((org.bukkit.inventory.ItemStack) asBukkit.invoke(null, stack)).getType());
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return String.valueOf(stack);
+        }
+    }
+
+    /**
+     * Sets a field by name, wherever along the class chain it is declared.
+     *
+     * <p>Every name here is a guess about a server build that publishes no API for any of this,
+     * so a name that is not found is not an error - it is a field this build does not have.
+     */
+    private static void plant(Object target, String field, Object value) {
+        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field found = type.getDeclaredField(field);
+                found.setAccessible(true);
+                found.set(target, value);
+                return;
+            } catch (NoSuchFieldException | IllegalAccessException ignored) {
+                // Declared further up, or not at all.
+            }
+        }
+    }
+
+    /**
+     * Every field that could be holding a player in transit, with its value.
+     *
+     * <p>{@code setInvulnerable(false)} is not enough on this build - the flag reads back true -
+     * which means the answer is a field nobody publishes, and the only way to find it is to look.
+     */
+    static String transit(Object bukkitPlayer) {
+        // The NMS object, not the Craft one in front of it: the fields are all declared on the
+        // server side, and scanning the Bukkit wrapper's own class chain finds nothing at all.
+        Object player = bukkitPlayer;
+        try {
+            player = call(bukkitPlayer, "getHandle");
+        } catch (ReflectiveOperationException ignored) {
+            // Already a handle, or has none; scan what came in either way.
+        }
+        StringBuilder out = new StringBuilder();
+        Object connection = null;
+        try {
+            connection = call(player, "connection");
+        } catch (ReflectiveOperationException ignored) {
+            // No connection on this build.
+        }
+        scan(player, out);
+        Object abilities = fieldOf(player, "abilities");
+        if (abilities != null) {
+            scan(abilities, out);
+        }
+        if (connection != null) {
+            scan(connection, out);
+        }
+        return out.length() == 0 ? "(nothing suspicious)" : out.toString();
+    }
+
+    private static void scan(Object target, StringBuilder out) {
+        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+            for (Field field : type.getDeclaredFields()) {
+                String name = field.getName().toLowerCase(java.util.Locale.ROOT);
+                if (!name.contains("invuln") && !name.contains("permanent") && !name.contains("changing")
+                        && !name.contains("dimension") && !name.contains("awaiting")
+                        && !name.contains("confirm")) {
+                    continue;
+                }
+                field.setAccessible(true);
+                try {
+                    out.append(type.getSimpleName()).append('.').append(field.getName())
+                            .append('=').append(field.get(target)).append("  ");
+                } catch (IllegalAccessException | RuntimeException ignored) {
+                    out.append(type.getSimpleName()).append('.').append(field.getName())
+                            .append("=(unreadable)  ");
+                }
+            }
+        }
     }
 
     private static Object enumConstant(Class<?> type, String name) {

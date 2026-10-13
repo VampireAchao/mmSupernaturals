@@ -34,6 +34,9 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.Bisected;
+import org.bukkit.block.data.Openable;
 import org.bukkit.entity.Arrow;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -46,7 +49,6 @@ import org.bukkit.event.entity.EntityShootBowEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.material.Door;
 import org.bukkit.util.Vector;
 
 public class HunterManager extends HumanManager {
@@ -351,8 +353,8 @@ public class HunterManager extends HumanManager {
 		return false;
 	}
 
-	public boolean doorEvent(Player player, Block block, Door door) {
-		if (door.isOpen()) {
+	public boolean doorEvent(Player player, Block block) {
+		if (doorIsOpen(block)) {
 			return true;
 		}
 
@@ -365,28 +367,27 @@ public class HunterManager extends HumanManager {
 		boolean open = false;
 
 		final Location loc = block.getLocation();
+		Block other;
 		Location newLoc;
-		Block newBlock;
 
 		if (snplayer.isHuman()) {
 			open = join(snplayer);
 		}
 
 		if (snplayer.isHunter() || snplayer.isHuman() && open) {
-			if (door.isTopHalf()) {
-				newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() - 1, loc.getBlockZ());
-				newBlock = newLoc.getBlock();
-				setDoorOpen(block, true);
-				setDoorOpen(newBlock, true);
-			} else {
-				newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() + 1, loc.getBlockZ());
-				newBlock = newLoc.getBlock();
-				setDoorOpen(block, true);
-				setDoorOpen(newBlock, true);
+			// Both panels move together. Which one is the other half is asked of the block
+			// data rather than worked out from which one was clicked - see {@link #otherHalf}.
+			other = otherHalf(block);
+			setDoorOpen(block, true);
+			newLoc = other == null ? null : other.getLocation();
+			if (other != null) {
+				setDoorOpen(other, true);
 			}
 
 			addDoorLocation(loc);
-			addDoorLocation(newLoc);
+			if (newLoc != null) {
+				addDoorLocation(newLoc);
+			}
 
 			SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(SupernaturalsPlugin.instance, new Runnable() {
 				@Override
@@ -405,28 +406,54 @@ public class HunterManager extends HumanManager {
 
 	private void closeDoor(Location loc) {
 		Block block = loc.getBlock();
-		Door door = (Door) block.getState().getData();
-		if (!door.isOpen()) {
+		if (!doorIsOpen(block)) {
 			return;
 		}
 
-		Location newLoc;
-		Block newBlock;
-
-		if (door.isTopHalf()) {
-			newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() - 1, loc.getBlockZ());
-			newBlock = newLoc.getBlock();
-			setDoorOpen(block, false);
-			setDoorOpen(newBlock, false);
-		} else {
-			newLoc = new Location(loc.getWorld(), loc.getBlockX(), loc.getBlockY() + 1, loc.getBlockZ());
-			newBlock = newLoc.getBlock();
-			setDoorOpen(block, false);
-			setDoorOpen(newBlock, false);
+		Block other = otherHalf(block);
+		setDoorOpen(block, false);
+		if (other != null) {
+			setDoorOpen(other, false);
 		}
 
 		removeDoorLocation(loc);
-		removeDoorLocation(newLoc);
+		if (other != null) {
+			removeDoorLocation(other.getLocation());
+		}
+	}
+
+	/**
+	 * The other panel of the door this block belongs to, or null when it has none.
+	 *
+	 * <p>A door is two blocks that must agree about which of them is the top one, and the answer
+	 * is in the block data. It used to be read off a legacy material-data object instead, which
+	 * is deprecated and, worse, silent about a door whose two blocks were both placed as the
+	 * bottom half - which is exactly what a plain {@code setType(IRON_DOOR)} leaves behind. Such
+	 * a door still shows two panels, and a click on the upper one used to open the upper one
+	 * plus the air above it, so half the door moved. Falling back to "whichever neighbour is a
+	 * door of the same material" pairs them up anyway.
+	 */
+	private static Block otherHalf(Block block) {
+		if (!(block.getBlockData() instanceof org.bukkit.block.data.type.Door door)) {
+			return null;
+		}
+		Block up = block.getRelative(BlockFace.UP);
+		Block down = block.getRelative(BlockFace.DOWN);
+		Block wanted = door.getHalf() == Bisected.Half.TOP ? down : up;
+		if (sameDoor(wanted, block.getType())) {
+			return wanted;
+		}
+		Block spare = wanted.equals(up) ? down : up;
+		return sameDoor(spare, block.getType()) ? spare : null;
+	}
+
+	private static boolean sameDoor(Block block, Material material) {
+		return block.getType().equals(material)
+				&& block.getBlockData() instanceof org.bukkit.block.data.type.Door;
+	}
+
+	private static boolean doorIsOpen(Block block) {
+		return block.getBlockData() instanceof Openable openable && openable.isOpen();
 	}
 
 	/**

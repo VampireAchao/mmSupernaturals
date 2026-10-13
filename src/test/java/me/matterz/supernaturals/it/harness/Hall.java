@@ -15,15 +15,17 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Chest;
 import org.bukkit.block.Sign;
+import org.bukkit.block.data.Bisected;
 import org.bukkit.block.data.Directional;
 import org.bukkit.block.data.type.Door;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Tameable;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.util.EulerAngle;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -37,11 +39,11 @@ import java.util.Set;
  *
  * <p>A race hall is a <b>row of sections along the corridor</b>, not a room with things
  * scattered in it. Every step of a race's own flow is one section: its number and its teaching
- * signs at the section's head, and its own chest, switch, dummy or arena right behind them. So a
+ * signs at the section's head, and its own chest, switch, target or arena right behind them. So a
  * section can be added, changed or removed on its own, and a player can walk straight to the one
  * thing they want to test instead of reading every sign in the room to find it. Two steps belong
- * to every race and are therefore appended to every hall by the same code: an immovable dummy to
- * hit, and a switch that hands out power.
+ * to every race and are therefore appended to every hall by the same code: a stand-in to hit, and
+ * a switch that hands out power.
  *
  * <p><b>Four worlds.</b> The vampire and the werewolf are the two races whose tests read the
  * clock, and the ghoul's is the one that reads the weather, so those three get a world each: the
@@ -128,8 +130,43 @@ public final class Hall {
         /** Casts one of a priest's spells at the stand-in. The trigger names the item. */
         TEST_SPELL,
 
+        /**
+         * Uses the player's own item on a stand-in, with the damage applied by the server.
+         *
+         * <p>The detail is {@code MATERIAL[:DAMAGE]}, both optional. An event raised by hand is
+         * read by the plugin and hits nobody - the rule looks tested while nothing loses health -
+         * so a section about a skill that has to land on somebody swings for real.
+         */
+        USE_ON_NPC,
+
+        /**
+         * Puts out a stand-in who gets up again where he fell.
+         *
+         * <p>Several races turn the person they kill into one of their own, and a target that
+         * stays dead can only be killed once. The detail is {@code RACE[:MATERIAL]}.
+         */
+        SPAWN_TARGET,
+
+        /**
+         * Sends one stand-in at another, for the things that only show when somebody else takes
+         * the blow - the ghoul's bond splits damage with the person it is bound to.
+         */
+        NPC_HITS_NPC,
+
         /** Brings the stand-in over to the player, so a section about hitting it has a target. */
         SPAR,
+
+        /** Takes a bite out of the player's health, so a section about healing has a wound. */
+        HURT,
+
+        /**
+         * Ends the player's life outright, so a step about what dying does can be run as often as
+         * it needs to be. A fake client cannot fall on its own sword.
+         */
+        SELF_KILL,
+
+        /** Calls up one stand-in player per race named in the trigger, as test prey. */
+        SPAWN_NPCS,
 
         /** Puts the player back at the near end of the hall they are already in. */
         RETURN_START,
@@ -147,7 +184,25 @@ public final class Hall {
         LEFT_CLICK,
 
         /** Reads the hunter's bounty list back, and refreshes one. */
-        BOUNTY
+        BOUNTY,
+
+        /** Drops the player from high above the hall's own roof, so falling can be felt. */
+        FALL_TEST,
+
+        /** Puts the player back on the floor, after a fall they may have survived. */
+        BACK_DOWN,
+
+        /** Sets the player alight, which several races are supposed to shrug off. */
+        SET_FIRE,
+
+        /** Lowers the player into the hall's own lava, where a demon is healed, not hurt. */
+        DIP_LAVA,
+
+        /** Reads the player's power back, for a step about power going up or down on its own. */
+        POWER_READ,
+
+        /** Lets out one mob of the type named in the trigger, for a step that needs a monster. */
+        SPAWN_MOB
     }
 
     /** A switch and, when it belongs to one race, whose. */
@@ -212,6 +267,37 @@ public final class Hall {
     /** How deep a hall is, in blocks. */
     private static final int DEPTH = 15;
 
+    /**
+     * How much text fits on one line of a sign board, in units of one ASCII character.
+     *
+     * <p>The board's text area is about ninety pixels and the default font is six pixels a
+     * character, so fifteen. A full-width character is nine pixels and counts as one and a half.
+     */
+    private static final double SIGN_WIDTH = 15.0;
+
+    /**
+     * How many lines a board holds, and how many boards one run of signs may use.
+     *
+     * <p>Ten is what fits: a section's own boards start two columns into its slot and a slot is
+     * eleven wide, so the next section's boards begin thirteen columns along. Anything past ten
+     * runs into them, and the later write wins - which loses a board silently, so
+     * {@link #boardsDropped()} and {@link #signCollisions()} exist to make that loud instead.
+     */
+    private static final int LINES_PER_BOARD = 4;
+    private static final int MAX_BOARDS = 10;
+
+    /** Boards a switch's own label may use. Switches stand three columns apart. */
+    private static final int SWITCH_BOARDS = 3;
+
+    /**
+     * A page break: the next line starts a fresh board.
+     *
+     * <p>A goal or an expectation is a sentence, and half of one on the end of a board and the
+     * rest on the next is worse than a board that ends early. Every part of a section's teaching
+     * gets its own board, so whichever one a person looks at says one thing.
+     */
+    private static final String BREAK = "\u0000";
+
     /** How far the halls sit from the world spawn, and from each other. */
     private static final int CELL = 320;
 
@@ -226,12 +312,14 @@ public final class Hall {
     private static final Material PAD_TRIM = Material.POLISHED_BLACKSTONE_BRICKS;
 
     /**
-     * The one monster that is not summoned into a hall. The arena is big and tall enough for
-     * everything else the plugin lists - a giant, a warden, a ghast, a phantom - but an ender
-     * dragon is a boss with its own dimension and its own multi-part body, and a copy of one
-     * standing in a room tests nothing about a truce.
+     * Monsters that cannot be summoned into a hall at all.
+     *
+     * <p>This used to hold the ender dragon, on the reasoning that a boss with a body made of
+     * parts has nothing to say about a truce. It turns out the plugin's truce list names the
+     * dragon and somebody wants to watch that hold, so it is summoned like everything else. The
+     * set stays empty rather than going away, because something may yet turn out not to fit.
      */
-    private static final Set<String> UNROOMABLE = Set.of("ENDER_DRAGON");
+    private static final Set<String> UNROOMABLE = Set.of();
 
     private static final Theme LOBBY = new Theme(Material.DEEPSLATE_TILES, Material.STONE_BRICKS,
             Material.SMOOTH_QUARTZ, Material.POLISHED_ANDESITE, Material.GLASS,
@@ -302,15 +390,25 @@ public final class Hall {
     private final int oz;
 
     private final Map<Location, Fixture> fixtures = new LinkedHashMap<>();
+
+    /**
+     * Boards a section wrote that there was no room left for, and boards written over by another
+     * section. Both mean a person reading the wall is missing text, and neither shows up on its
+     * own: the first is dropped, the second is overwritten and then quietly repaired back to
+     * whichever section recorded it last. A run that reports zero of each had room for
+     * everything it said.
+     */
+    private int boardsDropped;
+    private int signCollisions;
     private final Map<Location, Map<Integer, ItemStack>> chests = new LinkedHashMap<>();
     private final Map<String, Location> points = new LinkedHashMap<>();
     private final Map<String, Box> zones = new LinkedHashMap<>();
-    private final Map<String, ArmorStand> dummies = new LinkedHashMap<>();
+    private final Map<String, Location> sparMarks = new LinkedHashMap<>();
     private final List<Box> boxes = new ArrayList<>();
 
     private Location lobbySpawn;
     private Location outsideSpawn;
-    private Location priestAltar;
+    private final List<Location> priestAltars = new ArrayList<>();
     private Location netherLava;
 
     private Hall(World world, World nether, int ox, int oy, int oz) {
@@ -338,6 +436,7 @@ public final class Hall {
             hall.raceHall(cell.getKey(), cell.getValue());
         }
         hall.netherDemonHall();
+        hall.netherGhoulCell();
         hall.returnPad();
         hall.keepLoaded();
         world.setSpawnLocation(hall.lobbySpawn);
@@ -348,7 +447,7 @@ public final class Hall {
     /**
      * Keeps the hall's own chunks loaded, in every world it has one in.
      *
-     * <p>Blocks survive a chunk being unloaded; entities do not. A dummy in a hall three hundred
+     * <p>Blocks survive a chunk being unloaded; entities do not. A monster in a hall three hundred
      * blocks from wherever the player is gets put away with its chunk and comes back only when
      * the chunk does - and until then the hall sees an invalid stand and puts a new one down
      * every two seconds, for ever. Force-loading costs a few dozen chunks and makes a hall the
@@ -403,7 +502,7 @@ public final class Hall {
 
     /**
      * One race's hall: a corridor of sections in a row, with an entry station at the near end.
-     * The dummy and the power switch are appended to every hall's list of sections, so they are
+     * The stand-in and the power switch are appended to every hall's list of sections, so they are
      * part of the row rather than bolted onto the end of the room.
      */
     private void raceHall(String race, int[] cell) {
@@ -415,7 +514,7 @@ public final class Hall {
         int z0 = centreZ - DEPTH / 2;
         int headroom = cell[2];
 
-        List<Section> sections = sectionsFor(race);
+        List<Section> sections = sectionsFor(race, headroom);
         int length = 0;
         for (Section section : sections) {
             length += section.slots() * SLOT;
@@ -431,7 +530,7 @@ public final class Hall {
                 box(target, AIR, x, y + headroom + 1, z0, x + width - 1, y + headroom + 1,
                         z0 + DEPTH - 1);
             }
-            sectionHead(target, y, x, z0, section.title(), section.lines());
+            sectionHead(target, y, x, z0, section.title(), section.lines(), width);
             section.station().build(target, y, x, z0, width);
             points.put("sec." + race + "." + index, new Location(target, x, y, z0));
             index++;
@@ -457,9 +556,14 @@ public final class Hall {
         int y = Math.max(oy, nether.getMinHeight() + 24);
         int x0 = centreX - 40;
         int z0 = centreZ - DEPTH / 2;
-        room(nether, x0, y, z0, 5 * SLOT, DEPTH, 12, THEMES.get("demon"));
-        sectionHead(nether, y, x0, z0, "§4① 转化 · 下界的火",
-                List.of("§7先穿整套皮革", "§7死在岩浆或者火里"));
+        room(nether, x0, y, z0, 6 * SLOT, DEPTH, 12, THEMES.get("demon"));
+        sectionHead(nether, y, x0, z0, "§4① 转化 下界的火",
+                brief("穿着整套皮革死在下界的火里，验证恶魔转化",
+                        "三个条件同时成立才转化：死亡原因是岩浆 / 火 / 燃烧、死亡地点在下界、"
+                                + "身上穿着整套皮革（或事先穿皮革走过下界传送门登记过申请）。"
+                                + "皮革就是这里这个箱子里的四件——这是这个大厅建在下界的原因",
+                        "死后成为恶魔；皮革是这一步的判定条件",
+                        "从箱子里拿走整套皮革穿上", "点「跳进岩浆」"), SLOT);
         int cx = x0 + 2 * SLOT + SLOT / 2;
         int cz = z0 + DEPTH / 2;
         box(nether, Material.POLISHED_BLACKSTONE_BRICKS, cx - 3, y, cz - 3, cx + 3, y, cz + 3);
@@ -469,18 +573,83 @@ public final class Hall {
         largeChest(nether, x0 + 2, y + 1, z0 + DEPTH - 2, leather());
         switchpoint(nether, y, x0 + 2, z0 + 3, Trigger.of(Kind.DIP),
                 "§c跳进岩浆", "§7点了就下池子");
-        sectionHead(nether, y, x0 + SLOT, z0, "§f② 假人 · 伤害测试",
-                List.of("§7打它看伤害数字", "§7它不会被推走"));
-        dummy(nether, "demon_nether", x0 + SLOT + 5, y, z0 + DEPTH / 2);
+        sectionHead(nether, y, x0 + SLOT, z0, "§f② 陪练 伤害测试",
+                brief("在下界也能正常打伤害、拿能量",
+                        "恶魔在下界不掉能量（每 5 秒的 −4 只在离开下界、又没站在火里时才扣），"
+                                + "还免疫火焰、燃烧、爆炸和摔落伤害。这里的陪练是用来确认"
+                                + "你在下界的伤害数值和主世界一致",
+                        "陪练站在你面前，真实掉血；打不动就点按钮把他刷新",
+                        "点「放出陪练」", "用武器打他一下，再看伤害数字"), SLOT);
+        sparMark(nether, "demon_nether", x0 + SLOT + 8, y, z0 + DEPTH / 2);
+        switchpoint(nether, y, x0 + SLOT + 3, z0 + 3, Trigger.of(Kind.SPAR),
+                "§f放出陪练", "§7他站在你面前，真的会掉血");
+        sectionHead(nether, y, x0 + 5 * SLOT, z0, "§5③ 转化他人 地狱岩",
+                brief("验证恶魔能把别人变成恶魔",
+                        "手持地狱岩攻击另一名同样手持地狱岩的玩家，耗 2000 能量，"
+                                + "会把对方直接转成恶魔。两边都得拿着地狱岩，缺一边就只是普通一击",
+                        "打完那一下，对方的种族变成恶魔，聊天栏有提示",
+                        "点「放出一个持地狱岩的异族」",
+                        "拿箱子里的地狱岩打他一下",
+                        "看他的种族是不是变成了 demon"), 4 * SLOT);
+        chest(nether, x0 + 5 * SLOT + 2, y + 1, z0 + DEPTH - 2, BlockFace.NORTH, centred(
+                new ItemStack(Material.NETHERRACK, 8)));
+        switchpoint(nether, y, x0 + 5 * SLOT + 5, z0 + 3,
+                Trigger.with(Kind.SPAWN_NPCS, "demon", "vampire:NETHERRACK"),
+                "§a放出一个持地狱岩的异族", "§7他手上也得拿着地狱岩");
+        switchpoint(nether, y, x0 + 5 * SLOT + 8, z0 + 3, Trigger.of(Kind.POWER, "demon_nether"),
+                "§b能量 +1000", "§7点一下加一千");
         switchpoint(nether, y, x0 + 3 * SLOT + 5, z0 + 3, Trigger.of(Kind.POWER, "demon_nether"),
                 "§b能量 +1000", "§7点一下加一千");
-        switchpoint(nether, y, x0 + 4 * SLOT + 2, z0 + 3, Trigger.of(Kind.RETURN_OVERWORLD),
+        switchpoint(nether, y, x0 + 4 * SLOT + 2, z0 + 3, Trigger.of(Kind.RETURN_OVERWORLD,
+                "demon"),
                 "§a回到主世界大厅", "§7恶魔大厅在另一头");
         entryStation(nether, "demon_nether", x0, y, z0);
+        points.put("sec.demon_nether.0", new Location(nether, x0, y, z0));
+        points.put("sec.demon_nether.1", new Location(nether, x0 + SLOT, y, z0));
+        points.put("sec.demon_nether.2", new Location(nether, x0 + 5 * SLOT, y, z0));
         points.put("spawn.demon_nether",
                 new Location(nether, x0 + 2.5, y + 1, z0 + DEPTH / 2.0 + 0.5));
         zones.put("hall.demon_nether", new Box(nether.getName(), x0 - 1, y - 1, z0 - 1,
-                x0 + 5 * SLOT, y + 12, z0 + DEPTH));
+                x0 + 6 * SLOT, y + 12, z0 + DEPTH));
+    }
+
+    /**
+     * The ghoul's own cell in the nether, and the only place it can be entered.
+     *
+     * <p>The plugin's one way into a ghoul is being killed by a Zombie Pigman <em>in the
+     * nether</em>: both halves are checked, and neither is a matter of taste. The hall used to
+     * offer a plain zombie in an ordinary world, which meets neither condition - so its
+     * conversion step could not convert anybody, however long a person stood there. This cell is
+     * where the two halves of the condition are actually met.
+     */
+    private void netherGhoulCell() {
+        if (nether == null) {
+            Bukkit.getLogger().warning("no nether world, so the ghoul's conversion cell was"
+                    + " not built (allow-nether must be true)");
+            return;
+        }
+        int centreX = world.getSpawnLocation().getBlockX() - CELL;
+        int centreZ = world.getSpawnLocation().getBlockZ() + CELL;
+        int y = Math.max(oy, nether.getMinHeight() + 24);
+        int x0 = centreX + 40;
+        int z0 = centreZ - DEPTH / 2;
+        room(nether, x0, y, z0, 3 * SLOT, DEPTH, 10, THEMES.get("ghoul"));
+        sectionHead(nether, y, x0, z0, "§2① 转化 下界僵尸猪人",
+                brief("在下界被僵尸猪人杀死，验证食尸鬼转化",
+                        "插件只认这一条路：死在下界 + 凶手是僵尸猪人。主世界的普通僵尸杀你不算，"
+                                + "大厅里放过的僵尸也没有用",
+                        "你一定会变成食尸鬼；这里不掷概率，转化率是 100%",
+                        "点「放出一只僵尸猪人」", "站着别动，等它打死你"), 3 * SLOT);
+        switchpoint(nether, y, x0 + 2, z0 + 3, Trigger.of(Kind.PREPARE_GHOUL),
+                "§2放出一只僵尸猪人", "§7它杀死你就会转化");
+        switchpoint(nether, y, x0 + 5, z0 + 3, Trigger.of(Kind.RETURN_OVERWORLD, "ghoul"),
+                "§a回到主世界大厅", "§7食尸鬼长廊在另一头");
+        entryStation(nether, "ghoul_nether", x0, y, z0);
+        points.put("sec.ghoul_nether.0", new Location(nether, x0, y, z0));
+        points.put("spawn.ghoul_nether",
+                new Location(nether, x0 + 1.5, y + 1, z0 + DEPTH / 2.0 + 0.5));
+        zones.put("hall.ghoul_nether", new Box(nether.getName(), x0 - 1, y - 1, z0 - 1,
+                x0 + 3 * SLOT, y + 10, z0 + DEPTH));
     }
 
     /** The demon's conversion outfit: it is the leather that makes the fire death count. */
@@ -493,53 +662,229 @@ public final class Hall {
         return layout;
     }
 
-    /** The switches at the near end of every hall: how to stop, and how to get out. */
+    /**
+     * The switches at the near end of every hall: how to stop, and how to get out.
+     *
+     * <p>The sign goes on the very first column of the wall. It used to sit four blocks in, which
+     * was the start of the first section's own run of signs - and a section's signs now run to
+     * three or four boards, so the entry board was sitting on top of the last of them and eating
+     * whatever was written there.
+     */
     private void entryStation(World target, String race, int x0, int y, int z0) {
-        wallSign(target, y, x0 + 4, z0, "§f入口 · 退出", "§7随时可以停下", "§7按钮就在对面墙上");
+        wallSign(target, y, x0, z0, "§f入口 · 退出", "§7随时可以停下", "§7按钮就在对面墙上");
         switchpoint(target, y, x0 + 1, z0 + 3, Trigger.of(Kind.EXIT_TEST, race),
                 "§a退出测试", "§7清道具 · 恢复人类 · 回大厅");
         switchpoint(target, y, x0 + 3, z0 + 3, Trigger.of(Kind.RESET_HUMAN, race),
                 "§a恢复人类", "§7留在这里，只改种族");
     }
 
-    /** The two steps every race has: a dummy to hit, and a switch that hands out power. */
-    private Section dummySection(String race) {
-        return section("§f假人 · 伤害测试", 1, (w, y, x, z, width) -> {
-            dummy(w, race, x + SLOT / 2, y, z + DEPTH / 2);
-            wallSign(w, y, x + 2, z, "§f打它，伤害数字飘在头上", "§7它不会被推动、打坏或穿戴");
-        }, "§7用你的武器打它");
+    /**
+     * The two steps every race has: a stand-in to hit, and a switch that hands out power.
+     *
+     * <p>The stand-in used to be an armour stand. It answered a damage event and nothing else -
+     * it had no health worth losing and could not be given a race - so a section whose whole
+     * point was "watch what this does to a person" could only ever watch a number. {@link
+     * Kind#SPAR} calls out the hall's real stand-in player instead: he is a player, he is human,
+     * he loses health when he is hit, and the button puts him back to full.
+     */
+    private Section sparSection(String race) {
+        return section("§f陪练 伤害测试", 1, (w, y, x, z, width) -> {
+            sparMark(w, race, x + SLOT / 2 + 4, y, z + DEPTH / 2);
+            switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.SPAR),
+                    "§f放出陪练", "§7他站在你面前，真的会掉血");
+        }, "用你的武器打陪练，看到的是真实伤害数字",
+                "陪练是一位没有客户端的真人玩家：他会真的掉血、被击退、被闪白，"
+                        + "头上飘出来的是插件加成之后的最终伤害。打空了他不会死——再点一次按钮就刷回满血",
+                "陪练会掉血但不会死；打空了就再点一次按钮把他刷新到满血",
+                "站好，点「放出陪练」", "用武器打他，数字飘在他头上");
     }
 
     private Section powerSection(String race) {
-        return section("§b能量 · +1000", 1, (w, y, x, z, width) -> switchpoint(w, y,
+        return section("§b能量 +1000", 1, (w, y, x, z, width) -> switchpoint(w, y,
                 x + SLOT / 2, z + 3, Trigger.of(Kind.POWER, race),
-                "§b能量 +1000", "§7点一下加一千"), "§7不用先刷能量再测试");
+                "§b能量 +1000", "§7点一下加一千"), "把能量补满，不用先刷到够用",
+                "点一下给 1000 能量。这是测试便利，不是种族能力——真实的能量来源是击杀和被动"
+                        + "（比如吸血鬼杀生物 +100、杀玩家 +500；狼人杀生物 +20、吃食物 +100）",
+                "点一下加 1000 能量", "每个种族的走廊末尾都有这一个");
+    }
+
+    /** A second switch a few blocks behind a section's own, so a costly step is never gated. */
+    private void powerButton(World target, int y, int x, int z, String race) {
+        switchpoint(target, y, x, z + 6, Trigger.of(Kind.POWER, race),
+                "§b能量 +1000", "§7这一格要花能量");
+    }
+
+    /**
+     * The fall, which most of these races have an opinion about and every one of them words
+     * differently - the same drop, four different answers.
+     *
+     * <p>A hall is a closed box: its ceiling is solid, so a fall taken inside one is a fall of two
+     * blocks onto a floor. The drop therefore happens outside, on the ground above the hall - a
+     * stone pad is laid down first, so what is landed on is always a pad and never water, leaves
+     * or a slope. The number on the health bar is the whole result, and it should not depend on
+     * where the hall happens to stand.
+     *
+     * <p>A second switch is needed because a fall is as one-way as it sounds: the player is on a
+     * roof thirteen blocks above the ground, and the way back down is another fall.
+     */
+    private Section fallSection(String race, int headroom) {
+        String ability = switch (race) {
+            case "vampire", "ghoul", "angel" ->
+                    "免疫摔落伤害：FALL 伤害被直接取消，从任意高度落地都不掉血";
+            case "demon" ->
+                    "与火、爆炸一起免疫摔落伤害：Demon 的免疫清单里有 FALL";
+            case "werewolf" ->
+                    "摔落伤害减半：Were.DamageFactor.Fall = 0.5，十点摔落只掉五点";
+            case "witchhunter" ->
+                    "摔落伤害减免 3 点（下限 0）：WitchHunter.FallReduction = 3，"
+                            + "矮处跳下来几乎不疼，高处照样疼";
+            default ->
+                    "这一族没有任何摔落减免——这里是整个大厅唯一的对照组，"
+                            + "同样的高度、同样的落地，掉多少血就是多少";
+        };
+        String expect = switch (race) {
+            case "vampire", "ghoul", "angel", "demon" -> "血条一点不动，摔下来什么事都没有";
+            case "werewolf" -> "掉的血是同样高度的一半（十三格大约 10 点，你只掉 5 点）";
+            case "witchhunter" -> "比同样的高度少掉 3 点血（十三格大约 10 点，你掉 7 点）";
+            default -> "按高度正常掉血（十三格大约掉 10 点），这就是没有减免的样子";
+        };
+        return section("§6摔落 从高处落下", 2, (w, y, x, z, width) -> {
+            int cx = x + 6;
+            int cz = z + DEPTH / 2;
+            // The drop happens inside a shaft that stands on the hall's own roof: four walls and
+            // a lid around a three-by-three well, the landing pad at the bottom, and everything
+            // the fall needs on the inside of it. This used to be a patch of stone laid flat on
+            // the roof, which has no answer for a player who lands half a block wide of it or
+            // takes a step afterwards: they end up on the ground outside a hall they cannot get
+            // back into, with the switch that would have brought them back on a wall inside the
+            // room they can no longer reach. A well is its own little room. There is nowhere to
+            // fall to but the pad, and the way out is on the wall beside it.
+            // The height is worked out from the room's own numbers, never asked of the world.
+            // `getHighestBlockYAt` looks right and is not: the heightmap is rebuilt lazily, so
+            // during the build it still describes whatever stood here before - the ground - and
+            // the previous version of this step put its landing pad on the landscape outside the
+            // hall, which is exactly where the player ended up, with the way back on a wall
+            // inside a room they could no longer reach. The ceiling is at y + headroom + 1.
+            int roof = y + headroom + 1;
+            int floorY = roof + 1;      // where the player stands after the fall
+            int drop = 13;              // ten points of damage for a race with no help
+            int legTop = floorY + drop; // where they are put, to let go
+            int lid = legTop + 2;
+
+            for (int up = floorY; up <= lid; up++) {
+                box(w, Material.STONE_BRICKS, cx - 2, up, cz - 2, cx + 2, up, cz + 2);
+            }
+            box(w, Material.AIR, cx - 1, floorY, cz - 1, cx + 1, legTop + 1, cz + 1);
+            box(w, Material.STONE, cx - 1, floorY - 1, cz - 1, cx + 1, floorY - 1, cz + 1);
+            // Fifteen blocks of shaft with no light in it is a hole you cannot find the switch in.
+            set(w, Material.SEA_LANTERN, cx, lid, cz);
+            set(w, Material.SEA_LANTERN, cx + 2, floorY + 2, cz + 2);
+            set(w, Material.SEA_LANTERN, cx - 2, floorY + 2, cz - 2);
+
+            points.put("fall." + race, new Location(w, cx + 0.5, legTop, cz + 0.5));
+            points.put("fall.ground." + race, new Location(w, cx + 0.5, y + 1, cz + 0.5));
+            switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.FALL_TEST, race),
+                    "§6站到高处", "§7然后放开手落下来");
+            // The way back sits inside the well, because that is where the fall leaves you.
+            button(w, cx + 1, floorY + 1, cz, BlockFace.WEST, Trigger.of(Kind.BACK_DOWN, race));
+            signOn(w, cx + 2, floorY + 2, cz, BlockFace.WEST, "§a回到地面", "§7点一下回大厅");
+        }, "用一次真实坠落，验这一族的摔落减免",
+                ability,
+                expect,
+                "先确认自己是满血（上一节受过伤就点点「恢复人类」再回来）",
+                "点「站到高处」——你会被送进大厅屋顶上的那口石井里",
+                "放开手落到井底，看血条掉了多少",
+                "点井壁上的「回到地面」按钮回大厅，继续后面的环节");
+    }
+
+    /**
+     * The races that turn the human they finish into one of their own, by a roll.
+     *
+     * <p>Everything else either has no such rule or reaches its race another way - a demon turns
+     * people with netherrack rather than with a kill - so these four are the ones that need a
+     * target who can be killed more than once.
+     */
+    private static final Set<String> KILL_CONVERTS =
+            Set.of("vampire", "ghoul", "werewolf", "enderborn");
+
+    /**
+     * What the race does to the person it kills.
+     *
+     * <p>Four races have a chance to turn a human they finish into one of their own, and it is a
+     * roll - a third for three of them, a tenth for the enderborn - so a single kill proves
+     * nothing either way. The stand-in this brings up therefore comes back where he fell, and the
+     * section is about watching the race change rather than about the kill.
+     */
+    private Section convertSection(String race) {
+        String chance = switch (race) {
+            case "enderborn" -> "10%（代码里写死的 0.10，没有配置项）";
+            default -> "35%（Supernatural.SpreadChance 默认 0.35）";
+        };
+        String extra = switch (race) {
+            case "werewolf" -> "，而且狼人只在夜里才算——白天杀了也白杀，先点旁边的「夜晚」";
+            default -> "";
+        };
+        return section("§5转化 杀死人类", 2, (w, y, x, z, width) -> {
+            switchpoint(w, y, x + 3, z + 3,
+                    Trigger.with(Kind.SPAWN_TARGET, race, "human"),
+                    "§f放出一个人类", "§7他能被反复杀死");
+            switchpoint(w, y, x + 7, z + 3,
+                    Trigger.with(Kind.USE_ON_NPC, race, "DIAMOND_SWORD:100"),
+                    "§c一击打死他", "§7看他的种族变不变");
+            switchpoint(w, y, x + 11, z + 3,
+                    Trigger.with(Kind.USE_ON_NPC, race, "DIAMOND_SWORD:100"),
+                    "§c再打一次", "§7概率的东西要多试");
+            powerButton(w, y, x + 15, z, race);
+        }, "验证击杀人类时能不能把他也变成这一族",
+                "这一族的感染是概率：" + chance + extra
+                        + "。中奖时他当场变成这一族，聊天栏会告诉你一声，"
+                        + "他头顶和 tab 里的标签也一起改掉。被转化的就是你杀的那个人，"
+                        + "所以这一格放的是一个普通人类",
+                "连着杀，直到他的标签从「人类」变成这一族。中奖之后他就一直是这一族了："
+                        + "再杀不会变回去，也不会再有第二次转化；想重来就再点一次「放出一个人类」",
+                "点「放出一个人类」，他就站在你面前，标签写着「人类」",
+                "点「一击打死他」；他倒下，两 tick 后又在原地站起来",
+                "每杀一次抬头看一眼他的标签：变成这一族就是中奖了",
+                "没中就接着点「再打一次」；连着几次不中是正常的，这是概率不是必定",
+                "想换一个从头试，再点一次「放出一个人类」，他会变回人类重新开始");
     }
 
     // -- the sections ------------------------------------------------------
 
     /** The steps of one race's flow, in the order a player should meet them. */
-    private List<Section> sectionsFor(String race) {
+    private List<Section> sectionsFor(String race, int headroom) {
         List<Section> sections = new ArrayList<>();
         switch (race) {
             case "vampire" -> {
-                sections.add(section("§c① 转化 · 成为吸血鬼", 1, (w, y, x, z, width) -> {
+                sections.add(section("§c① 转化 成为吸血鬼", 1, (w, y, x, z, width) -> {
                     Shrines.vampire(new Blocks(w), x + 5, y, z + DEPTH / 2);
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.MUSHROOM_STEW, 1),
                             new ItemStack(Material.BONE, 10),
                             new ItemStack(Material.GUNPOWDER, 10),
                             new ItemStack(Material.REDSTONE, 10)));
-                }, "§7箱子里拿四样材料", "§7右键中间的金块"));
-                sections.add(section("§b② 恢复人类 · 治愈祭坛", 1, (w, y, x, z, width) -> {
+                }, "作为人类走到祭坛上转化为吸血鬼",
+                        "感染祭坛的中心是一块金块，判定的是它周围半径 7 格的球体内要有 20 块黑曜石，"
+                                + "怎么摆都行；材料是蘑菇煲 1、骨头 10、火药 10、红石 10，"
+                                + "四样齐了右键金块。需要权限 supernatural.player.shrineuse.vampire",
+                        "材料被收走，你变成吸血鬼：初始 10000 能量，聊天栏出现提示",
+                        "在箱子里拿齐四样材料（关箱会自动补满）",
+                        "站到黑曜石台子上，右键中间的金块"));
+                sections.add(section("§b② 治愈 变回人类", 1, (w, y, x, z, width) -> {
                     Shrines.cure(new Blocks(w), x + 5, y, z + DEPTH / 2);
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.WATER_BUCKET, 1),
                             new ItemStack(Material.MILK_BUCKET, 1),
                             new ItemStack(Material.SUGAR, 20),
                             new ItemStack(Material.WHEAT, 20)));
-                }, "§7箱子里拿四样材料", "§7右键中间的青金石块"));
-                sections.add(section("§6③ 阳光与金头盔", 2, true, (w, y, x, z, width) -> {
+                }, "吸血鬼用治愈祭坛变回人类",
+                        "治愈祭坛中心是青金石块，周围半径 7 格的球体内要 20 块萤石；材料是水桶 1、"
+                                + "牛奶桶 1、糖 20、小麦 20，右键青金石块。这是吸血鬼唯一的解药，"
+                                + "只有吸血鬼能用",
+                        "材料被收走，你立刻恢复人类，本区种族被清空",
+                        "先变成吸血鬼（回第①节）再回到这一格",
+                        "拿齐四样材料，右键中间的青金石块"));
+                sections.add(section("§6③ 阳光 与 金头盔", 2, true, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.GOLDEN_HELMET, 1)));
                     // The middle of this section has no roof at all: the plugin asks the sky how
@@ -554,26 +899,52 @@ public final class Hall {
                             "§9夜晚", "§7夜里安全");
                     switchpoint(w, y, x + 11, z + 3, Trigger.of(Kind.SUN_SPOT, "vampire"),
                             "§6站到露天台", "§7这一格头顶 9 格没有屋顶");
-                }, "§7这一格是露天的（头顶没屋顶）", "§7白天不戴金头盔会被点燃",
-                        "§7戴上金头盔就不会", "§7只改本大厅的世界"));
-                sections.add(section("§a④ 回复饱食度 · 食物清单", 2, (w, y, x, z, width) -> {
+                    switchpoint(w, y, x + 14, z + 3, Trigger.of(Kind.TOGGLE_RAIN, "vampire"),
+                            "§9切换下雨", "§7雨也是遮挡的一种");
+                    powerButton(w, y, x + 2, z, "vampire");
+                }, "验证阳光燃烧，以及它会因为什么停下来",
+                        "白天 + 头顶没有方块遮挡 + 没有戴金头盔时，吸血鬼会持续着火掉血。"
+                                + "一共七种情况不会烧：夜晚、下雨、泡在水里、头顶有方块、戴金头盔、"
+                                + "身处下界、有 supernatural.player.preventsundamage 权限",
+                        "白天站在露天台上会着火；戴上金头盔、或改成夜晚、或让它下雨，都不再着火。"
+                                + "只影响本大厅自己的世界",
+                        "先点「白天」，再点「站到露天台」，看身上有没有起火",
+                        "拿箱子里的金头盔戴上，重复一次对照",
+                        "点「切换下雨」，露天淋着雨也不再着火"));
+                sections.add(section("§a④ 食物 不回饱食度", 2, (w, y, x, z, width) -> {
                     largeChest(w, x + 4, y + 1, z + DEPTH - 2, foodList());
                     switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.CLEAR_HUNGER),
                             "§7清空饱食度", "§7方便看杀怪回饱食");
-                }, "§7吸血鬼不能吃普通食物", "§7拿箱子里的东西右键试试", "§7会提示必须喝血"));
-                sections.add(section("§2⑤ 杀鸡回饱食度", 1, (w, y, x, z, width) ->
+                }, "确认吸血鬼吃普通食物没有用",
+                        "插件拦的是「吞下去的那一刻」：配置里列出的任何食物都不加饱食度、也不消耗物品，"
+                                + "只提示「吸血鬼必须喝血」。箱子里的 41 样就是那份清单",
+                        "吃东西的动作照常播放，但饱食度一动不动，食物也还在背包里",
+                        "点「清空饱食度」让自己饿着",
+                        "拿着箱子里的食物右键空气，看聊天栏提示",
+                        "再看一眼饱食度：还是 0"));
+                sections.add(section("§2⑤ 杀鸡 回饱食度", 1, (w, y, x, z, width) ->
                         switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.SPAWN_CHICKEN),
                                 "§a放出一只鸡", "§7它不会动，杀掉看饱食度"),
-                        "§7吸血鬼杀生物会回饱食度", "§7按钮先清掉旧的测试鸡", "§7再放一只新的"));
-                sections.add(section("§5⑥ 休战 · 敌对怪物", 4, true, (w, y, x, z, width) -> {
+                        "吸血鬼真正补饱食度的方式是击杀生物",
+                        "杀一只生物回 2 点饱食度、加 100 能量；杀一名玩家回 3 点、加 500 能量。"
+                                + "这是替代吃饭的那条路",
+                        "杀掉鸡以后饱食度上升 2 点，能量 +100",
+                        "点按钮放出一只鸡（旧的会被清掉）", "把它杀掉，回头看饱食度"));
+                sections.add(section("§5⑥ 休战 敌对怪物", 4, true, (w, y, x, z, width) -> {
                     box(w, Material.BLACKSTONE, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "vampire"),
                             "§c召唤全部敌对怪物", "§7看它们打不打你");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "vampire"),
                             "§a清空怪物", "§7离开测试也会自动清");
-                }, "§7这一格又大又高（34 格）", "§7巨人 / 监守者 / 恶魂都放得下",
-                        "§7未破约时它们不该主动攻击", "§7你打它一下就会破约"));
-                sections.add(section("§d⑦ 道具 · 跑酷", 2, (w, y, x, z, width) -> {
+                }, "验证休战契约：未破约时敌对怪物不该主动攻击吸血鬼",
+                        "默认与苦力怕、骷髅、僵尸、末影人、蜘蛛停战：它们既不主动选你做目标，"
+                                + "打出去的伤害也会被拒绝。你打它们任意一下就算破约，"
+                                + "破约后 120 秒（2 分钟）自动恢复",
+                        "全部怪物站在原地不追你；你打它们任意一下，它们立刻开始还手",
+                        "点「召唤全部敌对怪物」，站着别动，观察它们是否追你",
+                        "打其中一只一下，再站着不动，看它是否开始反击",
+                        "点「清空怪物」收拾干净（离开测试也会清）"));
+                sections.add(section("§d⑦ 道具 跳与传送", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.POPPY, 8),
                             new ItemStack(Material.BOOK, 4)));
@@ -584,17 +955,63 @@ public final class Hall {
                     }
                     switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.RESET_TELEPORT, "vampire"),
                             "§d重置传送点", "§7重设成大厅里这个位置");
-                }, "§7红玫瑰左键＝超级跳", "§7红玫瑰右键＝存传送点", "§7书左键＝传回存点"));
-                sections.add(placeholder("§7⑧ 待加环节", 1));
+                    powerButton(w, y, x + 8, z, "vampire");
+                }, "验证传送道具与超级跳，并且传送点逃不出大厅",
+                        "红玫瑰左键＝超级跳，耗 1000 能量；红玫瑰右键＝把脚下存成传送点，不花能量；"
+                                + "书左键＝传回存点，耗 9000 能量并消耗 1 本书。"
+                                + "传送点只在存下它的那个世界有效，跨世界会被拒绝",
+                        "书左键会传回存点；点「重置传送点」后存点永远在大厅里，出不去",
+                        "拿红玫瑰：左键超级跳一次，右键存一个传送点",
+                        "拿书左键传回存点，再用「重置传送点」把它钉回大厅"));
+                sections.add(section("§c⑧ 溺水 与 木剑", 2, (w, y, x, z, width) -> {
+                    // The room's own floor is the pool's rim: the water sits level with it and has
+                    // two layers of blackstone under it, because a hall in the void has no ground
+                    // to dig into.
+                    box(w, Material.POLISHED_BLACKSTONE_BRICKS, x + 7, y - 2, z + 6,
+                            x + 15, y, z + 12);
+                    box(w, Material.WATER, x + 9, y - 1, z + 8, x + 13, y, z + 10);
+                    points.put("vampire.pool", new Location(w, x + 11.5, y, z + 9.5));
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.WOODEN_SWORD, 1),
+                            new ItemStack(Material.IRON_SWORD, 1)));
+                    switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.SPAR),
+                            "§f叫陪练过来", "§7他手上先拿铁剑，站到你面前");
+                    switchpoint(w, y, x + 5, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "vampire", "IRON_SWORD"),
+                            "§f挨一下铁剑", "§7他的剑会换成铁剑");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "vampire", "WOODEN_SWORD"),
+                            "§b挨一下木剑", "§7他的剑会换成木剑，更疼");
+                    switchpoint(w, y, x + 11, z + 3, Trigger.of(Kind.DIP_WATER, "vampire"),
+                            "§9跳进水里", "§7等它先烧能量再掉血");
+                    powerButton(w, y, x + 14, z, "vampire");
+                }, "验证吸血鬼的两条被动：木制武器会打得更疼，溺水可以用能量顶",
+                        "普通近战打过来只吃 80% 的伤害（配置 0.8 是减伤系数）；"
+                                + "但如果武器是木制的（木剑、木棍、弓），伤害反而额外 +150%。"
+                                + "溺水伤害每 1 点消耗 90 能量，能量不足 90 时照常掉血",
+                        "木剑打你比铁剑更疼；站在水里能量持续下降，能量耗尽之后才开始真的掉血",
+                        "点「叫陪练过来」——他手上拿的是铁剑，先看清这一点",
+                        "点「挨一下木剑」：他的剑会当场换成木剑，再砍你一下",
+                        "点「挨一下铁剑」换回铁剑对比：同一把陪练，两次掉血不一样",
+                        "点「跳进水里」站着别动：先看能量掉，再看血开始掉"));
             }
             case "ghoul" -> {
-                sections.add(section("§2① 转化 · 被僵尸杀死", 1, (w, y, x, z, width) ->
-                        switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.PREPARE_GHOUL),
-                                "§a放出一只僵尸", "§7它杀死你就会转化"),
-                        "§7站到它旁边等着", "§7转化率是 100%"));
-                sections.add(section("§f② 教会净化 · 恢复人类", 2, (w, y, x, z, width) -> {
+                sections.add(section("§2① 转化 下界僵尸猪人", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.ROTTEN_FLESH, 8)));
+                    switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.GO_NETHER, "ghoul"),
+                            "§4进入下界转化室", "§7主世界的僵尸杀你没用");
+                }, "食尸鬼只有一个入口：在下界被僵尸猪人杀死",
+                        "插件把两个条件都写死了：死亡地点必须在下界，凶手必须是僵尸猪人。"
+                                + "主世界的普通僵尸、或者在下界死于别的原因，都不会转化——"
+                                + "大厅为此专门在下界建了一间小室",
+                        "你一定会变成食尸鬼；这条路不掷概率，转化率是 100%",
+                        "点「进入下界转化室」，那间屋子在另一头",
+                        "在那边的格子里点「放出一只僵尸猪人」，站着别动等它打死你",
+                        "死后用「回到主世界大厅」回来，再回到这一格继续"));
+                sections.add(section("§f② 教会 净化回人类", 2, (w, y, x, z, width) -> {
                     Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
-                    priestAltar = new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5);
+                    priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
                     // A pillar over the altar, so the one thing that undoes a ghoul is the one
                     // thing in the hall that is impossible to walk past.
                     for (int up = 1; up <= 3; up++) {
@@ -608,17 +1025,44 @@ public final class Hall {
                             new ItemStack(Material.BREAD, 30)));
                     switchpoint(w, y, x + 10, z + 3, Trigger.of(Kind.RESET_HUMAN, "ghoul"),
                             "§f净化 · 恢复人类", "§7走插件自己的治愈代码");
-                }, "§f钻石块＝教会祭坛（发光柱子下面）", "§7食尸鬼自己没有任何解药",
-                        "§7所以净化只能靠教会：点右边的按钮", "§7净化后你会原地变回人类"));
-                sections.add(section("§5③ 休战 · 僵尸系怪物", 4, true, (w, y, x, z, width) -> {
+                }, "验证食尸鬼只能靠教会净化回人类",
+                        "教会祭坛的中心是钻石块，位置由管理员设（本大厅已经把它全部登记成教会）。"
+                                + "非牧师的超自然单位右键它会当场被圣光杀死；食尸鬼额外多一次机会："
+                                + "以 25% 的概率（SpreadChance 0.35 减 0.1）直接恢复人类。"
+                                + "食尸鬼自己没有任何解药",
+                        "右键祭坛后你当场死一次，有机会直接变回人类；没变的话用旁边那个按钮",
+                        "先变成食尸鬼（回第①节）",
+                        "走到发光柱子下的钻石块旁边，右键它，看聊天栏",
+                        "没变回人类就点「净化 · 恢复人类」，那走的是插件自己的治愈代码"));
+                sections.add(section("§b③ 道具 猪肉与骨头", 2, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.PORKCHOP, 8),
+                            new ItemStack(Material.BONE, 8),
+                            new ItemStack(Material.IRON_SWORD, 1)));
+                    powerButton(w, y, x + 9, z, "ghoul");
+                }, "把这一族的两样耗能道具发到手里",
+                        "猪排左键召唤一只僵尸，耗 1000 能量；骨头左键攻击一个非人类的超自然玩家"
+                                + "可以建立「不洁纽带」——那条能力有自己的环节，这里只是发道具。"
+                                + "铁剑是给后面武器禁令那一节比对照用的",
+                        "猪排能召出僵尸；骨头和铁剑留着后面几节用",
+                        "先点一次「能量 +1000」",
+                        "拿猪排左键空气，看有没有僵尸出现",
+                        "骨头和铁剑收进背包，后面几节要用"));
+                sections.add(section("§5④ 休战 僵尸系怪物", 4, true, (w, y, x, z, width) -> {
                     box(w, Material.MOSS_BLOCK, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "ghoul"),
                             "§c召唤僵尸系怪物", "§7看它们打不打你");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "ghoul"),
                             "§a清空怪物", "§7离开测试也会自动清");
-                }, "§7僵尸 / 尸壳 / 溺尸 / 僵尸村民 / 僵尸猪人", "§7巨人（12 格高）也放得下",
-                        "§7未破约时都不该主动攻击"));
-                sections.add(section("§9④ 露天 · 阳光与下雨", 2, true, (w, y, x, z, width) -> {
+                }, "验证食尸鬼与僵尸家族的休战契约",
+                        "默认与僵尸、僵尸村民、溺尸、尸壳、僵尸猪人、巨人停战：它们既不主动选你"
+                                + "做目标，打出去的伤害也会被拒绝。打任意一只一下就算破约，"
+                                + "120 秒后自动恢复",
+                        "它们都不主动攻击；你打任意一只立刻破约，它开始还手",
+                        "点「召唤僵尸系怪物」，站着不动观察",
+                        "打其中一只一下，看它是否立刻反击",
+                        "打完点「清空怪物」收尾"));
+                sections.add(section("§9⑤ 露天 阳光与下雨", 2, true, (w, y, x, z, width) -> {
                     // No roof over this section: the plugin asks the sky, and both tests are
                     // about the sky - the sun for a ghoul's regeneration, the rain for the
                     // rule that switches that regeneration off.
@@ -628,107 +1072,381 @@ public final class Hall {
                             "§e站到露天台", "§7这一格头顶 9 格没屋顶");
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.TOGGLE_RAIN, "ghoul"),
                             "§9切换下雨", "§7雨会真的落到你身上");
-                }, "§7露天：阳光和雨都能进来", "§7下雨且没遮盖 = 不回血",
-                        "§7站回有顶的格子里会回血", "§7只改本大厅的世界"));
-                sections.add(section("§b⑤ 钻石剑 · 伤害为 0", 2, (w, y, x, z, width) -> {
+                    switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.HURT),
+                            "§c先被打掉血", "§7不然没血可回，看不出回血");
+                    powerButton(w, y, x + 2, z, "ghoul");
+                }, "验证食尸鬼的回血条件：有顶、且不下雨才回血",
+                        "回血每 10 秒 1 点。但雨在下、你头顶又没有遮挡时，这条路整个不生效——"
+                                + "判定看的是天空，玻璃顶也算遮挡。它同时也免疫摔落伤害",
+                        "露天淋雨时完全不回血；回到有顶的格子里每 10 秒回 1 点",
+                        "先点「先被打掉血」，血量掉到一半",
+                        "站到露天台点「切换下雨」等一会，看血量不动",
+                        "走回有顶的格子再等一会，看它开始回血"));
+                sections.add(section("§b⑥ 钻石剑 伤害 0", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
-                            "§f叫陪练过来", "§7他会站在你面前");
+                            "§f叫陪练过来", "§7他手上先拿铁剑");
                     switchpoint(w, y, x + 9, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SWORD"),
-                            "§b挨一下钻石剑", "§7你一滴血都不会掉");
+                            "§b挨一下钻石剑", "§7他的剑换成钻石剑，你不掉血");
                     switchpoint(w, y, x + 12, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "IRON_SWORD"),
-                            "§f挨一下铁剑", "§7对照：真的会掉血");
-                }, "§7免疫钻石剑与下界合金剑", "§7按钮会叫来一位陪练（真人模型）",
-                        "§7他挥剑砍你，你看到的是真实掉血"));
-                sections.add(placeholder("§7⑥ 待加环节", 1));
+                            "§f挨一下铁剑", "§7他的剑换回铁剑，真的掉血");
+                }, "验证食尸鬼对钻石剑 / 下界合金剑免疫",
+                        "默认免疫名单是下界合金剑与钻石剑：打在身上 0 伤害。其他近战武器正常生效，"
+                                + "而且你还有 35% 的减伤（配置 0.65 是减伤系数）",
+                        "钻石剑打在身上是 0 伤害，铁剑是正常伤害",
+                        "点「叫陪练过来」让他站到你面前",
+                        "依次点「挨一下钻石剑」和「挨一下铁剑」对比"));
+                sections.add(section("§7⑦ 武器禁令", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.IRON_SWORD, 1),
+                            new ItemStack(Material.GOLDEN_AXE, 1),
+                            new ItemStack(Material.DIAMOND_PICKAXE, 1)));
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
+                            "§f放出陪练", "§7他会站在你面前给你打");
+                    powerButton(w, y, x + 9, z, "ghoul");
+                }, "验证食尸鬼不能用常规武器",
+                        "默认禁用清单：弓、木棍，以及木 / 石 / 铁 / 金 / 钻 / 铜 / 下界合金的剑、斧、镐、"
+                                + "锹、锄。拿着它们攻击，伤害直接被判成 0；空手不受限制",
+                        "拿这三样武器打陪练，伤害数字全是 0",
+                        "点「放出陪练」",
+                        "拿箱子里的剑 / 斧 / 镐分别打他一下，看伤害数字",
+                        "空手再打一下对照：正常伤害"));
+                sections.add(section("§9⑧ 水里 持续掉血", 3, (w, y, x, z, width) -> {
+                    box(w, Material.MOSSY_STONE_BRICKS, x + 7, y - 2, z + 6,
+                            x + 15, y, z + 12);
+                    box(w, Material.WATER, x + 9, y - 1, z + 8, x + 13, y, z + 10);
+                    points.put("ghoul.pool", new Location(w, x + 11.5, y, z + 9.5));
+                    // A boat floating on the pool. Sitting in one is the only thing that exempts a
+                    // ghoul from the water, and an exemption nobody can try is an exemption nobody
+                    // has tested - this keeps the line on the sign from being just a claim.
+                    // Spawned by type, not by class: Boat is an abstract base on this server and
+                    // asking for one by class throws while the plugin is still enabling.
+                    Entity boat = w.spawnEntity(new Location(w, x + 10.5, y, z + 9.5),
+                            EntityType.OAK_BOAT);
+                    boat.setPersistent(true);
+                    switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.DIP_WATER, "ghoul"),
+                            "§9跳进水里", "§7站着别动，等它掉血");
+                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.HURT),
+                            "§c先回满血再看", "§7免得死在池子里");
+                    powerButton(w, y, x + 8, z, "ghoul");
+                }, "验证食尸鬼在水里会持续溶解，以及船里为什么不会",
+                        "脚下方块是水时，每秒掉 4 点血（不是溺水，是碰到水就掉；判定每 1 秒跑一次、"
+                                + "没有节流）。所以满血 20 点也只撑得住 5 秒——这一条比看上去凶得多。"
+                                + "坐上池子里那条船就完全不掉血；有 "
+                                + "supernatural.player.preventwaterdamage 权限也免疫",
+                        "站在水里血条每秒掉 4 点，几秒钟就见底；上岸立刻停；坐进船里一点不掉",
+                        "先点「先回满血再看」，半血进去根本来不及看",
+                        "点「跳进水里」，数到 3 就自己上岸，看血条少了多少",
+                        "捡起池子里那条船坐上（对着水面右键），再泡 10 秒，确认血条一点不动",
+                        "下船再泡一次，几秒就会被「溶解」死"));
+                sections.add(section("§2⑨ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.BONE, 6),
+                            new ItemStack(Material.IRON_SWORD, 1)));
+                    switchpoint(w, y, x + 6, z + 3,
+                            Trigger.with(Kind.SPAWN_NPCS, "ghoul", "random,random"),
+                            "§c放出两个同伴", "§7随机超自然种族");
+                    switchpoint(w, y, x + 10, z + 3,
+                            Trigger.with(Kind.USE_ON_NPC, "ghoul", "BONE"),
+                            "§2用骨头建立纽带", "§7打其中一个");
+                    switchpoint(w, y, x + 14, z + 3,
+                            Trigger.with(Kind.NPC_HITS_NPC, "ghoul", "6"),
+                            "§4让另一个同伴打他", "§7对比两边的血");
+                    powerButton(w, y, x + 18, z, "ghoul");
+                }, "看清「不洁纽带」到底替对方做了什么",
+                        "拿骨头左键攻击一个非人类的超自然玩家就能建立纽带，消耗 1 根骨头；"
+                                + "对人类不成立（会提示 form a bond with a human）。建立之后他每次挨打："
+                                + "最终伤害先减半，另一半点数按你自己的 0.65 减伤算完，从你身上扣掉，"
+                                + "并且每分担一次再扣你 50 点能量。双方必须同一世界、相距 ≤10 格，"
+                                + "你能量要够；一个食尸鬼同时只能绑一个人",
+                        "第二个同伴砍第一个的那一下：被打的只掉一半血，你自己同时掉一截，能量 −50",
+                        "点「放出两个同伴」——他们是随机一个超自然种族，人类不行",
+                        "点「用骨头建立纽带」，聊天栏出现羁绊提示",
+                        "点「让另一个同伴打他」，对比被打的人掉了多少、你掉了多少",
+                        "想自己动手也行：拿武器打其中一个，效果一样"));
             }
             case "werewolf" -> {
-                sections.add(section("§6① 转化 · 夜里被狼咬死", 1, (w, y, x, z, width) -> {
-                    switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.NIGHT),
+                sections.add(section("§6① 转化 夜里被狼咬死", 1, (w, y, x, z, width) -> {
+                    // x+3 belongs to the entry station, which every hall writes last: a switch
+                    // there is overwritten, button and sign both, and this section's "night"
+                    // button was quietly replaced by the entry station's "back to human" one.
+                    switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.NIGHT),
                             "§9夜晚", "§7先调成夜里");
                     switchpoint(w, y, x + 7, z + 3, Trigger.of(Kind.PREPARE_WEREWOLF),
                             "§a放出一只狼", "§7它咬死你就会转化");
-                }, "§7只有夜里未驯服的狼才算", "§7白天能力不可用"));
-                sections.add(section("§a② 狼毒解药 · 制作与使用", 2, (w, y, x, z, width) -> {
+                }, "让未驯服的狼在夜里咬死你，验证死亡转化",
+                        "两个条件缺一不可：咬死你的是未驯服的野狼，而且当时是夜里"
+                                + "（世界时间大于 12400 就是夜晚）。白天放不出狼，白天死也不算",
+                        "你会变成狼人；白天脚本会直接拒绝放狼，并提示你先点「夜晚」",
+                        "先点「夜晚」把本大厅调成夜里",
+                        "再点「放出一只狼」，站着等它咬死你"));
+                sections.add(section("§a② 解药 狼毒解药", 2, (w, y, x, z, width) -> {
                     largeChest(w, x + 4, y + 1, z + DEPTH - 2, wereWolfbaneList());
                     switchpoint(w, y, x + 10, z + 3, Trigger.of(Kind.DAY),
                             "§e白天", "§7狼毒只能在白天做");
-                }, "§7箱子里是完整配方", "§7白天手持碗左键 = 解毒", "§7材料会被扣掉，直接恢复人类"));
+                    powerButton(w, y, x + 6, z, "werewolf");
+                }, "验证狼毒解药：只能在白天做，做完直接恢复人类",
+                        "配方不止常见的那几样——默认是 20 种：蒲公英、虞美人、红蘑菇、棕蘑菇各 10 个，"
+                                + "另加 15 种花（绒球葱、蓝花美耳草、兰花、闭眼绒球花、矢车菊、金蒲公英、"
+                                + "铃兰、睁眼绒球花、橙色郁金香、滨菊、粉色郁金香、红色郁金香、火把花、"
+                                + "白色郁金香、凋灵玫瑰）和 1 个碗，各 1 个。箱子里的东西是直接照插件配置生成的，"
+                                + "所以永远不会和配方对不上。手持碗左键，材料齐了才生效，"
+                                + "并需要 supernatural.player.wolfbane 权限。只能白天做——夜里左键不会被受理",
+                        "材料被扣掉，人立刻变回人类",
+                        "先把本大厅点成白天",
+                        "拿走箱子里的全部材料，手持碗左键一次"));
                 sections.add(section("§e③ 夜间道具", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.PORKCHOP, 8),
                             new ItemStack(Material.FEATHER, 8),
                             new ItemStack(Material.COOKED_BEEF, 16)));
-                    switchpoint(w, y, x + 7, z + 3, Trigger.of(Kind.NIGHT),
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.NIGHT),
                             "§9夜晚", "§7这些都要夜里用");
-                }, "§7猪肉左键＝召狼并驯服", "§7羽毛左键＝向前冲刺", "§7食物右键＝回饱食度并加能量"));
+                    switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.DAY),
+                            "§e白天", "§7白天它们全都不可用");
+                    powerButton(w, y, x + 12, z, "werewolf");
+                }, "验证狼人的三件夜间道具，以及它们白天确实失效",
+                        "猪排左键＝召唤一只狼并驯服它，耗 2000，最多同时控制 5 只；"
+                                + "羽毛左键＝朝面朝方向冲刺，耗 400；吃食物右键＝回饱食度并 +100 能量，"
+                                + "但面包例外。这三样只在夜里生效",
+                        "夜里三样都能用；换成白天再点，它们要么没反应、要么直接提示不可用",
+                        "先点「夜晚」，依次试猪排（左键）、羽毛（左键）、食物（右键）",
+                        "再点「白天」，把同样三样再试一遍，对照"));
                 sections.add(section("§c④ 夜间武器限制", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BOW, 1),
                             new ItemStack(Material.IRON_SWORD, 1),
                             new ItemStack(Material.STONE_AXE, 1)));
-                    dummy(w, "werewolf_night", x + 8, y, z + DEPTH / 2);
+                    sparMark(w, "werewolf_night", x + 8, y, z + DEPTH / 2);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.NIGHT),
-                            "§9夜晚", "§7再拿武器打假人");
-                }, "§7夜里不能用弓和多数剑斧镐", "§7打假人应该是 0 伤害", "§7白天没有这个限制"));
-                sections.add(placeholder("§7⑤ 待加环节", 1));
+                            "§9夜晚", "§7再拿武器打陪练");
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
+                            "§f放出陪练", "§7他站在你面前给你打");
+                    switchpoint(w, y, x + 10, z + 3, Trigger.of(Kind.DAY),
+                            "§e白天", "§7对照：白天没有限制");
+                    powerButton(w, y, x + 12, z, "werewolf");
+                }, "验证狼人夜里不能用弓和多数剑斧镐",
+                        "禁用的是木 / 石 / 铁 / 金 / 钻 / 铜 / 下界合金的剑、斧、镐、锹、锄，"
+                                + "外加弓和木棍：夜里拿着它们近战，伤害是 0。"
+                                + "狼人自己那 5 倍近战加成也只在夜里生效，白天两者一起消失",
+                        "夜里拿这些武器打陪练是 0 伤害；改成白天，同样的武器是正常伤害",
+                        "点「夜晚」再点「放出陪练」",
+                        "拿箱子里的弓 / 铁剑 / 石斧分别打他一下，看伤害数字",
+                        "点「白天」，拿铁剑再打一次，对照"));
+                sections.add(section("§6⑤ 与狼停战", 3, true, (w, y, x, z, width) -> {
+                    box(w, Material.SPRUCE_PLANKS, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
+                    switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "werewolf"),
+                            "§c放出三只愤怒的野狼", "§7它们本该冲你来");
+                    switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "werewolf"),
+                            "§a清空怪物", "§7离开测试也会自动清");
+                }, "验证狼人不会被狼咬伤",
+                        "Were.WolfTruce 打开时，未驯服的狼不会把狼人选作目标，就算它已经扑上来，"
+                                + "它打出的伤害也会被拒绝——休战是两道门。野狼自己那股怒气不写在"
+                                + "「目标」这个字段里，所以大厅直接指定了目标：这三只狼是真的会来咬你的，"
+                                + "要看的只有一件事——咬不咬得动",
+                        "狼会真的扑上来咬你（不是站着看），但你一点血都不掉；"
+                                + "把自己恢复成人类、再点一次同样的按钮，同样三只狼咬下去就会掉血",
+                        "点「放出三只愤怒的野狼」，站着别动，让它们咬你，看血条",
+                        "点入口那排的「恢复人类」，再点一次同样的按钮，对照：这次会掉血",
+                        "点「清空怪物」收尾"));
+                sections.add(section("§6⑥ 夜晚 自动回血", 3, (w, y, x, z, width) -> {
+                    switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.HURT),
+                            "§c先打掉半血", "§7不然看不出回血");
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.NIGHT),
+                            "§9夜晚", "§7回血只在夜里");
+                    switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.DAY),
+                            "§e白天", "§7对照：白天不回血");
+                    powerButton(w, y, x + 12, z, "werewolf");
+                }, "验证狼人的自动回血只在夜里发生",
+                        "Were.Time.HealthGained = 0.2/秒，每 5 秒结算一次，且只在夜里触发；"
+                                + "白天同样掉着血也一动不动。这是狼人白天弱势的一部分——"
+                                + "攻击加成、武器禁用、回血，三样都绑在时刻上",
+                        "夜里半血会一格一格涨回来；把时间改成白天，同样的半血就停在那里",
+                        "点「先打掉半血」",
+                        "点「夜晚」，安静站着，看血条每 5 秒涨一点",
+                        "点「白天」，再等半分钟，确认血条不再动"));
             }
             case "demon" -> {
-                sections.add(section("§c① 火球与束缚", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.REDSTONE, 16),
-                                new ItemStack(Material.INK_SAC, 8))),
-                        "§7红石左键＝火球", "§7墨囊左键＝蜘蛛网束缚", "§7这是主世界维度的大厅"));
-                sections.add(section("§b② 寒冷生物群系 · 溺死恢复人类", 2, (w, y, x, z, width) -> {
-                    // The pool sits ON the floor and is walled on all four sides, with its own
-                    // bottom: the first version dug one block below the room's floor, which in a
-                    // hall that floats over nothing is a hole straight into the void.
-                    box(w, Material.POLISHED_BLACKSTONE_BRICKS, x + 7, y, z + 4,
-                            x + 13, y + 3, z + 10);
-                    box(w, Material.WATER, x + 8, y + 1, z + 5, x + 12, y + 3, z + 9);
-                    points.put("demon.pool", new Location(w, x + 10.5, y + 3, z + 7.5));
-                    switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.COLD_BIOME, "demon"),
-                            "§b查看生物群系", "§7确认插件认不认");
-                    switchpoint(w, y, x + 3, z + 6, Trigger.of(Kind.DIP_WATER, "demon"),
-                            "§9跳进水里", "§7带着雪球淹死自己");
-                    largeChest(w, x + 2, y + 1, z + DEPTH - 2,
-                            fill(new LinkedHashMap<>(), Material.SNOWBALL, 64, 2));
-                }, "§7大厅生成时就在寒冷生物群系", "§7水池有底的，不会掉出去",
-                        "§7背包里放 30 个雪球", "§7溺水死亡 = 恢复人类"));
-                sections.add(section("§4③ 前往下界 · 岩浆转化", 2, (w, y, x, z, width) -> {
-                    box(w, Material.POLISHED_BLACKSTONE_BRICKS, x + 8, y, z + 5,
-                            x + 14, y, z + 10);
-                    box(w, Material.LAVA, x + 9, y, z + 6, x + 13, y, z + 9);
+                sections.add(section("§4① 下界 岩浆转化", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.NETHERRACK, 8)));
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.GO_NETHER, "demon"),
                             "§4进入下界大厅", "§7穿着皮革死在里面");
-                }, "§7恶魔必须在下界的火里转化", "§7按钮把你送进下界大厅",
-                        "§7那里有整套皮革和岩浆池"));
-                sections.add(placeholder("§7④ 待加环节", 1));
+                    powerButton(w, y, x + 8, z, "demon");
+                }, "验证恶魔必须死在下界的火里才能转化",
+                        "三个条件同时成立才转化：①死亡原因是岩浆、火或燃烧；②死亡地点在下界；"
+                                + "③身上穿着整套皮革（或者之前穿着皮革走过下界传送门登记过申请）。"
+                                + "缺一条都不行——主世界的火再大也只是白死",
+                        "死后成为恶魔；按钮把你送进下界的转化厅，那里有整套皮革和岩浆池",
+                        "点「进入下界大厅」",
+                        "在那边从箱子里拿走整套皮革穿上",
+                        "跳进岩浆（死后即转化），再用「回到主世界大厅」回来"));
+                sections.add(section("§c② 火球与束缚", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.REDSTONE, 16),
+                            new ItemStack(Material.INK_SAC, 8)));
+                    powerButton(w, y, x + 6, z, "demon");
+                }, "验证恶魔的两个主世界能力：火球与蜘蛛网束缚",
+                        "红石左键＝射出火球，耗 2000；只在允许 PvP 的区域可用，"
+                                + "威力被压到不破坏地形，命中处 3 格内造成 10 点伤害并点燃。"
+                                + "墨囊左键＝在你指的位置生成 3×3×3 的蜘蛛网，耗 1000，"
+                                + "10 秒后插件自己清掉，不会留在地上",
+                        "火球飞出去，落点有伤害和火；蜘蛛网出现在你指的地方，10 秒后消失",
+                        "拿箱子里的红石左键一次",
+                        "拿墨囊对着地面左键一次，看蜘蛛网的位置",
+                        "等 10 秒再看一眼：网自己没了"));
+                sections.add(section("§b③ 溺死 恢复人类", 2, (w, y, x, z, width) -> {
+                    // The pool is sunk into the floor and has a bottom of its own. The first
+                    // version was a raised basin three blocks high, which nobody could get into;
+                    // the version before that was dug one block below the room's own floor,
+                    // which in a hall that floats over nothing is a hole straight into the void.
+                    // Two layers of blackstone under the water are that bottom, and the water's
+                    // surface is level with the floor, so a person simply walks in.
+                    box(w, Material.POLISHED_BLACKSTONE_BRICKS, x + 6, y - 2, z + 3,
+                            x + 14, y, z + 11);
+                    box(w, Material.WATER, x + 8, y - 1, z + 5, x + 12, y, z + 9);
+                    points.put("demon.pool", new Location(w, x + 10.5, y, z + 7.5));
+                    switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.COLD_BIOME, "demon"),
+                            "§b查看生物群系", "§7确认插件认不认");
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.DIP_WATER, "demon"),
+                            "§9跳进水里", "§7带着雪球淹死自己");
+                    largeChest(w, x + 2, y + 1, z + DEPTH - 2,
+                            fill(new LinkedHashMap<>(), Material.SNOWBALL, 64, 2));
+                }, "验证恶魔回人类的唯一路径",
+                        "恶魔在寒冷生物群系（雪原、冰原、冷冻海洋、雪山等）溺死，"
+                                + "并且背包里至少有 30 个雪球时，才会恢复人类。"
+                                + "本大厅所在的世界建的时候就设成了雪原生物群系——插件读的是世界，"
+                                + "不是按钮，所以这一步改不了",
+                        "带够 30 个雪球时溺死会变成人类；水池是走进去的，不会掉出世界",
+                        "先从箱子里拿走至少 30 个雪球",
+                        "点「查看生物群系」确认是寒冷群系",
+                        "点「跳进水里」等着淹死"));
+                sections.add(section("§5④ 转化他人 地狱岩", 2, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.NETHERRACK, 8)));
+                    switchpoint(w, y, x + 4, z + 3,
+                            Trigger.with(Kind.SPAWN_NPCS, "demon", "vampire:NETHERRACK"),
+                            "§a放出持地狱岩的异族", "§7他手上真的拿着");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.USE_ON_NPC, "demon", "NETHERRACK"),
+                            "§c用地狱岩打他", "§7一下就会转化");
+                    powerButton(w, y, x + 12, z, "demon");
+                }, "验证恶魔能把别人变成恶魔",
+                        "手持地狱岩攻击另一名同样手持地狱岩的玩家，耗 2000 能量，会把对方直接"
+                                + "转成恶魔。两边都得拿着地狱岩，缺一边就只是普通一击——"
+                                + "所以你自己也得从箱子里拿一块。注意地狱岩不是武器，"
+                                + "拿它砍人几乎不掉血，这里要的也不是伤害",
+                        "打完之后对方的种族变成 demon，头顶标签和聊天栏都会变",
+                        "点「放出持地狱岩的异族」——他手上真的拿着地狱岩",
+                        "从箱子拿一块地狱岩拿在手上",
+                        "点「用地狱岩打他」（自己走过去打一下也行），看他的种族",
+                        "没变就再打一下：能量不够会提示，先点「能量 +1000」"));
+                sections.add(section("§4⑤ 免疫 火与爆炸", 2, (w, y, x, z, width) -> {
+                    box(w, Material.POLISHED_BLACKSTONE, x + 5, y, z + 5, x + 13, y, z + 11);
+                    set(w, Material.FIRE, x + 7, y + 1, z + 7);
+                    set(w, Material.FIRE, x + 9, y + 1, z + 7);
+                    set(w, Material.FIRE, x + 11, y + 1, z + 7);
+                    switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.SET_FIRE),
+                            "§c把自己点着", "§7恶魔不该掉血");
+                    powerButton(w, y, x + 6, z, "demon");
+                }, "验证恶魔对火焰的免疫",
+                        "Demon 的免疫清单是：火焰、火焰蔓延、方块爆炸、实体爆炸、摔落。"
+                                + "站在火里、被点着，血和能量都不该动；摔落那一条在走廊末尾的"
+                                + "公共「摔落」节里验（那一节写着恶魔也是免疫）",
+                        "你会一直烧着（火苗看得见），但血和能量一点都不掉——"
+                                + "免疫的是伤害，不是动画",
+                        "走到那排火里站一会儿，或者点「把自己点着」",
+                        "站够半分钟，确认血条一点没掉"));
+                sections.add(section("§4⑥ 岩浆 回血回能", 3, (w, y, x, z, width) -> {
+                    box(w, Material.POLISHED_BLACKSTONE_BRICKS, x + 7, y, z + 5,
+                            x + 15, y, z + 11);
+                    box(w, Material.LAVA, x + 8, y, z + 6, x + 14, y, z + 10);
+                    points.put("lava.demon", new Location(w, x + 11.5, y, z + 8.5));
+                    switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.HURT),
+                            "§c先打掉半血", "§7不然看不出回血");
+                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.DIP_LAVA, "demon"),
+                            "§4跳进岩浆", "§7站着别动");
+                    switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.POWER_READ),
+                            "§b查看能量", "§7每 2 秒 +40");
+                }, "验证恶魔在岩浆里不但不受伤，还回血回能",
+                        "岩浆对恶魔不是伤害而是补给：每次结算回 1 点血、+40 能量（两次结算之间"
+                                + "有约 2 秒冷却）。这是恶魔唯一不花钱的能量来源",
+                        "站在岩浆里血条慢慢回满，能量持续上涨",
+                        "点「先打掉半血」",
+                        "点「跳进岩浆」站进去，别急着上来",
+                        "每隔一会儿点一次「查看能量」，看它涨了多少"));
+                sections.add(section("§4⑦ 脱战 持续掉能", 2, (w, y, x, z, width) -> {
+                    switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.POWER_READ),
+                            "§b查看能量", "§7记下这个数");
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.POWER_READ),
+                            "§b再查一次", "§7隔一分钟再点");
+                    powerButton(w, y, x + 9, z, "demon");
+                }, "验证恶魔离开下界与火源之后会一直掉能量",
+                        "不在下界、脚下方块也不是火或岩浆时，每 5 秒 -20 能量"
+                                + "（Demon.Power.Loss = 4，每秒结算）。这是恶魔最大的枷锁："
+                                + "不在火旁边就一直在流失",
+                        "站在这里能量一路下降；跳进上一节的岩浆里则会涨——那是对照",
+                        "点一次「查看能量」，把数字记住",
+                        "原地等一分钟，再点一次，看掉了多少",
+                        "想让它停下来，就回下界（①节有传送）或者站进岩浆"));
+                sections.add(section("§4⑧ 护甲 只能裸装", 1, (w, y, x, z, width) ->
+                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                                new ItemStack(Material.LEATHER_CHESTPLATE, 1),
+                                new ItemStack(Material.IRON_CHESTPLATE, 1),
+                                new ItemStack(Material.DIAMOND_CHESTPLATE, 1))),
+                        "验证恶魔不能穿任何护甲",
+                        "护甲白名单里只有空气：皮革、铁、金、钻、锁链、铜、下界合金的头盔、胸甲、"
+                                + "护腿、靴子，穿上都会被脱下来掉在地上。恶魔靠免疫和回血活着，不靠甲",
+                        "三件胸甲一件都留不住，全被脱下来",
+                        "从箱子里拿三件胸甲",
+                        "依次穿上，看它们是不是都被脱掉"));
             }
             case "priest" -> {
-                sections.add(section("§f① 入教 · 教会祭坛", 1, (w, y, x, z, width) -> {
+                sections.add(section("§f① 入教 教会祭坛", 1, (w, y, x, z, width) -> {
                     Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
-                    priestAltar = new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5);
+                    priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.GOLD_INGOT, 4),
                             new ItemStack(Material.GLOWSTONE_DUST, 4),
                             new ItemStack(Material.REDSTONE, 8),
                             new ItemStack(Material.BREAD, 30)));
-                }, "§7钻石块是教会祭坛", "§7拿四样材料右键它", "§7教会位置就设在这里"));
-                sections.add(section("§6② 献祭 · 教会捐赠", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, donationList()),
-                        "§7苹果 / 生鳕鱼 / 熟鳕鱼", "§7熟猪排 / 面包", "§7拿它们右键祭坛换能量"));
-                sections.add(section("§8③ 逐出教会 · 恢复人类", 1, (w, y, x, z, width) ->
+                }, "作为人类捐齐材料加入教会，成为牧师",
+                        "教会祭坛是钻石块，位置由管理员用 /sn setchurch 设。教会是一个列表，"
+                                + "一台服务器可以有多座（/sn church add|remove|list|clear 管理）；"
+                                + "插件认的是你右键的那块钻石块在不在一座教会附近，而不是你的站位。"
+                                + "入教材料：金锭 4、萤石粉 4、红石 8、面包 30。"
+                                + "需要权限 supernatural.player.shrineuse.priest",
+                        "材料被收走，你变成牧师（初始 10000 能量），聊天栏出现提示",
+                        "在箱子里拿齐四样材料（关箱自动补满）",
+                        "右键中间的钻石块"));
+                sections.add(section("§6② 献祭 教会捐赠", 1, (w, y, x, z, width) ->
+                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                                new ItemStack(Material.APPLE, 8),
+                                new ItemStack(Material.COD, 8),
+                                new ItemStack(Material.COOKED_COD, 8),
+                                new ItemStack(Material.COOKED_PORKCHOP, 8),
+                                new ItemStack(Material.BREAD, 8))),
+                        "验证牧师向教会捐献换能量",
+                        "牧师右键祭坛会把背包里所有可捐物一次收走，按单价换算能量："
+                                + "苹果 9000、生鳕鱼 510、熟鳕鱼 500、熟猪排 210、面包 80。"
+                                + "箱子里五种各 8 个，够你把每一条都试到",
+                        "聊天栏列出收到的能量数值，对应物品全部被收走",
+                        "成为牧师后再回到这一格",
+                        "拿走箱子里的食物，右键钻石块，看聊天栏报的数值"));
+                sections.add(section("§8③ 逐出 恢复人类", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                                 new ItemStack(Material.COAL, 4))),
-                        "§7手持煤炭右键祭坛", "§7会被逐出教会并变回人类"));
-                sections.add(section("§b④ 法术 · 净化与治疗", 3, (w, y, x, z, width) -> {
+                        "验证牧师手持煤炭右键祭坛会被逐出教会",
+                        "牧师拿煤炭右键祭坛，等于自己退会：身份立刻清空、变回人类，"
+                                + "能量归 0。这是牧师唯一不需要别人帮忙的退出方式",
+                        "右键后立刻恢复人类，牧师身份清空",
+                        "确保自己还是牧师",
+                        "拿箱子里的煤炭右键钻石块"));
+                sections.add(section("§b④ 法术 净化与治疗", 3, (w, y, x, z, width) -> {
                     spellBench(w, y, x, z, Material.FEATHER, Material.SUGAR, Material.FLINT,
                             Material.PAPER);
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.SPAR),
@@ -741,8 +1459,20 @@ public final class Hall {
                             "§7燧石 · 治愈诅咒", "§7对方也要拿着燧石");
                     switchpoint(w, y, x + 14, z + 3, spell("PAPER"),
                             "§7纸 · 治疗", "§7给人类回 10 点血");
-                }, "§7用法术物品攻击目标", "§7陪练会被先变成异族", "§7这样每个法术都有对象"));
-                sections.add(section("§5⑤ 法术 · 汲取与守护", 2, (w, y, x, z, width) -> {
+                    powerButton(w, y, x + 6, z, "priest");
+                }, "验证牧师的四个单体法术都能触发",
+                        "全部四个都用「拿物品攻击目标」触发，不是右键：羽毛＝放逐，耗 4000，"
+                                + "把异族传送到管理员用 /sn setbanish 设的放逐点；糖＝驱魔，耗 9000，"
+                                + "把异族变回人类；燧石＝治愈诅咒，耗 1000，要求对方手上也拿着燧石；"
+                                + "纸＝治疗，耗 1000，给非超自然目标回 10 点血。"
+                                + "另外牧师打超自然目标会点燃对方、伤害翻倍，打普通动物则完全无效（狼除外）",
+                        "每个法术都在那个陪练身上真实生效：他先变成吸血鬼（一个真的超自然"
+                                + "单位），法术按普通攻击的路径打上去，掉血、变身、传送都是真的，"
+                                + "不是播一条消息。你也可以自己拿物品去打他，效果完全一样",
+                        "点「叫陪练过来」，他会先变成异族，然后走过来站到你面前",
+                        "手持箱子里的法术物品打他一下，看陪练的变化和聊天栏",
+                        "四件物品逐个试，每个法术的按钮只放一次"));
+                sections.add(section("§5⑤ 法术 汲取与守护", 2, (w, y, x, z, width) -> {
                     spellBench(w, y, x, z, Material.BOOK, Material.WHITE_WOOL, Material.BOWL);
                     switchpoint(w, y, x + 5, z + 3, spell("BOOK"),
                             "§7书 · 汲取", "§7抽走对方 15% 能量");
@@ -750,61 +1480,260 @@ public final class Hall {
                             "§7羊毛 · 守护天使", "§7给人类设置守护关系");
                     switchpoint(w, y, x + 11, z + 3, spell("BOWL"),
                             "§7碗 · 远程捐赠", "§7背包里有可捐物就有效");
-                }, "§7汲取 / 守护天使 / 远程捐赠", "§7远程捐赠一次只收一件，收益减半",
-                        "§7箱子里的东西关箱就补满"));
-                sections.add(placeholder("§7⑥ 待加环节", 1));
+                    powerButton(w, y, x + 2, z, "priest");
+                }, "验证汲取 / 守护天使 / 远程捐赠三件法术",
+                        "书＝汲取，耗 1000，抽走对方当前能量的 15% 加到自己身上；"
+                                + "羊毛＝守护天使，耗 5000，给一名人类挂上守护关系，"
+                                + "他之后被异族打死时替他挡一命，每个牧师只能保一个；"
+                                + "碗＝远程捐赠，不花能量，背包里有可捐物就一次收走一件，收益减半",
+                        "汲取让陪练掉能量、你涨能量；守护天使把关系挂在陪练身上；"
+                                + "远程捐赠按半价给你能量",
+                        "先点「叫陪练过来」当靶子（守护天使要人类，陪练默认是人类）",
+                        "依次用书 / 羊毛 / 碗打他，注意聊天栏的回报"));
+                sections.add(section("§8⑥ 护甲 只能裸装", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.LEATHER_CHESTPLATE, 1),
+                            new ItemStack(Material.IRON_CHESTPLATE, 1),
+                            new ItemStack(Material.DIAMOND_CHESTPLATE, 1)));
+                    powerButton(w, y, x + 7, z, "priest");
+                }, "验证牧师不能穿任何护甲",
+                        "牧师的护甲白名单里只有空气：不分材质，任何头盔、胸甲、护腿、靴子"
+                                + "在穿上后都会被立刻脱下并掉在地上。这不是「只禁高级护甲」，"
+                                + "皮革一样会被脱",
+                        "三件胸甲一件都留不住，都会被脱下来掉在地上",
+                        "从箱子里拿三件胸甲",
+                        "依次穿上，看每一件是不是都被立刻脱下"));
+                sections.add(section("§8⑦ 动物 与 点火", 3, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.IRON_SWORD, 1),
+                            new ItemStack(Material.PORKCHOP, 8)));
+                    switchpoint(w, y, x + 5, z + 3, Trigger.with(Kind.SPAWN_MOB, null, "COW"),
+                            "§a放出一头牛", "§7拿剑砍它，伤害是 0");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.SPAWN_NPCS, "priest", "vampire"),
+                            "§c放出一个吸血鬼", "§7再拿剑砍他");
+                }, "验证牧师的战斗规则：不伤无辜动物，对异族加重并点燃",
+                        "对非敌对的动物（狼除外）伤害一律为 0，只提示 \"You cannot hurt innocent animals.\"；"
+                                + "对超自然玩家则额外加一倍基础伤害，并把对方点燃 50 tick（恶魔不会被点燃）；"
+                                + "对怪物也会点燃。注意这些判定都在插件认为的「PvP 区域」里生效——"
+                                + "本测试服没有 WorldGuard，插件把一切都当作 PvP",
+                        "牛挨多少下都不掉血；吸血鬼被打中会烧起来，伤害还翻倍",
+                        "点「放出一头牛」，拿箱子里的铁剑砍它几下，看是否掉血",
+                        "点「放出一个吸血鬼」，再砍他一下",
+                        "看他身上有没有着火、聊天栏有没有提示"));
             }
             case "witchhunter" -> {
-                sections.add(section("§7① 入会 · 铁门与告示牌", 1, (w, y, x, z, width) -> {
+                sections.add(section("§7① 入会 杀三个异族", 3, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.IRON_SWORD, 1)));
+                    switchpoint(w, y, x + 5, z + 3,
+                            Trigger.with(Kind.SPAWN_NPCS, "witchhunter", "vampire,ghoul,werewolf"),
+                            "§a放出三个异族", "§7吸血鬼 / 食尸鬼 / 狼人");
+                }, "验证猎巫人的真实入会条件：以人类身份杀死三种不同异族",
+                        "条件是以人类身份亲手杀死 3 种不同的超自然种族"
+                                + "（同一种杀三次不算）。杀满之后约 10 秒，公会会发一张邀请给你，"
+                                + "那才是正规入会——下一格才用得上它",
+                        "杀满三种后聊天栏会收到公会邀请，这才是正规入会；"
+                                + "本节放出来的三个靶子是吸血鬼、食尸鬼、狼人",
+                        "先用铁剑（箱子里有）杀掉放出来的三个异族",
+                        "杀满三种后等约 10 秒，看聊天栏的邀请，再去下一格开门"));
+                sections.add(section("§7② 入会 铁门与告示牌", 1, (w, y, x, z, width) -> {
                     door(w, x + 6, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 2, z + DEPTH / 2);
                     signOn(w, x + 7, y + 2, z + DEPTH / 2, BlockFace.EAST, "WitchHunter");
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.INVITE_HUNTER),
-                            "§a报名入会", "§7等约 10 秒再右击铁门");
-                }, "§7铁门旁告示牌写着 WitchHunter", "§7入会要邀请", "§7杀死 3 种异族会收到邀请"));
-                sections.add(section("§a② 弓箭模式 · 打假人", 3, (w, y, x, z, width) -> {
+                            "§a直接发一张邀请", "§7跳过杀怪，图快的用这个");
+                }, "验证铁门入会：门旁告示牌必须写着 WitchHunter",
+                        "猎巫人大厅的入口是一扇铁门，判定靠旁边告示牌的任意一行含有文本 WitchHunter。"
+                                + "右键铁门时：有邀请的人类、或者已经是猎巫人，才会开门并完成入会；"
+                                + "其他人只会看到 WitchHunters Only!。门自己 1 秒后关上，"
+                                + "开的时候上下两格一起动",
+                        "有邀请时右键铁门会开门并把你变成猎巫人；没邀请只会提示 WitchHunters Only",
+                        "（可选）点左边按钮直接拿一张邀请",
+                        "右键铁门，门开一下再关上，人就入会了"));
+                sections.add(section("§a③ 弓箭模式", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BOW, 1),
                             new ItemStack(Material.ARROW, 32)));
                     chest(w, x + 4, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.ARROW, 32)));
-                    longDummy(w, "witchhunter_bow", x + 12, y, z + DEPTH / 2);                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.LEFT_CLICK),
+                    longSparMark(w, "witchhunter_bow", x + 12, y, z + DEPTH / 2);
+                    // A ledge to grapple onto: a grapple arrow pulls the shooter at whatever it
+                    // hit, and there is nothing above the corridor to pull anybody towards.
+                    box(w, Material.STONE_BRICKS, x + 13, y + 6, z + 3, x + 17, y + 6, z + 11);
+                    box(w, Material.STONE_BRICKS, x + 13, y + 1, z + 12, x + 17, y + 6, z + 12);
+                    points.put("witchhunter.ledge", new Location(w, x + 15.5, y + 7, z + 7.5));
+                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.LEFT_CLICK),
                             "§a切换箭矢模式", "§7也可以自己空挥弓");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.SPAR),
                             "§f叫陪练过来", "§7拿他当靶子试特殊箭");
-                }, "§7手持弓左键循环箭种", "§7normal → fire → triple → power → grapple",
-                        "§7power 箭有 15 秒冷却"));
-                sections.add(section("§6③ 悬赏", 1, (w, y, x, z, width) -> {
+                    powerButton(w, y, x + 2, z, "witchhunter");
+                }, "验证猎巫人的特殊箭矢：五种模式各是什么、各花多少",
+                        "手持弓左键循环切换，顺序是 normal → fire → triple → power → grapple"
+                                + " → normal："
+                                + "①normal 普通箭，不花能量；"
+                                + "②fire 火焰箭，100，命中后目标着火，落点还能点着可燃方块；"
+                                + "③triple 三连箭，100，一次射出三支；"
+                                + "④power 强化箭，1000，伤害额外 +200%，用完进入 15 秒冷却，"
+                                + "冷却中射不出去；"
+                                + "⑤grapple 抓钩箭，500 —— 要对着头顶那层石砖平台射，箭必须命中方块，"
+                                + "命中后你会被拽向命中点；离得太近（3 格内）或者箭什么都没打到就不会拉。"
+                                + "除 normal 以外，特殊箭只允许在 PvP 区域使用",
+                        "左键一次换一种，聊天栏报出当前箭种；对着陪练射 power 箭伤害明显更高，"
+                                + "紧接着再射一箭会被 15 秒冷却挡下；fire 箭会让陪练身上着火；"
+                                + "triple 一箭射出三支；grapple 打中头顶那层石砖会把你整个人拽上去",
+                        "点「切换箭矢模式」切到 grapple（聊天栏会报当前箭种）",
+                        "站远一点，抬头对着那层石砖平台射一箭，看自己是不是被拽过去",
+                        "再切回别的箭种，对着陪练射一箭看伤害",
+                        "换 fire 再射一箭，看陪练身上着火",
+                        "换 triple 射一箭，数一下是不是三支",
+                        "切到 power 连射两次，第二次会因为冷却射不出去"
+                                + "（注意：火只点得着人身，点不着方块——大厅里是禁止点燃的）"));
+                sections.add(section("§6④ 悬赏", 1, (w, y, x, z, width) -> {
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.BOUNTY),
                             "§6查看悬赏名单", "§7顺手刷新一个悬赏");
                     switchpoint(w, y, x + 7, z + 3, Trigger.of(Kind.POWER, "witchhunter"),
                             "§b能量 +1000", "§7够放特殊箭");
-                }, "§7服务器最多保留 5 个悬赏目标", "§7杀掉悬赏目标额外 +8000 能量",
-                        "§7按钮会报出当前名单"));
-                sections.add(section("§7④ 护甲限制", 1, (w, y, x, z, width) ->
+                }, "验证悬赏系统",
+                        "服务器最多同时保留 5 个悬赏目标，只从在线的超自然玩家里挑，不够就自动补。"
+                                + "杀掉悬赏目标额外 +8000 能量；顺带一提猎巫人的能量来源很窄："
+                                + "杀玩家 +2000、杀生物 +0、死亡只扣 500、摔落伤害减 3 点",
+                        "点按钮聊天栏报出当前名单；名单不满 5 个时会自动补一个并全服公告",
+                        "点「查看悬赏名单」，聊天栏报出当前名单",
+                        "名单不满时会自动补一个（全服公告）"));
+                sections.add(section("§7⑤ 护甲限制", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                                 new ItemStack(Material.LEATHER_CHESTPLATE, 1),
                                 new ItemStack(Material.IRON_CHESTPLATE, 1),
                                 new ItemStack(Material.DIAMOND_CHESTPLATE, 1))),
-                        "§7只允许穿皮革护甲", "§7穿别的会被脱下来"));
-                sections.add(placeholder("§7⑤ 待加环节", 1));
+                        "验证猎巫人只能穿皮革护甲",
+                        "护甲白名单只有空气和皮革：铁、金、钻、锁链、铜、下界合金的头盔、胸甲、"
+                                + "护腿、靴子都不能穿，穿上就被脱下来掉在地上",
+                        "穿上皮革没事；穿铁或钻石的会被立刻脱下并掉落",
+                        "从箱子里拿三件胸甲",
+                        "依次穿上，看哪两件被脱下来"));
+                sections.add(section("§7⑥ 武器限制", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.IRON_SWORD, 1),
+                            new ItemStack(Material.STONE_AXE, 1),
+                            new ItemStack(Material.DIAMOND_PICKAXE, 1)));
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
+                            "§f放出陪练", "§7他会站在你面前给你打");
+                    powerButton(w, y, x + 9, z, "witchhunter");
+                }, "验证猎巫人除了弓以外的近战武器全被禁",
+                        "禁用的是木 / 石 / 铁 / 金 / 钻 / 铜 / 下界合金的剑、斧、镐、锹、锄："
+                                + "拿着它们近战，伤害直接判成 0。弓是允许的（那是猎巫人的主业），"
+                                + "空手也不受限",
+                        "拿这三样武器打陪练，伤害数字全是 0；空手是正常伤害",
+                        "点「放出陪练」",
+                        "拿箱子里的剑 / 斧 / 镐分别打他一下",
+                        "空手再打一下对照"));
             }
             case "enderborn" -> {
-                sections.add(section("§5① 转化 · 珍珠与粘土", 1, (w, y, x, z, width) -> {
+                sections.add(section("§5① 转化 珍珠与粘土", 1, (w, y, x, z, width) -> {
                     layer(w, Material.CLAY, y, x + 4, z + DEPTH / 2 - 1,
                             x + 6, z + DEPTH / 2 + 1);
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.ENDER_PEARL, 8)));
-                }, "§7手持末影珍珠右键粘土", "§7材料在箱子里"));
-                sections.add(section("§d② 末影珍珠 · 两种用法", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.ENDER_PEARL, 16))),
-                        "§7右键＝不传送，换 +100 能量", "§7左键＝切换是否真的传送"));
-                sections.add(placeholder("§7③ 待加环节", 1));
+                }, "作为人类用末影珍珠右键粘土，验证末影族转化",
+                        "手持末影珍珠右键粘土方块，消耗 1 颗珍珠，人就变成末影族。"
+                                + "另一条路是被末影族用珍珠打（双方都得拿着珍珠），那个更快但更少见",
+                        "珍珠右键粘土后你会变成末影族，聊天栏出现提示",
+                        "从箱子里拿一颗末影珍珠",
+                        "对着粘土方块右键"));
+                sections.add(section("§d② 珍珠 两种用法", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.ENDER_PEARL, 16)));
+                    powerButton(w, y, x + 5, z, "enderborn");
+                }, "验证末影族珍珠的两种用法",
+                        "右键＝不传送，改换 100 能量并消耗 1 颗珍珠；左键＝切换「珍珠是否真的传送」"
+                                + "这个开关（默认开着）。另外手持珍珠被攻击时，只要能量超过 500，"
+                                + "就减伤一半并扣 500 能量。"
+                                + "末影族的死亡代价很低：每死一次只扣 300 能量",
+                        "右键能量 +100、珍珠少一颗；左键聊天栏报出开关状态；"
+                                + "开关关掉时右键不再传送、改为换能量",
+                        "先变成末影族，回到这一格",
+                        "拿珍珠右键一次（加能量），再左键切换模式",
+                        "再右键一次，看行为随开关变了"));
+                sections.add(section("§d③ 武器限制", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.DIAMOND_SWORD, 1),
+                            new ItemStack(Material.DIAMOND_PICKAXE, 1),
+                            new ItemStack(Material.IRON_SWORD, 1)));
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
+                            "§f放出陪练", "§7他会站在你面前给你打");
+                    powerButton(w, y, x + 9, z, "enderborn");
+                }, "验证末影族的武器禁令只针对高级材质",
+                        "禁用清单是钻石 / 铜 / 下界合金的全套工具与剑（剑、镐、锹、斧、锄）："
+                                + "近战伤害直接判成 0。木、石、铁没被禁——这条禁令挑材质，不挑类型",
+                        "钻石剑和钻石镐打陪练都是 0 伤害；铁剑是正常伤害",
+                        "点「放出陪练」",
+                        "拿箱子里的钻石剑和钻石镐各打一下",
+                        "拿铁剑再打一下对照"));
+                sections.add(section("§5④ 死亡五次 恢复人类", 1, (w, y, x, z, width) -> {
+                    switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.SELF_KILL),
+                            "§c死一次", "§7连着点到第五次");
+                    powerButton(w, y, x + 5, z, "enderborn");
+                }, "验证末影族的死亡次数上限：第 5 次死亡自动变回人类",
+                        "每死一次扣 300 能量并累计一次；累计到第 5 次时自动恢复人类，"
+                                + "计数器清零。这是末影族唯一的自救路径，不用找别人帮忙。"
+                                + "（配置里 10% 概率把被击杀者转成末影族，也要先有人死给你）",
+                        "每死一次聊天栏报出还剩几次；第 5 次之后你变回人类",
+                        "先变成末影族，回到这一格",
+                        "连点「死一次」，每次死亡后回到出生点再点下一次",
+                        "数到第 5 次，看聊天栏和你的种族"));
+                sections.add(section("§5⑤ 转化他人 珍珠对珍珠", 2, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.ENDER_PEARL, 8)));
+                    switchpoint(w, y, x + 6, z + 3,
+                            Trigger.with(Kind.SPAWN_NPCS, "enderborn", "vampire:ENDER_PEARL"),
+                            "§c放出一个持珍珠的异族", "§7他也得拿着珍珠");
+                }, "验证末影族的转化方式：两颗珍珠对撞",
+                        "攻击一个同样手持末影珍珠的玩家，会把对方直接转成末影族——"
+                                + "没有概率，一次就成，也不用对方同意。对方手上没有珍珠则不会发生，"
+                                + "只是一记普通攻击。这是末影族唯一能扩大同族的手段",
+                        "打中他一下，他立刻变成末影族，聊天栏有提示",
+                        "从箱子里拿一颗末影珍珠，拿在手上",
+                        "点「放出一个持珍珠的异族」，他会站在你旁边",
+                        "用手打他一下（拿着珍珠也算攻击），看他的种族变成 enderborn"));
+                sections.add(section("§5⑥ 持珍珠 减伤", 2, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.ENDER_PEARL, 8)));
+                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.POWER_READ),
+                            "§b查看能量", "§7挨打前后各看一次");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "enderborn", "IRON_SWORD"),
+                            "§c挨一下铁剑", "§7手持珍珠时减半");
+                }, "验证末影族手持珍珠时的护身",
+                        "受到任何伤害时，只要手上拿着末影珍珠且能量超过 500，"
+                                + "就立刻扣掉 500 能量、把这次伤害减半——拿能量换命。"
+                                + "能量不足 500 时这一条不生效，全额挨打",
+                        "拿着珍珠挨打，伤害数字是同样一刀的一半，同时能量掉 500；"
+                                + "把珍珠收起来再挨一刀，就是全额伤害",
+                        "点「查看能量」记住数字（要保证过 500）",
+                        "拿一颗珍珠在手上，点「挨一下铁剑」，看掉血和能量",
+                        "把珍珠收回背包，再点一次「挨一下铁剑」，对照"));
+                sections.add(section("§5⑦ 击杀 转移能量", 2, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.IRON_SWORD, 1)));
+                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.POWER_READ),
+                            "§b查看能量", "§7杀他之前记住数");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.SPAWN_NPCS, "enderborn", "werewolf"),
+                            "§c放出一个狼人", "§7杀掉他看能量");
+                }, "验证末影族从击杀里拿能量",
+                        "末影族的能量来源只有两条：击杀生物 +50，击杀玩家则从对方身上"
+                                + "「偷」50 给自己（对方同时 -50）。另外有一条 10% 的几率"
+                                + "把被击杀的玩家转成末影族——这是概率，不保证出现。"
+                                + "注意它不靠吃、不靠泡水，也不靠站在火里",
+                        "杀掉那个狼人之后，你的能量比之前高 50",
+                        "先点「查看能量」，把数字记住",
+                        "点「放出一个狼人」，用剑杀掉他",
+                        "再点一次「查看能量」，对比前后差了 50"));
             }
             case "angel" -> {
-                sections.add(section("§f① 转化 · 手持羽毛摔死", 3, (w, y, x, z, width) -> {
+                sections.add(section("§f① 转化 羽毛摔死", 3, true, (w, y, x, z, width) -> {
                     // A human has twenty health and a fall costs one per block past the third,
                     // so a ledge has to be about twenty-five blocks up before the fall is a
                     // death at all. The first version was six up and simply broke an ankle.
@@ -816,28 +1745,119 @@ public final class Hall {
                             new ItemStack(Material.FEATHER, 8)));
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.CLIMB, "angel"),
                             "§b上到高台", "§7走到洞里跳下");
-                }, "§7手持羽毛从 28 格高摔死", "§7羽毛在箱子里", "§7按钮送你上台"));
-                sections.add(section("§e② 天使道具", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.DANDELION, 8),
-                                new ItemStack(Material.FEATHER, 8),
-                                new ItemStack(Material.PAPER, 8))),
-                        "§7蒲公英左键＝超级跳", "§7羽毛攻击＝治疗目标", "§7纸攻击＝把异族变回人类"));
-                sections.add(section("§b③ 召唤与护甲", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.BEEF, 8),
-                                new ItemStack(Material.BONE, 8),
-                                new ItemStack(Material.PORKCHOP, 8),
-                                new ItemStack(Material.GOLDEN_CHESTPLATE, 1),
-                                new ItemStack(Material.DIAMOND_CHESTPLATE, 1))),
-                        "§7生牛肉 / 骨头 / 猪肉 对方块左键", "§7分别召唤牛 / 狼 / 猪",
-                        "§7禁止金与钻石护甲"));
-                sections.add(placeholder("§7④ 待加环节", 1));
+                }, "作为人类手持羽毛从高处摔死，验证天使转化",
+                        "条件只有一个：以人类身份摔死，而且摔死时手上拿着羽毛。"
+                                + "台子有 28 格高——人类 20 点血，掉落伤害从第 3 格起算每格 1 点，"
+                                + "矮了根本摔不死。变成天使之后这条伤害会被完全免除，以后摔不死了",
+                        "摔死的那一刻你会变成天使：掉落伤害被免除，但死亡本身照常触发",
+                        "从箱子里拿一根羽毛拿在手上",
+                        "点「上到高台」，走到中间的洞里跳下去"));
+                sections.add(section("§e② 道具 跳与治疗", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.DANDELION, 8),
+                            new ItemStack(Material.FEATHER, 8),
+                            new ItemStack(Material.PAPER, 8)));
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
+                            "§f叫陪练过来", "§7治疗要有伤口才看得出来");
+                    powerButton(w, y, x + 9, z, "angel");
+                }, "验证天使的超级跳与治疗法术",
+                        "蒲公英左键＝超级跳，往上窜一截，耗 1000；羽毛＝治疗，"
+                                + "攻击目标（不是右键）给他回 5 点生命，耗 3000。"
+                                + "天使另外还免疫摔落伤害、在水里每 10 秒 +50 能量",
+                        "蒲公英左键往上窜一截；拿羽毛打受伤的目标，他会回 5 点血",
+                        "先点「叫陪练过来」，用剑把他打掉一点血",
+                        "拿羽毛打他一下，看他回血；再拿蒲公英左键跳一次"));
+                sections.add(section("§b③ 召唤 三种动物", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.BEEF, 8),
+                            new ItemStack(Material.BONE, 8),
+                            new ItemStack(Material.PORKCHOP, 8)));
+                    powerButton(w, y, x + 6, z, "angel");
+                }, "验证天使的三种召唤",
+                        "都按左键触发，各耗 5000 能量：生牛肉召牛、骨头召一只已驯服的狼"
+                                + "（归你所有、满血）、猪肉召猪。左键空气时它们落在你身前 2 格，"
+                                + "左键方块时落在你指的位置上方；落点会自己挑能站人、脚下有地的地方，"
+                                + "不会再生成在方块内部憋死",
+                        "三种动物出现在你身前或你指的地方，而且十几秒后还活着",
+                        "拿箱子里的三种肉，对着地面或空中左键一次",
+                        "等十几秒再看一眼，召唤物必须还活着",
+                        "两只手的物品栏都不一样的话，换一种肉再来一次"));
+                sections.add(section("§6④ 护甲 与 钻石剑", 2, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.GOLDEN_HELMET, 1),
+                            new ItemStack(Material.GOLDEN_CHESTPLATE, 1),
+                            new ItemStack(Material.DIAMOND_LEGGINGS, 1),
+                            new ItemStack(Material.DIAMOND_BOOTS, 1),
+                            new ItemStack(Material.LEATHER_CHESTPLATE, 1),
+                            new ItemStack(Material.IRON_CHESTPLATE, 1),
+                            new ItemStack(Material.DIAMOND_SWORD, 1),
+                            new ItemStack(Material.IRON_SWORD, 1)));
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAWN_CHICKEN),
+                            "§a放出一只鸡", "§7拿它试钻石剑那条禁令");
+                    powerButton(w, y, x + 9, z, "angel");
+                }, "验证天使的护甲禁令，以及不能拿钻石剑砍动物",
+                        "护甲：金与钻石的头盔、胸甲、护腿、靴子四件都会被脱下来，"
+                                + "皮革、铁、锁链、铜、下界合金没有在禁用名单里（那条名单是硬编码的，"
+                                + "不走配置文件）。武器：拿钻石剑攻击动物会被直接拦下、伤害 0，"
+                                + "换别的武器就正常",
+                        "金/钻四件穿上就被脱；皮革和铁胸甲留得住；"
+                                + "拿钻石剑打鸡被拦，拿铁剑能打",
+                        "从箱子里拿四件金色/钻石护甲依次穿上，看它们是不是都被脱下",
+                        "再穿一次皮革胸甲和铁胸甲，看它们留不留",
+                        "点「放出一只鸡」，先用钻石剑打它，再用铁剑打它"));
+                sections.add(section("§e⑤ 净化 用纸", 1, (w, y, x, z, width) -> {
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.PAPER, 8)));
+                    switchpoint(w, y, x + 6, z + 3,
+                            Trigger.with(Kind.SPAWN_NPCS, "angel", "vampire"),
+                            "§a放出一个异族", "§7一个假人吸血鬼");
+                    powerButton(w, y, x + 9, z, "angel");
+                }, "验证天使把异族净化回人类的能力",
+                        "纸＝净化，攻击目标触发，耗 6000，把超自然目标变回人类。"
+                                + "对本来就是人类的目标只会提示，不消耗能量。"
+                                + "这是天使唯一能给别人解咒的能力——天使自己没有解药，"
+                                + "只能靠牧师驱魔、治愈诅咒或者管理员",
+                        "打完那一下对方变成人类；如果他本来就是人类，只会收到提示",
+                        "点「放出一个异族」，他会站在你面前",
+                        "拿箱子里的纸打他，看聊天栏和种族变化"));
+                sections.add(section("§b⑥ 水中 回能", 2, (w, y, x, z, width) -> {
+                    box(w, Material.SMOOTH_QUARTZ, x + 7, y - 2, z + 6,
+                            x + 15, y, z + 12);
+                    box(w, Material.WATER, x + 9, y - 1, z + 8, x + 13, y, z + 10);
+                    points.put("angel.pool", new Location(w, x + 11.5, y, z + 9.5));
+                    switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.DIP_WATER, "angel"),
+                            "§9跳进水里", "§7站着就能回能量");
+                    powerButton(w, y, x + 5, z, "angel");
+                }, "验证天使泡在水里会回能量",
+                        "脚下方块是水时，每 10 秒 +50 能量——天使是唯一一个能在水里充电的种族，"
+                                + "而且不花任何代价。顺带一提天使击杀怪物只有 +30 能量",
+                        "站在水里能量持续上升，每 10 秒 50 点",
+                        "点「跳进水里」",
+                        "站着别动，隔一分钟再看能量涨了多少"));
+                sections.add(section("§b⑦ 击杀 怪物回能", 2, (w, y, x, z, width) -> {
+                    switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.POWER_READ),
+                            "§b查看能量", "§7杀之前先记住数");
+                    switchpoint(w, y, x + 6, z + 3, Trigger.with(Kind.SPAWN_MOB, null, "ZOMBIE"),
+                            "§c放出一只僵尸", "§7它是怪物，不是动物");
+                    switchpoint(w, y, x + 9, z + 3, Trigger.with(Kind.SPAWN_MOB, null, "CHICKEN"),
+                            "§a放出一只鸡", "§7对照：杀动物不给能量");
+                }, "验证天使从击杀怪物身上拿能量",
+                        "击杀任何怪物（Monster，例如僵尸、骷髅、苦力怕）+30 能量；"
+                                + "击杀动物（牛、鸡、羊）不给——插件判的是实体类型，不是「打死一个东西」。"
+                                + "这是天使除泡水之外的唯一能量来源",
+                        "杀掉僵尸能量 +30；杀掉鸡什么都不加",
+                        "点「查看能量」，把数字记住",
+                        "点「放出一只僵尸」，杀掉它，再点「查看能量」",
+                        "点「放出一只鸡」杀掉，再查一次能量：这次没有变化"));
             }
             default -> throw new IllegalStateException("no hall for " + race);
         }
-        // Every race gets these three, built by the same code, at the end of its row.
-        sections.add(dummySection(race));
+        // Every race gets these four, built by the same code, at the end of its row.
+        sections.add(fallSection(race, headroom));
+        if (KILL_CONVERTS.contains(race)) {
+            sections.add(convertSection(race));
+        }
+        sections.add(sparSection(race));
         sections.add(powerSection(race));
         sections.add(endSection(race));
         return sections;
@@ -849,28 +1869,55 @@ public final class Hall {
      * test altogether.
      */
     private Section endSection(String race) {
-        return section("§f→ 回到开头 / 离开测试", 2, (w, y, x, z, width) -> {
+        return section("§f末尾 重来或离开", 2, (w, y, x, z, width) -> {
             switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.RETURN_START, race),
                     "§a回到开头", "§7回到这一族的入口，种族不变");
             switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.EXIT_TEST, race),
                     "§a离开测试", "§7清道具 · 恢复人类 · 回大厅");
-        }, "§7走到这里就不用再折返回去了");
+        }, "走完这一族了，选一种走法",
+                "每族走廊末尾固定三格：陪练、+1000 能量、重来或离开。这三格八个种族共用，"
+                        + "不属于某个技能；本族的技能测试都在它们前面",
+                "「回到开头」只挪位置，种族不变；「离开测试」清空道具、恢复人类再回大厅",
+                "想重做一遍点「回到开头」", "想去别的种族点「离开测试」");
     }
 
-    /** A section that is only a note in the row, so the next step has somewhere to go. */
-    private Section placeholder(String title, int slots) {
-        return section(title, slots, (w, y, x, z, width) -> {
-            wallSign(w, y, x + 2, z, "§7留给下一个环节", "§7照抄一段 Section 就能加");
-        }, "§7这里还是空的");
-    }
-
-    private static Section section(String title, int slots, Station station, String... lines) {
-        return new Section(title, List.of(lines), slots, false, station);
+    /**
+     * A step: a title, what it is for, what should happen, what to do in what order, how many
+     * slots of the corridor it takes, whether its ceiling is left open (the ghoul's rain step
+     * needs the sky), and what to build in it.
+     */
+    private static Section section(String title, int slots, Station station,
+            String goal, String ability, String expect, String... steps) {
+        return new Section(title, brief(goal, ability, expect, steps), slots, false, station);
     }
 
     private static Section section(String title, int slots, boolean openSky, Station station,
-            String... lines) {
-        return new Section(title, List.of(lines), slots, openSky, station);
+            String goal, String ability, String expect, String... steps) {
+        return new Section(title, brief(goal, ability, expect, steps), slots, openSky, station);
+    }
+
+    /**
+     * The lines a section teaches, always in the same order and always labelled: the goal, what
+     * the ability is and what it costs, what a right answer looks like, then the steps.
+     *
+     * <p>Written for somebody who has never seen the plugin. The {@code 技能} board says what the
+     * thing does, what triggers it, what it costs and what restricts it - the numbers included -
+     * because a tester who has to read the source to find out a cooldown is being sent to the
+     * source, not taught. An unlabelled paragraph told a person what the step was about but not
+     * what they were supposed to do with it.
+     */
+    private static List<String> brief(String goal, String ability, String expect, String... steps) {
+        List<String> lines = new ArrayList<>();
+        lines.add("§e目标 §f" + goal);
+        lines.add(BREAK);
+        lines.add("§d技能 §f" + ability);
+        lines.add(BREAK);
+        lines.add("§b预期 §f" + expect);
+        for (int index = 0; index < steps.length; index++) {
+            lines.add(BREAK);
+            lines.add("§7" + (index + 1) + ". " + steps[index]);
+        }
+        return lines;
     }
 
     // -- what the plugin asks ----------------------------------------------
@@ -894,9 +1941,15 @@ public final class Hall {
         return zones.get(key);
     }
 
-    /** The dummies that must never move, by key. */
-    public Map<String, ArmorStand> dummies() {
-        return dummies;
+    /**
+     * Where each section wants the stand-in to stand, by key.
+     *
+     * <p>These are places, not entities. The stand-in is one player - a real {@code ServerPlayer}
+     * with no client behind it - and there is exactly one of him, so he cannot be pinned down at
+     * every mark at once. He is called to whichever one the player is standing at.
+     */
+    public Map<String, Location> sparMarks() {
+        return sparMarks;
     }
 
     /**
@@ -927,8 +1980,13 @@ public final class Hall {
         return outsideSpawn;
     }
 
-    public Location priestAltar() {
-        return priestAltar;
+    /**
+     * Every priest altar the hall built. A church used to be one point in the config, so a hall
+     * that built two altars could only ever have one of them answer; the harness registers all
+     * of these as churches.
+     */
+    public List<Location> priestAltars() {
+        return priestAltars;
     }
 
     public Location netherLava() {
@@ -949,8 +2007,10 @@ public final class Hall {
     }
 
     /**
-     * Puts every switch, sign, chest and dummy back the way it was built. The switches are the
-     * way out of a hall, so a switch that can go missing is the same as no way out.
+     * Puts every switch, sign and chest back the way it was built. The switches are the way out
+     * of a hall, so a switch that can go missing is the same as no way out. The stand-in is not
+     * furniture: he is a player, he is put wherever a section asks for him, and there is nothing
+     * of his to put back.
      */
     public boolean repair() {
         boolean repaired = false;
@@ -965,22 +2025,6 @@ public final class Hall {
                 refill(chest.getInventory());
             }
             repaired = true;
-        }
-        for (Map.Entry<String, ArmorStand> entry : dummies.entrySet()) {
-            ArmorStand stand = entry.getValue();
-            Location anchor = points.get("dummy." + entry.getKey());
-            if (anchor == null) {
-                continue;
-            }
-            if (stand.isDead() || !stand.isValid()) {
-                spawnDummy(entry.getKey(), anchor);
-                repaired = true;
-                continue;
-            }
-            if (stand.getLocation().distanceSquared(anchor) > 0.05) {
-                stand.teleport(anchor);
-                repaired = true;
-            }
         }
         return repaired;
     }
@@ -1023,13 +2067,14 @@ public final class Hall {
         return wrong;
     }
 
-    /** The dummies and whether they are still alive, for the moments that need to know. */
-    public String dummyReport() {
+    /** Every place a section has asked the stand-in to stand, so a report can name them. */
+    public String sparReport() {
         StringBuilder out = new StringBuilder();
-        for (Map.Entry<String, ArmorStand> entry : dummies.entrySet()) {
-            ArmorStand stand = entry.getValue();
-            out.append(' ').append(entry.getKey())
-                    .append('=').append(stand.isValid() ? "ok" : "gone");
+        for (Map.Entry<String, Location> entry : sparMarks.entrySet()) {
+            Location at = entry.getValue();
+            out.append(' ').append(entry.getKey()).append('@')
+                    .append(at.getBlockX()).append(',').append(at.getBlockY()).append(',')
+                    .append(at.getBlockZ());
         }
         return out.toString();
     }
@@ -1061,10 +2106,19 @@ public final class Hall {
             double ry = (box.y2() - box.y1()) / 2.0 + 4;
             double rz = (box.z2() - box.z1()) / 2.0 + 2;
             for (Entity entity : target.getNearbyEntities(middle, rx, ry, rz)) {
-                if (entity instanceof LivingEntity && !(entity instanceof Player)
-                        && !(entity instanceof ArmorStand)) {
-                    found.add(entity);
+                if (!(entity instanceof LivingEntity living) || entity instanceof Player
+                        || entity instanceof ArmorStand) {
+                    continue;
                 }
+                // Something a player owns - the wolf a werewolf called, the one an angel tamed -
+                // belongs to them, not to the hall. Clearing it along with the hall's own
+                // monsters both loses their pet and, because the plugin only hears about a
+                // tamed animal dying, leaves it counted against their control limit for good.
+                if (living instanceof Tameable tameable && tameable.isTamed()
+                        && tameable.getOwner() instanceof Player) {
+                    continue;
+                }
+                found.add(living);
             }
         }
         return found;
@@ -1135,6 +2189,30 @@ public final class Hall {
         edge(target, x, y + 1, z, length, depth, theme.skirting());
         edge(target, x, top, z, length, depth, theme.window());
 
+        // A tall hall cannot be lit from its own ceiling. Light falls off about a level a block,
+        // so a lamp thirty blocks overhead leaves the floor as dark as no lamp at all - which is
+        // exactly what the angel's hall was, and the vampire's was not much better. Rooms with
+        // headroom to spare get their lamps set into the walls instead, at a height that reaches
+        // the floor: same material, same grid, just somewhere useful.
+        if (headroom > 8) {
+            for (int dx = 1; dx < length; dx += 4) {
+                set(target, theme.light(), x + dx, y + 3, z - 1);
+                set(target, theme.light(), x + dx, y + 3, farZ + 1);
+            }
+            for (int dz = 1; dz < depth; dz += 4) {
+                set(target, theme.light(), x - 1, y + 3, z + dz);
+                set(target, theme.light(), farX + 1, y + 3, z + dz);
+            }
+        }
+        // A hall as tall as the vampire's or the angel's - thirty-four blocks - is two rooms
+        // stacked up, and one band of lamps at knee height leaves the top half in the dark.
+        if (headroom > 20) {
+            for (int dx = 1; dx < length; dx += 4) {
+                set(target, theme.light(), x + dx, y + 12, z - 1);
+                set(target, theme.light(), x + dx, y + 12, farZ + 1);
+            }
+        }
+
         box(target, theme.wall(), x, top + 1, z, farX, top + 1, farZ);
         for (int dx = 1; dx < length; dx += LIGHT_SPACING) {
             for (int dz = 1; dz < depth; dz += LIGHT_SPACING) {
@@ -1145,21 +2223,136 @@ public final class Hall {
     }
 
     /** A section's title and teaching lines, hung along the near wall in reading order. */
-    private void sectionHead(World target, int y, int x, int z, String title, List<String> lines) {
+    private void sectionHead(World target, int y, int x, int z, String title, List<String> lines,
+            int maxBoards) {
         List<String> text = new ArrayList<>();
         text.add(title);
         text.addAll(lines);
-        wallSign(target, y, x + 2, z, text.toArray(new String[0]));
+        wallSign(target, y, x + 2, z, maxBoards, text.toArray(new String[0]));
     }
 
-    /** A run of signs on a hall's near wall, three lines each, readable from inside. */
+    /**
+     * A run of signs on a hall's near wall, four lines each, readable from inside.
+     *
+     * <p>Every line is wrapped first. A sign board's text area is about ninety pixels and the
+     * default font is six pixels a character - nine for a full-width one - so a line much past
+     * fifteen letters (or ten characters of Chinese) runs off the board and over whatever is
+     * beside it. A section's goal is a sentence, not a label: without wrapping, the boards next
+     * to each other become one unreadable smear, and the parts that matter are the parts that
+     * get lost.
+     */
     private void wallSign(World target, int y, int x, int z, String... lines) {
-        for (int sign = 0; sign * 3 < lines.length && sign < 4; sign++) {
-            int from = sign * 3;
-            int to = Math.min(lines.length, from + 3);
-            signOn(target, x + sign, y + 2, z - 1, BlockFace.SOUTH,
-                    List.of(lines).subList(from, to).toArray(new String[0]));
+        wallSign(target, y, x, z, MAX_BOARDS, lines);
+    }
+
+    /** The same, for a run of signs that owns more or less wall than the default. */
+    private void wallSign(World target, int y, int x, int z, int maxBoards, String... lines) {
+        signBoard(target, x, y + 2, z - 1, BlockFace.SOUTH, maxBoards, wrapAll(lines));
+    }
+
+    /**
+     * Writes wrapped lines out, four to a board, with further boards along the same wall.
+     *
+     * <p>How many boards a run may use is not a constant: it is how much wall the section owns. A
+     * section takes a whole number of slots and a slot is {@link #SLOT} columns, so a three-slot
+     * section has columns to spare while a one-slot section has nine - and a cap that ignores that
+     * either wastes the wide sections' room or lets a narrow one write over its neighbour. The
+     * caller passes the width it owns, which is always what the section was sized for.
+     */
+    private void signBoard(World target, int supportX, int supportY, int supportZ, BlockFace side,
+            int maxBoards, List<String> lines) {
+        List<String> board = new ArrayList<>();
+        int placed = 0;
+        for (String line : lines) {
+            if (BREAK.equals(line)) {
+                if (!board.isEmpty()) {
+                    writeBoard(target, supportX, supportY, supportZ, side, maxBoards,
+                            placed++, board);
+                    board.clear();
+                }
+                continue;
+            }
+            if (board.size() == LINES_PER_BOARD) {
+                writeBoard(target, supportX, supportY, supportZ, side, maxBoards, placed++, board);
+                board.clear();
+            }
+            board.add(line);
         }
+        if (!board.isEmpty() && placed < maxBoards) {
+            writeBoard(target, supportX, supportY, supportZ, side, maxBoards, placed, board);
+        }
+    }
+
+    private void writeBoard(World target, int supportX, int supportY, int supportZ, BlockFace side,
+            int maxBoards, int board, List<String> lines) {
+        if (board >= maxBoards) {
+            boardsDropped++;
+            return;
+        }
+        signOn(target, supportX + board, supportY, supportZ, side,
+                lines.toArray(new String[0]));
+    }
+
+    /** Boards a section had nowhere left to write. Zero means every word fitted. */
+    public int boardsDropped() {
+        return boardsDropped;
+    }
+
+    /** Boards two sections both wrote. Zero means no section is reading over another's shoulder. */
+    public int signCollisions() {
+        return signCollisions;
+    }
+
+    private static List<String> wrapAll(String... lines) {
+        List<String> out = new ArrayList<>();
+        for (String line : lines) {
+            out.addAll(wrap(line));
+        }
+        return out;
+    }
+
+    /**
+     * Splits one line to what fits on a board, in units of one ASCII character.
+     *
+     * <p>A colour code takes no room and is carried onto the next line, so a wrapped line does
+     * not come back in the default colour halfway through.
+     */
+    private static List<String> wrap(String line) {
+        List<String> out = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        String colour = "";
+        double width = 0;
+        for (int index = 0; index < line.length(); index++) {
+            char c = line.charAt(index);
+            if (c == '\u00a7' && index + 1 < line.length()) {
+                colour = line.substring(index, index + 2);
+                current.append(colour);
+                index++;
+                continue;
+            }
+            double size = c >= 0x2E80 ? 1.5 : (c == ' ' ? 0.5 : 1.0);
+            if (width + size > SIGN_WIDTH && current.length() > 0 && !isClosing(c)) {
+                out.add(current.toString());
+                current.setLength(0);
+                current.append(colour);
+                width = 0;
+            }
+            current.append(c);
+            width += size;
+        }
+        if (current.length() > 0) {
+            out.add(current.toString());
+        }
+        return out;
+    }
+
+    /**
+     * Punctuation that may not open a line. A wrapped sentence reads wrong with a lone "）" or
+     * "，" sitting at the start of the next board, so one of these is allowed to overhang the
+     * line it belongs to instead.
+     */
+    private static boolean isClosing(char c) {
+        return "）)】」』》〉、。，,．.！!？?：:；;…".indexOf(c) >= 0;
     }
 
     private void edge(World target, int x, int y, int z, int length, int depth, Material material) {
@@ -1182,6 +2375,20 @@ public final class Hall {
 
     private void sign(World target, int x, int y, int z, BlockFace facing, String... lines) {
         Block block = target.getBlockAt(x, y, z);
+        Fixture already = fixtures.get(blockKey(block.getLocation()));
+        if (already != null && already.lines() != null
+                && !already.lines().equals(List.of(lines))) {
+            // Two sections writing the same board means whoever builds last wins and the other
+            // section's text is gone. It is silent otherwise, and it has happened before.
+            signCollisions++;
+            Bukkit.getLogger().warning("two sections both wrote the sign at "
+                    + block.getLocation().getWorld().getName() + " "
+                    + block.getLocation().getBlockX() + "," + block.getLocation().getBlockY()
+                    + "," + block.getLocation().getBlockZ()
+                    + " - one of them loses its text; was ["
+                    + String.join(" | ", already.lines()) + "] now ["
+                    + String.join(" | ", lines) + "]");
+        }
         place(block, Material.OAK_WALL_SIGN, facing, List.of(lines));
         fixtures.put(blockKey(block.getLocation()),
                 new Fixture(Material.OAK_WALL_SIGN, facing, List.of(lines), null));
@@ -1207,21 +2414,38 @@ public final class Hall {
         set(target, STELE, x, y + 1, z - 1);
         set(target, STELE, x, y + 2, z - 1);
         button(target, x, y + 1, z, BlockFace.SOUTH, trigger);
-        signOn(target, x, y + 2, z - 1, BlockFace.SOUTH, lines);
+        // Three boards, because that is how much wall a switch has: the next one along is three
+        // columns away and puts its own sign at its own column.
+        signBoard(target, x, y + 2, z - 1, BlockFace.SOUTH, SWITCH_BOARDS, wrapAll(lines));
     }
 
+    /**
+     * A door, as two blocks rather than as two blocks that happen to be made of door.
+     *
+     * <p>A door is one structure: the lower block carries {@code half=lower} and the upper one
+     * {@code half=upper}, and everything that reads a door - vanilla, and the plugin under test -
+     * trusts that. Placing two blocks with {@code setType(IRON_DOOR)} leaves both of them at the
+     * material's default, which is the bottom half, so the upper block was a bottom half standing
+     * on the lower one. A click on it still opened a panel, but the "other half" the plugin
+     * looked for was the air above it, and only one of the two moved.
+     *
+     * <p>Deliberately not registered in {@link #fixtures}: a {@link Fixture} remembers a
+     * material, a facing and a sign's lines, and nothing about which half a block is, so the
+     * repair pass would rebuild the door from the default state and undo exactly this fix.
+     */
     private void door(World target, int x, int y, int z) {
-        set(target, Material.IRON_DOOR, x, y, z);
-        set(target, Material.IRON_DOOR, x, y + 1, z);
-        Block lower = target.getBlockAt(x, y, z);
-        if (lower.getBlockData() instanceof Door data) {
+        doorHalf(target.getBlockAt(x, y, z), Bisected.Half.BOTTOM);
+        doorHalf(target.getBlockAt(x, y + 1, z), Bisected.Half.TOP);
+    }
+
+    private static void doorHalf(Block block, Bisected.Half half) {
+        block.setType(Material.IRON_DOOR, false);
+        if (block.getBlockData() instanceof Door data) {
             data.setFacing(BlockFace.NORTH);
-            lower.setBlockData(data, false);
-            Block upper = target.getBlockAt(x, y + 1, z);
-            if (upper.getBlockData() instanceof Door top) {
-                top.setFacing(BlockFace.NORTH);
-                upper.setBlockData(top, false);
-            }
+            data.setHinge(Door.Hinge.LEFT);
+            data.setHalf(half);
+            data.setOpen(false);
+            block.setBlockData(data, false);
         }
     }
 
@@ -1264,38 +2488,16 @@ public final class Hall {
     }
 
     /**
-     * The dummy a section is about: a stand that reports what hitting it does and cannot be
-     * moved, knocked over, dressed or taken. {@link HallGuard} cancels the damage, so it is
-     * never destroyed either - and if one is destroyed anyway, the hall puts a new one back on
-     * the same mark and takes the dropped remains away.
+     * Where a section wants the stand-in to stand.
+     *
+     * <p>Nothing is placed here. The stand-in is a player that is called to the mark when the
+     * section's switch is pressed, so a hall that is only ever walked through costs one imaginary
+     * player rather than one per section - and a section that wants him to be hit, healed,
+     * converted or killed is working with a real player's health bar rather than an armour stand
+     * that has to be talked out of dying on the first hit.
      */
-    private ArmorStand dummy(World target, String key, int x, int y, int z) {
-        Location anchor = new Location(target, x + 0.5, y + 1, z + 0.5);
-        points.put("dummy." + key, anchor);
-        return spawnDummy(key, anchor);
-    }
-
-    /** Puts a fresh dummy on a mark, for the first one and for any that had to be replaced. */
-    ArmorStand spawnDummy(String key, Location anchor) {
-        ArmorStand stand = anchor.getWorld().spawn(anchor, ArmorStand.class, spawned -> {
-            spawned.setGravity(false);
-            spawned.setBasePlate(false);
-            spawned.setArms(true);
-            spawned.setInvulnerable(false);
-            spawned.setPersistent(true);
-            spawned.setRemoveWhenFarAway(false);
-            spawned.setCanMove(false);
-            spawned.setCustomName("§f测试假人");
-            spawned.setCustomNameVisible(true);
-            spawned.setRightArmPose(new EulerAngle(Math.toRadians(-90), 0, 0));
-        });
-        dummies.put(key, stand);
-        return stand;
-    }
-
-    /** The same, from a mark, for a dummy that was destroyed and has to be put back. */
-    ArmorStand replaceDummy(String key, Location anchor) {
-        return spawnDummy(key, anchor);
+    private void sparMark(World target, String key, int x, int y, int z) {
+        sparMarks.put(key, new Location(target, x + 0.5, y + 1, z + 0.5));
     }
 
     /** Puts one fixture down: its type, the way it faces, and the words on it if it is a sign. */
@@ -1385,11 +2587,11 @@ public final class Hall {
         return Trigger.with(Kind.TEST_SPELL, "priest", material);
     }
 
-    /** A dummy with a target wall behind it, for the bow modes that need something to hit. */
-    private ArmorStand longDummy(World target, String key, int x, int y, int z) {
+    /** A bow target: the stand-in's mark, with a wall of colour behind it to aim at. */
+    private void longSparMark(World target, String key, int x, int y, int z) {
         box(target, Material.WHITE_CONCRETE, x - 1, y + 1, z - 2, x - 1, y + 3, z + 2);
         box(target, Material.RED_CONCRETE, x - 1, y + 2, z - 1, x - 1, y + 2, z + 1);
-        return dummy(target, key, x, y, z);
+        sparMark(target, key, x, y, z);
     }
 
     private void box(World target, Material material, int x1, int y1, int z1,

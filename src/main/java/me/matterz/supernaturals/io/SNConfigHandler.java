@@ -24,13 +24,16 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.logging.Level;
 
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.util.Recipes;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.entity.EntityType;
 
@@ -201,6 +204,20 @@ public class SNConfigHandler {
 	public static int priestChurchLocationX;
 	public static int priestChurchLocationY;
 	public static int priestChurchLocationZ;
+
+	/** How close to a registered church its altar still counts as part of that church. */
+	public static final int PRIEST_CHURCH_RADIUS = 10;
+
+	/**
+	 * Every church on the server.
+	 *
+	 * <p>A church used to be one point in the config, and an altar only answered within ten
+	 * blocks of it - so a server with two chapels could only ever have one of them work, and a
+	 * hall built somewhere else could not be a church at all. The altar is the block; a church
+	 * is a place that block belongs to, and there can be as many as the server wants.
+	 */
+	public static List<Location> priestChurches = new ArrayList<Location>();
+	private static List<String> priestChurchEntries = new ArrayList<String>();
 	public static String priestBanishWorld;
 	public static int priestBanishLocationX;
 	public static int priestBanishLocationY;
@@ -334,7 +351,10 @@ public class SNConfigHandler {
 			config.set("Priest.Spell.DrainFactor", 0.15);
 			config.set("Priest.DamageFactor.FireTicks", 50);
 			config.set("Priest.Church.AltarMaterial", "DIAMOND_BLOCK");
-			config.set("Priest.Spell.Material.GuardianAngel", "WOOL");
+			// WOOL stopped being a material when the wool items were split by colour, and the
+			// spell is matched by name, so a default of "WOOL" left guardian angel permanently
+			// uncastable on any server that had not edited it by hand.
+			config.set("Priest.Spell.Material.GuardianAngel", "WHITE_WOOL");
 
 			config.set("Ghoul.Power.Start", 5000);
 			config.set("Ghoul.Kill.SpreadCurse", true);
@@ -382,7 +402,7 @@ public class SNConfigHandler {
 			config.set("Demon.Fireball.Damage", 10);
 			config.set("Demon.Power.Snare", 1000);
 			config.set("Demon.Snare.Duration", 10000);
-			config.set("Demon.Snare.Material", "INK_SACK");
+			config.set("Demon.Snare.Material", "INK_SAC");
 			config.set("Demon.SnowballAmount", 30);
 			config.set("Demon.DamageFactor.FireTicks", 50);
 
@@ -1025,10 +1045,28 @@ public class SNConfigHandler {
 		vampireAltarCureMaterialsString = config.getStringList("Vampire.Altar.Cure.Recipe.Materials");
 		vampireAltarCureQuantities = config.getIntegerList("Vampire.Altar.Cure.Recipe.Quantities");
 
-		priestChurchWorld = config.getString("Priest.Church.World", "world");
-		priestChurchLocationX = config.getInt("Priest.Church.Location.X", 0);
-		priestChurchLocationY = config.getInt("Priest.Church.Location.Y", 80);
-		priestChurchLocationZ = config.getInt("Priest.Church.Location.Z", 0);
+		priestChurchEntries = new ArrayList<String>(config.getStringList("Priest.Church.Locations"));
+		priestChurches = new ArrayList<Location>();
+		for (String entry : priestChurchEntries) {
+			Location church = parseChurch(entry);
+			if (church != null) {
+				priestChurches.add(church);
+			}
+		}
+		if (priestChurches.isEmpty() && !config.contains("Priest.Church.Locations")) {
+			// A server that has been running since before churches came in a list still has its
+			// one church in the four settings below, and it has to keep working.
+			Location legacy = new Location(
+					plugin.getServer().getWorld(config.getString("Priest.Church.World", "world")),
+					config.getInt("Priest.Church.Location.X", 0),
+					config.getInt("Priest.Church.Location.Y", 80),
+					config.getInt("Priest.Church.Location.Z", 0));
+			if (legacy.getWorld() != null) {
+				priestChurches.add(legacy);
+				priestChurchEntries.add(describeChurch(legacy));
+			}
+		}
+		storeChurches(config);
 		priestBanishWorld = config.getString("Priest.Banish.World", "world");
 		priestBanishLocationX = config.getInt("Priest.Banish.Location.X", 0);
 		priestBanishLocationY = config.getInt("Priest.Banish.Location.Y", 80);
@@ -1049,7 +1087,11 @@ public class SNConfigHandler {
 		priestFireTicks = config.getInt("Priest.DamageFactor.FireTicks", 50);
 		priestAltarMaterial = config.getString("Priest.Church.AltarMaterial", "DIAMOND_BLOCK");
 		priestMaterialsString = config.getStringList("Priest.Spell.Material");
-		priestSpellGuardianAngel = config.getString("Priest.Spell.Material.GuardianAngel", "WOOL");
+		// WOOL stopped existing when the wool items were split by colour, and INK_SACK is INK_SAC
+		// here, so both spells were impossible to cast on any server that had the old defaults.
+		priestSpellGuardianAngel = usableMaterial("Priest.Spell.Material.GuardianAngel",
+				config.getString("Priest.Spell.Material.GuardianAngel", "WHITE_WOOL"),
+				"WHITE_WOOL");
 		priestAltarMaterialsString = config.getStringList("Priest.Church.Recipe.Materials");
 		priestAltarQuantities = config.getIntegerList("Priest.Church.Recipe.Quantities");
 		priestDonationMaterialsString = config.getStringList("Priest.Church.Donation.Materials");
@@ -1110,7 +1152,8 @@ public class SNConfigHandler {
 		demonFireballDamage = config.getInt("Demon.Fireball.Damage", 10);
 		demonPowerSnare = config.getInt("Demon.Power.Snare", 1000);
 		demonSnareDuration = config.getInt("Demon.Snare.Duration", 10000);
-		demonSnareMaterial = config.getString("Demon.Snare.Material", "INK_SACK");
+		demonSnareMaterial = usableMaterial("Demon.Snare.Material",
+				config.getString("Demon.Snare.Material", "INK_SAC"), "INK_SAC");
 		demonSnowballAmount = config.getInt("Demon.SnowballAmount", 30);
 		demonArmorString = config.getStringList("Demon.Armor");
 		demonWeaponsString = config.getStringList("Demon.Weapon.Restrictions");
@@ -1296,8 +1339,9 @@ public class SNConfigHandler {
 			priestDonationMap.put(material, reward);
 		}
 
-		priestChurchLocation = new Location(plugin.getServer().getWorld(priestChurchWorld), priestChurchLocationX, priestChurchLocationY, priestChurchLocationZ);
 		priestBanishLocation = new Location(plugin.getServer().getWorld(priestBanishWorld), priestBanishLocationX, priestBanishLocationY, priestBanishLocationZ);
+
+		warnAboutUnknownMaterials(config);
 	}
 
 	public static void saveConfig() {
@@ -1314,6 +1358,227 @@ public class SNConfigHandler {
 
 	public static Configuration getConfig() {
 		return config;
+	}
+
+	// -------------------------------------------- //
+	// Churches //
+	// -------------------------------------------- //
+
+	/** Whether an altar block belongs to one of the server's churches. */
+	public static boolean isChurch(Location at) {
+		if (at == null || at.getWorld() == null) {
+			return false;
+		}
+		for (Location church : priestChurches) {
+			if (church == null || church.getWorld() == null) {
+				continue;
+			}
+			if (!church.getWorld().equals(at.getWorld())) {
+				continue;
+			}
+			if (Math.abs(church.getBlockX() - at.getBlockX()) <= PRIEST_CHURCH_RADIUS
+					&& Math.abs(church.getBlockY() - at.getBlockY()) <= PRIEST_CHURCH_RADIUS
+					&& Math.abs(church.getBlockZ() - at.getBlockZ()) <= PRIEST_CHURCH_RADIUS) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Registers another church at a place, and writes it down. */
+	public static void addChurch(Location at) {
+		if (at == null || at.getWorld() == null) {
+			return;
+		}
+		priestChurches.add(at);
+		priestChurchEntries.add(describeChurch(at));
+		storeChurches(config);
+		saveConfig();
+	}
+
+	/** Forgets every church, and writes that down. */
+	public static void clearChurches() {
+		priestChurches.clear();
+		priestChurchEntries.clear();
+		storeChurches(config);
+		saveConfig();
+	}
+
+	/**
+	 * Forgets the church nearest to a place, within {@link #PRIEST_CHURCH_RADIUS}. Answers
+	 * whether there was one to forget, so a command can say so rather than claim success.
+	 */
+	public static boolean removeChurchNear(Location at) {
+		Location nearest = null;
+		double best = Double.MAX_VALUE;
+		for (Location church : priestChurches) {
+			if (church == null || church.getWorld() == null || at == null
+					|| !church.getWorld().equals(at.getWorld())) {
+				continue;
+			}
+			double away = church.distance(at);
+			if (away <= PRIEST_CHURCH_RADIUS && away < best) {
+				best = away;
+				nearest = church;
+			}
+		}
+		if (nearest == null) {
+			return false;
+		}
+		priestChurches.remove(nearest);
+		for (int i = 0; i < priestChurchEntries.size(); i++) {
+			if (sameChurch(priestChurchEntries.get(i), nearest)) {
+				priestChurchEntries.remove(i);
+				break;
+			}
+		}
+		storeChurches(config);
+		saveConfig();
+		return true;
+	}
+
+	/** A church as the config writes it: {@code world,x,y,z}. */
+	public static String describeChurch(Location church) {
+		return church.getWorld().getName() + "," + church.getBlockX() + ","
+				+ church.getBlockY() + "," + church.getBlockZ();
+	}
+
+	private static Location parseChurch(String entry) {
+		if (entry == null) {
+			return null;
+		}
+		String[] parts = entry.split(",");
+		if (parts.length != 4) {
+			return null;
+		}
+		World world = plugin.getServer().getWorld(parts[0].trim());
+		if (world == null) {
+			// A church in a world that is not loaded right now is kept, so starting the server
+			// without that world does not quietly delete it.
+			SupernaturalsPlugin.log(Level.WARNING, "the church in \"" + parts[0].trim()
+					+ "\" is not loaded, so that church is not active this session");
+			return null;
+		}
+		try {
+			return new Location(world, Integer.parseInt(parts[1].trim()),
+					Integer.parseInt(parts[2].trim()), Integer.parseInt(parts[3].trim()));
+		} catch (NumberFormatException notANumber) {
+			SupernaturalsPlugin.log(Level.WARNING, "unreadable church entry: " + entry);
+			return null;
+		}
+	}
+
+	private static boolean sameChurch(String entry, Location church) {
+		if (entry == null || church == null || church.getWorld() == null) {
+			return false;
+		}
+		String[] parts = entry.split(",");
+		if (parts.length != 4 || plugin.getServer().getWorld(parts[0].trim()) != church.getWorld()) {
+			return false;
+		}
+		try {
+			return Integer.parseInt(parts[1].trim()) == church.getBlockX()
+					&& Integer.parseInt(parts[2].trim()) == church.getBlockY()
+					&& Integer.parseInt(parts[3].trim()) == church.getBlockZ();
+		} catch (NumberFormatException notANumber) {
+			return false;
+		}
+	}
+
+	/**
+	 * Writes the churches out, in both forms: the list the plugin now reads, and the four older
+	 * settings, mirrored from the first church so anything still reading those keeps working.
+	 */
+	private static void storeChurches(Configuration config) {
+		config.set("Priest.Church.Locations", new ArrayList<String>(priestChurchEntries));
+		if (priestChurches.isEmpty()) {
+			priestChurchLocation = null;
+			return;
+		}
+		Location first = priestChurches.get(0);
+		priestChurchLocation = first;
+		priestChurchWorld = first.getWorld().getName();
+		priestChurchLocationX = first.getBlockX();
+		priestChurchLocationY = first.getBlockY();
+		priestChurchLocationZ = first.getBlockZ();
+		config.set("Priest.Church.World", priestChurchWorld);
+		config.set("Priest.Church.Location.X", priestChurchLocationX);
+		config.set("Priest.Church.Location.Y", priestChurchLocationY);
+		config.set("Priest.Church.Location.Z", priestChurchLocationZ);
+	}
+
+	/**
+	 * Whether an item is the one a setting names.
+	 *
+	 * <p>Abilities used to compare the item's <b>name</b> against the configured string, so a
+	 * setting whose value no longer exists in this version simply stopped matching: an ability
+	 * would quietly become impossible to use, with nothing anywhere to say why. Comparing the
+	 * resolved materials means a name is either right, or reported at load.
+	 */
+	public static boolean isItem(Material item, String configuredName) {
+		return item != null && configuredName != null
+				&& item == Material.matchMaterial(configuredName);
+	}
+
+	/** Settings a substitution was already made for, so the sweep does not report them twice. */
+	private static final Set<String> substitutedMaterials = new HashSet<>();
+
+	/**
+	 * A material setting that is guaranteed to name something this version has.
+	 *
+	 * <p>A name that does not resolve cannot be a deliberate choice - the ability that reads it
+	 * simply would not work - and an existing {@code config.yml} keeps whatever was written into
+	 * it the first time, so changing a default alone would never reach a server that already had
+	 * one. The fallback is used, and the substitution is logged.
+	 */
+	private static String usableMaterial(String setting, String value, String fallback) {
+		if (value != null && Material.matchMaterial(value) != null) {
+			return value;
+		}
+		substitutedMaterials.add(setting);
+		SupernaturalsPlugin.log(Level.WARNING, setting + " is set to \"" + value
+				+ "\", which is not a material in this version - using \"" + fallback
+				+ "\" instead.");
+		return fallback;
+	}
+
+	/**
+	 * Every setting whose name says it holds a material, checked once, at load. A Minecraft
+	 * update that renames an item does not break an ability loudly - it makes it impossible to
+	 * use - so this is the only thing that will ever say so.
+	 *
+	 * <p>Not every one of them holds a single name: a recipe, a weapon-ban list and a list of
+	 * things a race is weak to are all lists, and a list is exactly where a renamed item hides -
+	 * the setting still reads as present, and the entry that no longer resolves is the one the
+	 * ability silently skips. Those are swept entry by entry.
+	 */
+	private static void warnAboutUnknownMaterials(Configuration config) {
+		for (String key : config.getKeys(true)) {
+			if (!key.toLowerCase(Locale.ROOT).contains("material")
+					|| substitutedMaterials.contains(key)) {
+				continue;
+			}
+			Object value = config.get(key);
+			if (value instanceof String name) {
+				warnAboutUnknownMaterial(key, name);
+			} else if (value instanceof List<?> entries) {
+				for (Object entry : entries) {
+					if (entry instanceof String one) {
+						warnAboutUnknownMaterial(key, one);
+					}
+				}
+			}
+		}
+	}
+
+	/** One name out of one setting, reported when this version has no such material. */
+	private static void warnAboutUnknownMaterial(String key, String name) {
+		if (name == null || name.isEmpty() || Material.matchMaterial(name) != null) {
+			return;
+		}
+		SupernaturalsPlugin.log(Level.WARNING, key + " is set to \"" + name
+				+ "\", which is not a material in this version - the ability that uses"
+				+ " it cannot be used.");
 	}
 
 }
