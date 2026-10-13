@@ -357,6 +357,9 @@ final class HallGuard implements Listener {
             case SPAWN_NPCS -> spawnNpcs(player, trigger.detail());
             case SUN_SPOT -> teleport(player, hall.point(trigger.race() + ".sun"),
                     "§6站到露天台上：这一格头顶没有屋顶");
+            case ROOF_SPOT -> teleport(player, hall.point(trigger.race() + ".roof"),
+                    "§a站到有顶处：这一格头顶有方块，雨落在棚子上");
+            case RESTORE_HEALTH -> restoreHealth(player);
             case RETURN_START -> teleport(player, hall.point("spawn." + trigger.race()),
                     "§a回到这一族的入口");
             case GO_NETHER -> teleport(player,
@@ -502,8 +505,18 @@ final class HallGuard implements Listener {
             world.setClearWeatherDuration(20 * 60 * 5);
         }
         note(player, raining ? "§9这个大厅开始下雨了（下 5 分钟）" : "§7这个大厅的雨停了");
-        if (raining && !openToSky(player)) {
+        if (!raining) {
+            return;
+        }
+        if (!openToSky(player)) {
             note(player, "§7不过你头顶有屋顶，雨落不到你身上 —— 点旁边的「站到露天台」");
+        } else if (SuperNManager.get(player).isGhoul()) {
+            // The one place where "it is raining" is not just scenery. A ghoul that is standing in
+            // the rain stops regenerating, and since this switch is right next to the regeneration
+            // step, a reader who flips it watches their health bar stop moving with nothing on
+            // screen to explain it. So the switch says what it just did to the rule.
+            note(player, "§7你在露天淋着雨：食尸鬼的回血现在被关掉了，"
+                    + "点「站到有顶处」就恢复（不用关雨）");
         }
     }
 
@@ -612,6 +625,19 @@ final class HallGuard implements Listener {
         double full = max == null ? 20 : max.getValue();
         player.setHealth(Math.max(1, full / 2));
         note(player, "§c已把你打到半血，现在可以看回血了");
+    }
+
+    /**
+     * Puts the player back on a full bar.
+     *
+     * <p>The mirror of {@link #hurt}, and the one two steps needed without having it: a step about
+     * damage over time wants a full bar to start from, and the switch that said "top yourself up
+     * first" was wired to the wound it was meant to undo.
+     */
+    private void restoreHealth(Player player) {
+        AttributeInstance max = player.getAttribute(Attribute.MAX_HEALTH);
+        player.setHealth(max == null ? 20 : max.getValue());
+        note(player, "§a血已经补满，可以开始了");
     }
 
     /**

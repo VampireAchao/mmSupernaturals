@@ -348,6 +348,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return teleportPoint(rest);
             case "biome":
                 return biome(rest);
+            case "rain":
+                return rain(rest);
             case "race":
                 return race(rest);
             case "loot":
@@ -1363,6 +1365,28 @@ public final class HarnessPlugin extends JavaPlugin {
         int x = intOf(args[1]);
         int z = intOf(args[2]);
         return "ok y0=" + world.getBiome(x, 0, z) + " here=" + world.getBiome(x, 200, z);
+    }
+
+    /**
+     * What the weather over one column would actually look like.
+     *
+     * <p>Three things have to agree before a tester sees rain: the world's storm flag, an unbroken
+     * column, and a biome that precipitates. A section can only set the first, and the client draws
+     * nothing in a biome whose precipitation is none - so a rain switch in the wrong biome is a
+     * switch whose only visible effect is on rules nobody can see it causing. This prints the flag
+     * and the biome's own answer side by side.
+     */
+    private String rain(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length != 3) {
+            return "err usage: rain <world> <x> <z>";
+        }
+        World world = Bukkit.getWorld(args[0]);
+        if (world == null) {
+            return "err no such world: " + args[0];
+        }
+        return "ok storm=" + world.hasStorm()
+                + " " + Nms.precipitation(world, intOf(args[1]), intOf(args[2]));
     }
 
     /**

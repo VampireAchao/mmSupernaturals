@@ -192,6 +192,51 @@ final class Nms {
     }
 
     /**
+     * Whether the biome at one spot can have weather at all.
+     *
+     * <p>Rain needs three things to be seen and a section can only set one of them. The world's
+     * storm flag is the one a switch sets; the column has to have nothing solid over it; and the
+     * <b>biome</b> has to precipitate, which is what the client is told and what it draws the rain
+     * from. In a biome whose precipitation is {@code none} the storm flag changes the plugin's
+     * world and nothing on anybody's screen - so a switch that looks dead and a rule that has
+     * quietly changed can be the same event. This is the third fact, which nothing else on the
+     * server will say out loud.
+     */
+    static String precipitation(org.bukkit.World world, int x, int z) {
+        String biome = String.valueOf(world.getBiome(x, 0, z));
+        try {
+            Object level = call(world, "getHandle");
+            Class<?> posClass = load("net.minecraft.core.BlockPos");
+            Object pos = posClass.getConstructor(int.class, int.class, int.class)
+                    .newInstance(x, 0, z);
+            Object holder = null;
+            for (Method candidate : level.getClass().getMethods()) {
+                if (!candidate.getName().equals("getBiome") || candidate.getParameterCount() != 1) {
+                    continue;
+                }
+                if (!candidate.getParameterTypes()[0].getName().equals(posClass.getName())) {
+                    continue;
+                }
+                holder = candidate.invoke(level, pos);
+                break;
+            }
+            if (holder == null) {
+                return "precipitates=? (no getBiome(BlockPos) on this build) biome=" + biome;
+            }
+            Object nmsBiome = call(holder, "value");
+            for (Method candidate : nmsBiome.getClass().getMethods()) {
+                if (candidate.getName().equals("hasPrecipitation")
+                        && candidate.getParameterCount() == 0) {
+                    return "precipitates=" + candidate.invoke(nmsBiome) + " biome=" + biome;
+                }
+            }
+            return "precipitates=? (no hasPrecipitation on this build) biome=" + biome;
+        } catch (ReflectiveOperationException e) {
+            return "precipitates=? (" + e.getClass().getSimpleName() + ") biome=" + biome;
+        }
+    }
+
+    /**
      * Takes the "you have not arrived yet" state off a player.
      *
      * <p>A player whose client has not confirmed the position it was put at is treated as still

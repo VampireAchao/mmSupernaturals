@@ -180,6 +180,20 @@ public final class Hall {
         /** Stands the player on the section's open-air mark, where the sky can be read. */
         SUN_SPOT,
 
+        /**
+         * Stands the player under a roof the section built, for the other half of a sky rule.
+         *
+         * <p>Several rules read the sky and then answer differently: the ghoul regenerates under
+         * cover and not in the rain, and the vampire burns in the sun unless something is over its
+         * head. Without a mark of its own the covered case is "walk back into the previous
+         * section", which is far enough that a reader who does not go cannot tell a rule that
+         * answered from a rule that never ran.
+         */
+        ROOF_SPOT,
+
+        /** Puts the player back to full health, so a step about damage starts from the top. */
+        RESTORE_HEALTH,
+
         /** Swings what the player is holding at nothing, the way a bow mode is cycled. */
         LEFT_CLICK,
 
@@ -1068,20 +1082,34 @@ public final class Hall {
                     // rule that switches that regeneration off.
                     box(w, Material.MOSSY_STONE_BRICKS, x + 9, y, z + 5, x + 14, y, z + 9);
                     points.put("ghoul.sun", new Location(w, x + 11.5, y + 1, z + 7.5));
+                    // ... and one covered porch, because "under a roof" is the other half of the
+                    // rule and it used to mean walking back into a neighbouring section. Four
+                    // blocks away is far enough that a reader who stays put cannot tell a rule
+                    // that answered from a rule that never ran - which is most of why this step
+                    // read as broken. Two switches, two marks, one health bar.
+                    box(w, Material.MOSSY_STONE_BRICKS, x + 16, y + 3, z + 6, x + 18, y + 3, z + 8);
+                    box(w, Material.MOSSY_STONE_BRICKS, x + 16, y + 1, z + 6, x + 16, y + 2, z + 6);
+                    box(w, Material.MOSSY_STONE_BRICKS, x + 18, y + 1, z + 6, x + 18, y + 2, z + 6);
+                    box(w, Material.MOSSY_STONE_BRICKS, x + 16, y + 1, z + 8, x + 16, y + 2, z + 8);
+                    box(w, Material.MOSSY_STONE_BRICKS, x + 18, y + 1, z + 8, x + 18, y + 2, z + 8);
+                    points.put("ghoul.roof", new Location(w, x + 17.5, y + 1, z + 7.5));
                     switchpoint(w, y, x + 3, z + 3, Trigger.of(Kind.SUN_SPOT, "ghoul"),
-                            "§e站到露天台", "§7这一格头顶 9 格没屋顶");
-                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.TOGGLE_RAIN, "ghoul"),
+                            "§e站到露天台", "§7头顶完全没屋顶");
+                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.ROOF_SPOT, "ghoul"),
+                            "§a站到有顶处", "§7这四格在棚子底下");
+                    switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.TOGGLE_RAIN, "ghoul"),
                             "§9切换下雨", "§7雨会真的落到你身上");
-                    switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.HURT),
+                    switchpoint(w, y, x + 12, z + 3, Trigger.of(Kind.HURT),
                             "§c先被打掉血", "§7不然没血可回，看不出回血");
                     powerButton(w, y, x + 2, z, "ghoul");
                 }, "验证食尸鬼的回血条件：有顶、且不下雨才回血",
-                        "回血每 10 秒 1 点。但雨在下、你头顶又没有遮挡时，这条路整个不生效——"
+                        "回血每 10 秒 1 点，一次 1 点，所以要看血条上那条绿线慢慢涨。"
+                                + "但雨在下、你头顶又没有遮挡时，这条路整个不生效——"
                                 + "判定看的是天空，玻璃顶也算遮挡。它同时也免疫摔落伤害",
-                        "露天淋雨时完全不回血；回到有顶的格子里每 10 秒回 1 点",
+                        "露天淋雨时完全不回血；挪到有顶的地方，10 秒后开始每 10 秒回 1 点",
                         "先点「先被打掉血」，血量掉到一半",
-                        "站到露天台点「切换下雨」等一会，看血量不动",
-                        "走回有顶的格子再等一会，看它开始回血"));
+                        "站到露天台→点「切换下雨」→等 20 秒，看血条不动",
+                        "点「站到有顶处」再等 20 秒，看它开始回血（雨不用关）"));
                 sections.add(section("§b⑥ 钻石剑 伤害 0", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
@@ -1123,15 +1151,27 @@ public final class Hall {
                     // A boat floating on the pool. Sitting in one is the only thing that exempts a
                     // ghoul from the water, and an exemption nobody can try is an exemption nobody
                     // has tested - this keeps the line on the sign from being just a claim.
+                    //
+                    // Two blocks above the water, because a boat put down anywhere else does not
+                    // end up on it. The pool is two deep - it fills y-1 and y - so the waterline is
+                    // the top face of y, at y+1, and a boat dropped into the pool settles about half
+                    // a block below that line, which is the position the game itself gives a boat
+                    // here. A boat placed at y does not: it stays exactly at y, a whole block lower,
+                    // with its hull short of the waterline from end to end, and no boat on this
+                    // server floats back up out of the water on its own - so where it is put down is
+                    // where it stays. That is the whole of "the boat is underwater and I cannot get
+                    // in", measured on this pool: placed at y it sits at -19.0 under a -18.0
+                    // waterline; dropped in from above it comes to rest at -18.48.
+                    //
                     // Spawned by type, not by class: Boat is an abstract base on this server and
                     // asking for one by class throws while the plugin is still enabling.
-                    Entity boat = w.spawnEntity(new Location(w, x + 10.5, y, z + 9.5),
+                    Entity boat = w.spawnEntity(new Location(w, x + 10.5, y + 2, z + 9.5),
                             EntityType.OAK_BOAT);
                     boat.setPersistent(true);
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.DIP_WATER, "ghoul"),
                             "§9跳进水里", "§7站着别动，等它掉血");
-                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.HURT),
-                            "§c先回满血再看", "§7免得死在池子里");
+                    switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.RESTORE_HEALTH),
+                            "§a先回满血再看", "§7免得死在池子里");
                     powerButton(w, y, x + 8, z, "ghoul");
                 }, "验证食尸鬼在水里会持续溶解，以及船里为什么不会",
                         "脚下方块是水时，每秒掉 4 点血（不是溺水，是碰到水就掉；判定每 1 秒跑一次、"
@@ -2147,7 +2187,14 @@ public final class Hall {
         if (existing != null) {
             return existing;
         }
-        String biome = "demon".equals(race) ? "minecraft:snowy_plains" : "minecraft:the_void";
+        // A hall whose step turns the weather on has to stand in a biome that has weather. Every
+        // hall but the demon's used to be the_void, and the void never rains - the client draws
+        // nothing there whatever the world's storm flag says - so "切换下雨" looked like a switch
+        // wired to nothing. Worse, the flag it did set was the one the ghoul's regeneration reads:
+        // the healing stopped on schedule, for a rain that was not on the screen.
+        boolean weatherHall = "ghoul".equals(race) || "vampire".equals(race);
+        String biome = "demon".equals(race) ? "minecraft:snowy_plains"
+                : weatherHall ? "minecraft:plains" : "minecraft:the_void";
         World created = new WorldCreator(name)
                 .environment(World.Environment.NORMAL)
                 .type(WorldType.FLAT)
