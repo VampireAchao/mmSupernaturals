@@ -32,6 +32,10 @@ public class SNTaskTimer implements Runnable {
 
 	@Override
 	public void run() {
+		// One clock tick for the whole server, before any player is asked about it. The counter
+		// used to be advanced once per player, which made every timed rule run faster the more
+		// players were online - see SuperNManager#advanceClock.
+		plugin.getSuperManager().advanceClock();
 		// Tick each online player
 		for (final SuperNPlayer snplayer : SuperNManager.findAllOnline()) {
 			plugin.getServer().getScheduler().scheduleSyncDelayedTask(plugin, new Runnable() {
