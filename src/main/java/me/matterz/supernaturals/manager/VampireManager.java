@@ -269,7 +269,16 @@ public class VampireManager extends ClassManager {
 		if (SupernaturalsPlugin.instance.getDataHandler().checkPlayer(snplayer)) {
 			org.bukkit.Location destination = SupernaturalsPlugin.instance.getDataHandler()
 					.getTeleport(snplayer);
-			if (destination == null || !destination.getWorld().equals(player.getWorld())) {
+			if (destination == null) {
+				// Saved, but not usable: the world it was saved in is not loaded this session.
+				// It is still their point and it comes back with that world, so this is not the
+				// same answer as "you never set one" - which is what asking whether the point
+				// exists, and being told no, used to say instead.
+				SuperNManager.sendMessage(snplayer,
+						"Your teleport location is in a world that is not loaded right now.");
+				return false;
+			}
+			if (!destination.getWorld().equals(player.getWorld())) {
 				// A saved point belongs to the world it was saved in. Carrying it across worlds
 				// is how somebody teleports out of an area they were sealed into - the point is
 				// kept, so going back to that world still uses it.

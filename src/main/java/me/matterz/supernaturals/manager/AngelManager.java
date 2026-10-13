@@ -56,8 +56,11 @@ public class AngelManager extends ClassManager {
 		SuperNPlayer sntarget = SuperNManager.get(target);
 		if (player.getItemInHand().getType().equals(Material.FEATHER)) {
 			if (snplayer.getPower() > SNConfigHandler.angelHealPowerCost) {
-				target.setHealth(target.getHealth()
-						+ SNConfigHandler.angelHealHealthGain);
+				// Healing adds to whatever the target has, so a target that is already full gets
+				// asked for more than its bar can hold. The server clamps that, but the plugin
+				// should not be the one asking for an impossible number.
+				target.setHealth(Math.min(target.getMaxHealth(),
+						target.getHealth() + SNConfigHandler.angelHealHealthGain));
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.angelHealPowerCost, "Healing "
 						+ target.getName());
 				target.sendMessage(ChatColor.RED + "Healed by "

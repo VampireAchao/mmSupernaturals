@@ -95,8 +95,16 @@ public class SNDataHandler implements Serializable {
 		teleportLocations.put(player, new Location(online.getLocation()));
 	}
 
+	/**
+	 * Whether a point has ever been saved for this player.
+	 *
+	 * <p>This is a question about the record, not about whether the record can be used right now:
+	 * a point saved in a world that is not loaded is still a point, and a caller that asked
+	 * "have they set one?" and got "no" told the player to go and set one that they had already
+	 * set. {@link #getTeleport} answers the other half.
+	 */
 	public boolean checkPlayer(SuperNPlayer player) {
-		return getTeleport(player) != null;
+		return teleportLocations.containsKey(player);
 	}
 
 	/**

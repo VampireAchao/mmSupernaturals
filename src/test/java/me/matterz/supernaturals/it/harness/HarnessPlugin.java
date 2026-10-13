@@ -1326,10 +1326,12 @@ public final class HarnessPlugin extends JavaPlugin {
     private String teleportPoint(String rest) {
         SuperNPlayer snplayer = SuperNManager.get(player(rest.trim()));
         var data = SupernaturalsPlugin.instance.getDataHandler();
-        if (!data.checkPlayer(snplayer)) {
-            return "ok none";
-        }
+        // The saved point, not the question of whether one was saved: a point whose world is not
+        // loaded has been saved and cannot be read back, and this asks for the reading.
         Location at = data.getTeleport(snplayer);
+        if (at == null) {
+            return data.checkPlayer(snplayer) ? "ok set-in-an-unloaded-world" : "ok none";
+        }
         return "ok " + at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ()
                 + " " + at.getWorld().getName();
     }

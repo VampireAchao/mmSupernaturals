@@ -23,8 +23,11 @@ public class EnderBornManager extends ClassManager {
 	 * blow turns the victim into one of them.
 	 *
 	 * <p>Both used to be written as {@code Math.random() == 0.35} and {@code == 0.10}: a double
-	 * compared for <em>exact</em> equality with a number that is not even representable, so the
-	 * rolls could never come up and neither the attack bonus nor the conversion ever happened.
+	 * compared for <em>exact</em> equality against one particular value out of the roughly 2^53
+	 * that {@code Math.random()} can return. Equality is not impossible - around one roll in nine
+	 * quadrillion - but it is not a chance anybody will ever see, so neither the attack bonus nor
+	 * the conversion has ever happened. Asking whether the roll came in <em>under</em> the number
+	 * is what makes it the chance it was meant to be.
 	 */
 	private static final double ATTACK_BONUS_CHANCE = 0.35;
 	private static final double CONVERT_CHANCE = 0.10;

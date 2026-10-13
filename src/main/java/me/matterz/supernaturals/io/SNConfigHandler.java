@@ -1546,21 +1546,39 @@ public class SNConfigHandler {
 	 * Every setting whose name says it holds a material, checked once, at load. A Minecraft
 	 * update that renames an item does not break an ability loudly - it makes it impossible to
 	 * use - so this is the only thing that will ever say so.
+	 *
+	 * <p>Not every one of them holds a single name: a recipe, a weapon-ban list and a list of
+	 * things a race is weak to are all lists, and a list is exactly where a renamed item hides -
+	 * the setting still reads as present, and the entry that no longer resolves is the one the
+	 * ability silently skips. Those are swept entry by entry.
 	 */
 	private static void warnAboutUnknownMaterials(Configuration config) {
 		for (String key : config.getKeys(true)) {
-			Object value = config.get(key);
-			if (!(value instanceof String name) || name.isEmpty()
-					|| !key.toLowerCase(Locale.ROOT).contains("material")
+			if (!key.toLowerCase(Locale.ROOT).contains("material")
 					|| substitutedMaterials.contains(key)) {
 				continue;
 			}
-			if (Material.matchMaterial(name) == null) {
-				SupernaturalsPlugin.log(Level.WARNING, key + " is set to \"" + name
-						+ "\", which is not a material in this version - the ability that uses"
-						+ " it cannot be used.");
+			Object value = config.get(key);
+			if (value instanceof String name) {
+				warnAboutUnknownMaterial(key, name);
+			} else if (value instanceof List<?> entries) {
+				for (Object entry : entries) {
+					if (entry instanceof String one) {
+						warnAboutUnknownMaterial(key, one);
+					}
+				}
 			}
 		}
+	}
+
+	/** One name out of one setting, reported when this version has no such material. */
+	private static void warnAboutUnknownMaterial(String key, String name) {
+		if (name == null || name.isEmpty() || Material.matchMaterial(name) != null) {
+			return;
+		}
+		SupernaturalsPlugin.log(Level.WARNING, key + " is set to \"" + name
+				+ "\", which is not a material in this version - the ability that uses"
+				+ " it cannot be used.");
 	}
 
 }
