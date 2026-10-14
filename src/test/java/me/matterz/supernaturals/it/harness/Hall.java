@@ -472,9 +472,16 @@ public final class Hall {
     /** How often a hanging light is set into the grid, in blocks. */
     private static final int HANG_SPACING = 6;
 
-    /** Where a room's switches and the boards over them hang, relative to the floor. */
-    private static final int SWITCH_Y = 2;
-    private static final int BOARD_Y = 3;
+    /**
+     * Where a room's switches and the boards over them hang, relative to the floor.
+     *
+     * <p>The floor is the block they stand on, so a switch at two is at the player's waist and a
+     * board at three is where their eyes are. One lower than that - which is where these are - puts
+     * the switch at the top of their feet and the board across their chest: still in reach, and low
+     * enough that nothing on any wall has to be looked up at.
+     */
+    private static final int SWITCH_Y = 1;
+    private static final int BOARD_Y = 2;
 
     /** Where a tall room's second band of wall lights goes. */
     private static final int HIGH_BAND_Y = 12;
@@ -517,7 +524,7 @@ public final class Hall {
      * been got wrong twice; `mmp signage` now checks it rather than anybody remembering it.
      */
     private static final int SWITCH_PITCH = 4;
-    private static final int SWITCH_ROW_Y = 2;
+    private static final int SWITCH_ROW_Y = 1;
     private static final int SWITCH_ROW_GAP = 2;
 
     /**
@@ -529,7 +536,7 @@ public final class Hall {
      * read and a row of switches nobody can press.
      */
     private static final int DIRECTORY_PITCH = 4;
-    private static final int DIRECTORY_Y = 2;
+    private static final int DIRECTORY_Y = 1;
     private static final int DIRECTORY_ROW = 2;
 
     private static final Material AIR = Material.AIR;
@@ -1509,9 +1516,9 @@ public final class Hall {
             // The well is fifteen blocks of stone with one lamp at the top of it, which is a fine
             // place to fall down and a terrible place to find a switch in - so the switch inside it
             // gets a lamp of its own, in the wall it is mounted on.
-            set(w, Material.SEA_LANTERN, cx + 2, floorY + 1, cz);
-            button(w, cx + 1, floorY + 1, cz, BlockFace.WEST, Trigger.of(Kind.BACK_DOWN, race));
-            signOn(w, cx + 2, floorY + 2, cz, BlockFace.WEST, "§a回到地面", "§7点一下回大厅");
+            set(w, Material.SEA_LANTERN, cx + 2, floorY, cz);
+            button(w, cx + 1, floorY, cz, BlockFace.WEST, Trigger.of(Kind.BACK_DOWN, race));
+            signOn(w, cx + 2, floorY + 1, cz, BlockFace.WEST, "§a回到地面", "§7点一下回大厅");
         }, "用一次真实坠落，验这一族的摔落减免",
                 ability,
                 expect,
@@ -2354,8 +2361,8 @@ public final class Hall {
                     door(w, x + 6, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 2, z + DEPTH / 2);
-                    signOn(w, x + 7, y + 2, z + DEPTH / 2, BlockFace.EAST, "WitchHunter");
-                    set(w, Material.SEA_LANTERN, x + 7, y + 3, z + DEPTH / 2);
+                    signOn(w, x + 7, y + 1, z + DEPTH / 2, BlockFace.EAST, "WitchHunter");
+                    set(w, Material.SEA_LANTERN, x + 7, y + 2, z + DEPTH / 2);
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.INVITE_HUNTER),
                             "§a直接发一张邀请", "§7跳过杀怪，图快的用这个");
                 }, "验证铁门入会：门旁告示牌必须写着 WitchHunter",
@@ -3140,7 +3147,7 @@ public final class Hall {
 
     /** The same, for a run of signs that owns more or less wall than the default. */
     private void wallSign(World target, int y, int x, int z, int maxBoards, String... lines) {
-        signBoard(target, x, y + 2, z - 1, BlockFace.SOUTH, maxBoards, wrapAll(lines));
+        signBoard(target, x, y + SWITCH_Y, z - 1, BlockFace.SOUTH, maxBoards, wrapAll(lines));
     }
 
     /**
@@ -3578,10 +3585,10 @@ public final class Hall {
         }
         // No room open - the two nether cells build corridors rather than rooms, and a corridor
         // with no wall of its own keeps the post.
+        set(target, STELE, x, y, z - 1);
         set(target, STELE, x, y + 1, z - 1);
-        set(target, STELE, x, y + 2, z - 1);
-        button(target, x, y + 1, z, BlockFace.SOUTH, trigger);
-        signBoard(target, x, y + 2, z - 1, BlockFace.SOUTH, SWITCH_BOARDS, wrapAll(lines));
+        button(target, x, y, z, BlockFace.SOUTH, trigger);
+        signBoard(target, x, y + 1, z - 1, BlockFace.SOUTH, SWITCH_BOARDS, wrapAll(lines));
     }
 
     /**
