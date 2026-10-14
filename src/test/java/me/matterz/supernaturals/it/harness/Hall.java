@@ -488,6 +488,17 @@ public final class Hall {
      */
     private static final int LIGHT_MIN = 10;
 
+    /**
+     * How high a switch and a board may hang over the floor of their room.
+     *
+     * <p>A player stands on the floor with their eyes about one and a half blocks up and reaches a
+     * little over four; a switch at {@link #BUTTON_REACH} is at the top of what an arm will do, and
+     * a board at {@link #BOARD_REACH} is read by looking up rather than by tipping the head back.
+     * Past those, a wall of text is scenery.
+     */
+    private static final int BUTTON_REACH = 4;
+    private static final int BOARD_REACH = 5;
+
     /** Boards one step's own teaching may use on its wall, and one scene board's may use. */
     private static final int TEACH_BOARDS = 17;
     private static final int SCENE_BOARDS = 4;
@@ -496,17 +507,30 @@ public final class Hall {
      * How a room's switches are laid out along the wall they hang on.
      *
      * <p>Four columns each: the switch, and up to three boards over it. Five of them fit along a
-     * wall of the standard room, and a step with more than that starts a second row four blocks
-     * up rather than running off the end of the wall.
+     * wall of the standard room, and a step with more than that starts a second row.
+     *
+     * <p>The gap between rows is two, not four, and that is the whole point of the number. A
+     * player's reach is a few blocks and their eyes are one and a half up, so a switch at five or
+     * six blocks over the floor is a switch nobody can press - it looks like furniture and it is
+     * scenery. Rows at two and four put every switch in the building between the floor and one
+     * block over the player's head, and every board between their eyes and their hair. This has
+     * been got wrong twice; `mmp signage` now checks it rather than anybody remembering it.
      */
     private static final int SWITCH_PITCH = 4;
     private static final int SWITCH_ROW_Y = 2;
-    private static final int SWITCH_ROW_GAP = 4;
+    private static final int SWITCH_ROW_GAP = 2;
 
-    /** The same, for the entry room's wall of doors, which is wider and has more to list. */
+    /**
+     * The same, for the entry room's wall of doors.
+     *
+     * <p>Two rows of ten: a wall forty-four wide holds ten entries four columns apart, and two
+     * rows hold the twenty rooms the largest hall has. Height is the other half - the first
+     * version put the third row nine blocks over the floor, which is a wall of text nobody can
+     * read and a row of switches nobody can press.
+     */
     private static final int DIRECTORY_PITCH = 4;
-    private static final int DIRECTORY_Y = 4;
-    private static final int DIRECTORY_ROW = 4;
+    private static final int DIRECTORY_Y = 2;
+    private static final int DIRECTORY_ROW = 2;
 
     private static final Material AIR = Material.AIR;
     private static final Material STELE = Material.CHISELED_STONE_BRICKS;
@@ -866,9 +890,14 @@ public final class Hall {
 
         zones.put("hall." + race, new Box(target.getName(), gridX - 1, y - 1, gridZ - 1,
                 gridX + COLS * CHAMBER_PITCH, y + MOB_HEAD + 1, gridZ + rows * CHAMBER_PITCH));
-        roomSpawns.put(race, origins.stream()
-                .map(at -> landing(target, at[0], y, at[1], at[2]))
-                .toList());
+        List<Location> spawns = new ArrayList<>();
+        for (int index = 0; index < origins.size(); index++) {
+            int[] at = origins.get(index);
+            // The entry room is entered by walking into a wall of text, so the player is put down
+            // in front of it rather than at the far end of a forty-four block room.
+            spawns.add(landing(target, at[0], y, at[1], at[2], index == 0));
+        }
+        roomSpawns.put(race, spawns);
         points.put("spawn." + race, roomSpawns.get(race).get(0));
     }
 
@@ -883,8 +912,14 @@ public final class Hall {
      * middle of the near wall first, then outwards along it, then a row further in.
      */
     private static Location landing(World target, int x, int y, int z, int side) {
+        return landing(target, x, y, z, side, false);
+    }
+
+    /** The same, starting from the far wall - for a room whose business is on that wall. */
+    private static Location landing(World target, int x, int y, int z, int side, boolean fromFar) {
         int middle = x + side / 2;
-        for (int row = 2; row < side - 2; row += 2) {
+        for (int rowStep = 0; rowStep < (side - 4) / 2; rowStep++) {
+            int row = fromFar ? side - 3 - rowStep * 2 : 2 + rowStep * 2;
             for (int step = 0; step < side - 2; step++) {
                 for (int direction : new int[] {1, -1}) {
                     int at = middle + step * direction;
@@ -1122,15 +1157,19 @@ public final class Hall {
      */
     private void directory(World target, String race, int y, int x, int z, int side, Theme theme,
             List<Section> sections) {
+        // The far wall, which is the one the player is looking at when they walk in, and the same
+        // wall every other room hangs its switches on - so the entry room is not a special case to
+        // learn, it is the same wall with more on it.
+        int wallZ = z + side;
         int perRow = Math.max(1, (side - 5) / DIRECTORY_PITCH + 1);
         for (int index = 1; index < sections.size(); index++) {
             int slot = index - 1;
             int bx = x + 1 + (slot % perRow) * DIRECTORY_PITCH;
             int by = y + DIRECTORY_Y + (slot / perRow) * DIRECTORY_ROW;
-            set(target, theme.light(), bx, by, z - 1);
-            button(target, bx, by, z, BlockFace.SOUTH,
+            set(target, theme.light(), bx, by, wallZ);
+            button(target, bx, by, wallZ - 1, BlockFace.NORTH,
                     Trigger.with(Kind.GO_ROOM, race, race + ":" + index));
-            signBoard(target, bx, by + 1, z - 1, BlockFace.SOUTH, 2,
+            signBoard(target, bx, by + 1, wallZ, BlockFace.NORTH, 2,
                     wrapAll("§f" + sections.get(index).title(), "§7" + blurb(sections.get(index))));
         }
     }
@@ -1353,19 +1392,17 @@ public final class Hall {
         // it, and a standard room's one wall is twenty-one columns - five entries - which is not a
         // directory, it is a hint.
         return section("§f入口 · 这一族有哪些房间", 1, 4, 18, (w, y, x, z, width) -> {
+            // No switches of its own: the far wall is the directory, and a directory is a wall of
+            // switches. Anything else up there would be a second row of buttons in the same place.
             chest(w, x + 2, y + 1, z + 1, BlockFace.SOUTH, centred(
                     new ItemStack(Material.BREAD, 8)));
-            switchpoint(w, y, x + 1, z + 1, Trigger.of(Kind.POWER, race),
-                    "§b能量 +1000", "§7点一下加一千");
-            switchpoint(w, y, x + 5, z + 1, Trigger.of(Kind.RETURN_START, race),
-                    "§f回到入口", "§7就是这一间");
         }, "这是" + title(race) + "的测试大厅，先看清它有哪些房间",
-                "一族的能力拆成一间一间的房，一间只讲一件事。房间之间不通——对面那面墙上"
+                "一族的能力拆成一间一间的房，一间只讲一件事。房间之间不通——对面（尽头）那面墙上"
                         + "一格一格列着这一族所有房间：按哪一格就去哪一间，格子上写着那一间讲什么。"
                         + "每间房的右手墙上都有「回入口大厅」「上一间」「下一间」，"
                         + "「上一间 / 下一间」的牌子上直接写着那一间是什么",
                 "按目录里的一格，你就站在那一间房的正中间，聊天栏会说出它的名字",
-                "站在对面墙前，从上到下看一遍，这就是这一族的全部环节",
+                "走进来面朝那面墙，从上到下看一遍，这就是这一族的全部环节",
                 "想从哪一间开始就按哪一格；看完了按「回入口大厅」回来再挑下一间",
                 "每间房进门左手边都有一格红色羊毛——那是退出，按下去回大厅并恢复人类");
     }
@@ -3279,6 +3316,49 @@ public final class Hall {
             }
         }
         return out;
+    }
+
+    /**
+     * Switches and boards hung higher up a wall than anybody can use.
+     *
+     * <p>A player's reach is a few blocks and their eyes are one and a half up, so a switch five or
+     * six blocks over the floor cannot be pressed from the floor at all, and a board that high is
+     * read with the head tipped back. This has happened twice in this building, and both times it
+     * looked fine from across the room - so it is a number now, printed by `mmp signage`, rather
+     * than something anybody has to remember to look at.
+     */
+    public List<String> outOfReach() {
+        List<String> out = new ArrayList<>();
+        for (Map.Entry<Location, Fixture> entry : fixtures.entrySet()) {
+            Fixture fixture = entry.getValue();
+            boolean board = fixture.type() == Material.OAK_WALL_SIGN;
+            if (!board && fixture.trigger() == null) {
+                continue;
+            }
+            Location at = entry.getKey();
+            Integer floor = floorUnder(at);
+            if (floor == null) {
+                continue;
+            }
+            int height = at.getBlockY() - floor;
+            int limit = board ? BOARD_REACH : BUTTON_REACH;
+            if (height > limit) {
+                out.add((board ? "sign " : "button ") + place(at.getBlock()) + " height=" + height
+                        + " limit=" + limit + " kind="
+                        + (fixture.trigger() == null ? "board" : fixture.trigger().kind()));
+            }
+        }
+        return out;
+    }
+
+    /** The floor of the room a block stands in, or {@code null} when it is not in a room. */
+    private Integer floorUnder(Location at) {
+        for (Map.Entry<String, Box> zone : zones.entrySet()) {
+            if (zone.getKey().startsWith("room.") && zone.getValue().holds(at)) {
+                return zone.getValue().y1() + 1;
+            }
+        }
+        return null;
     }
 
     /** How many rooms the halls are made of. */

@@ -768,7 +768,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " rooms=" + hall.roomTotal()
                 + " missingExit=" + hall.exitsMissing().size()
                 + " missingScene=" + hall.scenesMissing().size()
-                + " unsupported=" + hall.unsupportedSwitches().size());
+                + " unsupported=" + hall.unsupportedSwitches().size()
+                + " outOfReach=" + hall.outOfReach().size());
         if (hall.boardsDropped() > 0) {
             out.append("\n  dropped where: ")
                     .append(String.join(" | ", hall.droppedBoardReport()));
@@ -776,6 +777,9 @@ public final class HarnessPlugin extends JavaPlugin {
         if (!hall.unsupportedSwitches().isEmpty()) {
             out.append("\n  hanging on nothing: ")
                     .append(String.join(" | ", hall.unsupportedSwitches()));
+        }
+        if (!hall.outOfReach().isEmpty()) {
+            out.append("\n  too high to use: ").append(String.join(" | ", hall.outOfReach()));
         }
         if (!hall.exitsMissing().isEmpty()) {
             out.append("\n  no way out of: ").append(String.join(", ", hall.exitsMissing()));
