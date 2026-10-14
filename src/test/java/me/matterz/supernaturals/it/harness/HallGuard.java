@@ -378,7 +378,294 @@ final class HallGuard implements Listener {
                     "§4下池子了：恶魔在岩浆里回血回能，别的种族会被烧、还会掉进去");
             case POWER_READ -> readPower(player);
             case SPAWN_MOB -> spawnMob(player, trigger.detail());
+            case ROOM_NEXT -> walkRoom(player, hall, trigger.race(), 1);
+            case ROOM_PREV -> walkRoom(player, hall, trigger.race(), -1);
+            case EXIT_ROOM -> backToHuman(player, hall, hall.lobbySpawn(),
+                    "§a已退出测试：道具已清空，种族已恢复人类，回到大厅");
+            case GO_ROOM -> goRoom(player, hall, trigger.detail());
+            case SUN_MAT -> standUnder(player, hall, trigger.race(), trigger.detail());
+            case ARM_ME -> armMe(player, trigger.detail());
+            case SELF_CONVERT -> selfConvert(player, trigger.detail());
+            case SPAWN_ALIGN -> spawnAlign(player, trigger.detail());
+            case NPC_KILL_ME -> npcKillMe(player, trigger.detail());
+            case NPC_CAST_ME -> npcCastMe(player, trigger.detail());
+            case DROP_TOWER -> dropTower(player, hall, trigger.race());
         }
+    }
+
+    // -- walking the grid ---------------------------------------------------
+
+    /**
+     * Walks the player one room on or back.
+     *
+     * <p>Where the player is comes from the room they are standing in, not from a number they were
+     * told: the rooms of a serpentine row run one way and the next row runs back, and a room that
+     * takes four cells is still one step. A player standing between two rooms (in a doorway) is
+     * taken to have left the one they were in, and a player past either end is told so rather than
+     * moved somewhere arbitrary.
+     */
+    private void walkRoom(Player player, Hall hall, String race, int delta) {
+        if (hall == null || race == null) {
+            return;
+        }
+        int count = hall.roomCount(race);
+        int here = hall.roomIndexAt(race, player.getLocation());
+        if (count == 0 || here < 0) {
+            note(player, "§7你现在不在任何一间房里，用墙上的门走");
+            return;
+        }
+        int next = here + delta;
+        if (next < 0) {
+            note(player, "§7这已经是第一间了");
+            return;
+        }
+        if (next >= count) {
+            note(player, "§7这已经是最后一间了");
+            return;
+        }
+        Location at = hall.roomSpawn(race, next);
+        teleport(player, at, delta > 0 ? "§a下一间" : "§a上一间");
+    }
+
+    /** Sends the player to a named room of a named hall. The detail is {@code RACE:INDEX}. */
+    private void goRoom(Player player, Hall hall, String detail) {
+        if (hall == null || detail == null) {
+            return;
+        }
+        String[] parts = detail.split(":", 2);
+        if (parts.length < 2) {
+            return;
+        }
+        int index;
+        try {
+            index = Integer.parseInt(parts[1].trim());
+        } catch (NumberFormatException notANumber) {
+            return;
+        }
+        Location at = hall.roomSpawn(parts[0].trim(), index);
+        if (at == null) {
+            note(player, "§c那间房不存在");
+            return;
+        }
+        teleport(player, at, "§a到了 " + Hall.title(parts[0].trim()) + " 的第 " + index + " 间");
+    }
+
+    /**
+     * Stands the player under one of the four roofs a step about the sun is about.
+     *
+     * <p>The four are one click apart on purpose. Whether glass counts as cover and whether leaves
+     * do is the whole question, and a player who has to walk somewhere else between the two
+     * answers cannot compare them.
+     */
+    private void standUnder(Player player, Hall hall, String race, String mat) {
+        Location at = hall == null || race == null ? null
+                : hall.point(race + ".sun." + (mat == null ? "open" : mat));
+        if (at == null) {
+            note(player, "§c这一格还没建好");
+            return;
+        }
+        String what = switch (mat == null ? "open" : mat) {
+            case "glass" -> "§b头顶是玻璃";
+            case "leaves" -> "§a头顶是树叶";
+            case "solid" -> "§7头顶是石头";
+            default -> "§6头顶什么都没有，完全露天";
+        };
+        teleport(player, at, what);
+    }
+
+    /** Puts the player on the release platform of a race's entry tower. */
+    private void dropTower(Player player, Hall hall, String race) {
+        Location at = hall == null || race == null ? null : hall.point(race + ".tower");
+        if (at == null) {
+            note(player, "§c入族塔还没建好");
+            return;
+        }
+        teleport(player, at, "§6站到塔顶了：手上要拿着羽毛，然后按「放手」");
+    }
+
+    // -- being changed by somebody else -------------------------------------
+
+    /**
+     * Puts the item a conversion needs into the player's hand.
+     *
+     * <p>Two of the conversions need the person being converted to be holding something - a
+     * demon's blow only heats a body that is holding netherrack, and an enderborn's only takes
+     * hold of a body holding a pearl. Which is the sort of detail a room can describe all day and
+     * a player will still not have in their hand.
+     */
+    private void armMe(Player player, String material) {
+        Material item = material == null ? null : Material.matchMaterial(material);
+        if (item == null) {
+            note(player, "§c这个环节没有配置物品");
+            return;
+        }
+        player.getInventory().setItemInMainHand(new ItemStack(item, 1));
+        note(player, "§7已把 " + item.name() + " 放到你手上");
+    }
+
+    /**
+     * Hands the player what one of the self-service conversions wants, and says what to do with
+     * it. The interaction itself has to be the player's - the plugin reads a right-click on a
+     * block, and a right-click a section performs is not one.
+     */
+    private void selfConvert(Player player, String detail) {
+        if (detail == null || detail.isBlank()) {
+            return;
+        }
+        for (String one : detail.split(",")) {
+            armMe(player, one.trim());
+        }
+        note(player, "§7拿着它右键旁边的方块，转换就发生在插件自己的判定里");
+    }
+
+    /**
+     * Puts one stand-in out as a named race, to see what a rule answers for somebody other than
+     * the player.
+     *
+     * <p>A ghoul cannot bind a human, and an angel counts as one; a priest's cure takes a
+     * supernatural target and refuses the same four. The interesting half of those rules is the
+     * refusal, so the room has to be able to put the refused target in front of the player.
+     */
+    private void spawnAlign(Player player, String race) {
+        spawnNpcs(player, race);
+    }
+
+    /**
+     * Sends a stand-in of a named race at the player until the player is dead.
+     *
+     * <p>This is the "I am the one being turned" half of every race's conversion. The plugin turns
+     * whoever a race kills, so the only honest way to show it is for a member of that race to
+     * actually kill the player: the dice, the message and the new race all come out of the same
+     * path a real fight would take.
+     *
+     * <p>What he is holding matters more than it looks. Each race has its own list of weapons it
+     * cannot use, and a race that cannot use a weapon deals nothing with one - so a stand-in whose
+     * race bans swords has to arrive empty-handed or the kill never lands and the section looks
+     * broken for a reason nobody can see. The check below is against the plugin's own list, so it
+     * stays right when the list changes.
+     */
+    private void npcKillMe(Player player, String detail) {
+        String[] parts = detail == null ? new String[0] : detail.trim().split(":", 2);
+        String race = parts.length > 0 ? parts[0].trim() : "";
+        Material wanted = parts.length > 1 ? Material.matchMaterial(parts[1].trim()) : null;
+        if (race.isEmpty()) {
+            return;
+        }
+        Material hand = legalWeapon(race, wanted, player);
+        Player npc = putPrey(player, 0, race, hand);
+        if (npc == null) {
+            note(player, "§c他起不来，这个环节暂时不能用");
+            return;
+        }
+        fullPower(npc);
+        revives.put(npc.getName(), npc.getLocation().clone());
+        Bukkit.getScheduler().runTaskLater(plugin, () -> hunt(player, npc), 30L);
+    }
+
+    /**
+     * Sends a stand-in of a named race over to cast one of its spells on the player.
+     *
+     * <p>Every spell the plugin has is hung on a damage event - the manager for whoever dealt the
+     * blow is asked what that blow does - so "cast at the player" and "hit the player" are the
+     * same action. A stand-in that walks up and swings is therefore casting; one that stands
+     * still is not. He is topped up first because a cast costs power and the power is spent for
+     * real: exorcising costs nine thousand of a possible ten, so a stand-in that has cast once
+     * cannot cast again until somebody fills him up.
+     */
+    private void npcCastMe(Player player, String detail) {
+        String[] parts = detail == null ? new String[0] : detail.trim().split(":", 2);
+        String race = parts.length > 0 ? parts[0].trim() : "";
+        Material item = parts.length > 1 ? Material.matchMaterial(parts[1].trim()) : null;
+        if (race.isEmpty()) {
+            return;
+        }
+        Player npc = putPrey(player, 0, race, item);
+        if (npc == null) {
+            note(player, "§c他起不来，这个环节暂时不能用");
+            return;
+        }
+        fullPower(npc);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> hunt(player, npc), 30L);
+    }
+
+    /** Walks a stand-in over to the player and swings until something changes. */
+    private void hunt(Player player, Player npc) {
+        if (!npc.isOnline() || !player.isOnline()) {
+            return;
+        }
+        walkIn(npc, player, () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            strike(npc, player);
+            // A blow worth two is a demonstration, not a fight: what these rooms are about is
+            // being killed, and a stand-in that lands a hit every two seconds takes half a
+            // minute over it. The rest of the job is done by the same swing, faster.
+            for (int i = 0; i < 12 && player.isOnline() && !player.isDead(); i++) {
+                strike(npc, player);
+            }
+        });
+    }
+
+    /**
+     * Fills a stand-in's power up, because spells are paid for out of it.
+     *
+     * <p>The ceiling is ten thousand whatever is asked for - the setter clamps - and a priest's
+     * exorcism costs nine of it, so "full power" is not a one-off gift at spawn: a second casting
+     * needs a second fill.
+     */
+    private void fullPower(Player npc) {
+        SuperNPlayer snplayer = SuperNManager.get(npc);
+        if (snplayer != null) {
+            snplayer.setPower(10000);
+        }
+    }
+
+    /**
+     * The weapon a stand-in of this race may swing, or nothing.
+     *
+     * <p>Each race has a list of things it cannot use, taken from the plugin's own configuration
+     * rather than copied - a copy is right until the day the list changes, and this one has to be
+     * right every day. A race whose list is empty or unset can hold anything.
+     */
+    private Material legalWeapon(String race, Material wanted, Player player) {
+        if (wanted == null || wanted.isAir()) {
+            return null;
+        }
+        List<Material> banned = bannedWeapons(race);
+        if (banned.contains(wanted)) {
+            note(player, "§e" + Hall.title(race) + " 用不了 " + wanted.name()
+                    + "（在它的禁用名单里），所以让他空手出手");
+            return null;
+        }
+        return wanted;
+    }
+
+    /** What a race may not swing, straight out of the plugin's own configuration. */
+    static List<Material> bannedWeapons(String race) {
+        return switch (race) {
+            case "ghoul" -> SNConfigHandler.ghoulWeapons;
+            case "werewolf" -> SNConfigHandler.wereWeapons;
+            case "witchhunter" -> SNConfigHandler.hunterWeapons;
+            case "enderborn" -> SNConfigHandler.enderWeapons;
+            case "vampire" -> SNConfigHandler.vampireWeapons;
+            case "demon" -> SNConfigHandler.demonWeapons;
+            case "priest" -> SNConfigHandler.priestWeapons;
+            default -> List.of();
+        };
+    }
+
+    /** What a race may wear, or {@code null} when it may wear anything the API can name. */
+    static List<Material> allowedArmor(String race) {
+        return switch (race) {
+            case "vampire" -> SNConfigHandler.vampireArmor;
+            case "ghoul" -> SNConfigHandler.ghoulArmor;
+            case "werewolf" -> SNConfigHandler.wereArmor;
+            case "demon" -> SNConfigHandler.demonArmor;
+            case "priest" -> SNConfigHandler.priestArmor;
+            case "witchhunter" -> SNConfigHandler.hunterArmor;
+            default -> null;
+        };
     }
 
     /**
@@ -1214,6 +1501,12 @@ final class HallGuard implements Listener {
         if (!prey.containsKey(name)) {
             return;
         }
+        // Nothing he was carrying hits the floor. A stand-in killed while holding a pearl, a
+        // sword and a label drops all of it, and the next person through the room picks it up -
+        // which turns a demonstration into a loot run and puts items the hall did not hand out
+        // into a player's inventory.
+        event.getDrops().clear();
+        event.setDroppedExp(0);
         Location home = revives.get(name);
         if (home != null) {
             // One of the targets that is meant to be killed again. Nothing puts a player back on

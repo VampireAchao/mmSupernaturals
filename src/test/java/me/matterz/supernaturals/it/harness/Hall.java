@@ -216,7 +216,74 @@ public final class Hall {
         POWER_READ,
 
         /** Lets out one mob of the type named in the trigger, for a step that needs a monster. */
-        SPAWN_MOB
+        SPAWN_MOB,
+
+        // -- the room grid --------------------------------------------------
+
+        /**
+         * Walks the player one room on, along the order the rooms were laid out in.
+         *
+         * <p>Relative, not "room seven": rooms are edited and inserted, and a switch that names
+         * the room after it keeps working when the numbering changes.
+         */
+        ROOM_NEXT,
+
+        /** Walks the player one room back, the way {@link #ROOM_NEXT} walks them on. */
+        ROOM_PREV,
+
+        /**
+         * Puts the player in a named room of a named hall. The detail is {@code RACE:INDEX}.
+         *
+         * <p>Every hall's restore room is reachable from every other hall's, so a player who has
+         * been turned into something else can go to the room that un-turns it.
+         */
+        GO_ROOM,
+
+        /**
+         * Leaves the whole test: back to the lobby, restored to a human, props taken back. Every
+         * room has one, in the same corner, on the same block of red wool.
+         */
+        EXIT_ROOM,
+
+        /**
+         * Stands the player under one of the four roofs a sun step is about.
+         *
+         * <p>The detail is {@code open|glass|leaves|solid}. The plugin reads the sky light over
+         * the player's eyes, and which of these answers "in the sun" is exactly the thing that
+         * step exists to show - so the four of them are one click apart and each has the measured
+         * answer on its own board.
+         */
+        SUN_MAT,
+
+        // -- being changed by somebody else ---------------------------------
+
+        /**
+         * Sends a stand-in of the named race at the player to kill them.
+         *
+         * <p>The detail is {@code RACE[:MATERIAL]}. The material is not decoration: a race that
+         * cannot use a weapon deals no damage with one, so a stand-in whose race bans swords has
+         * to come empty-handed or its kill never lands and the rule it is demonstrating never
+         * fires. {@code HallGuard} checks the material against that race's own ban list.
+         */
+        NPC_KILL_ME,
+
+        /** Makes a stand-in of the named race cast one of its spells at the player. */
+        NPC_CAST_ME,
+
+        /** Hands the player the item a conversion needs them to be holding, then waits. */
+        ARM_ME,
+
+        /** Lets the vampire's infection altar, the enderborn's clay or the church do the work. */
+        SELF_CONVERT,
+
+        /**
+         * Gives a stand-in one race, to see what a rule answers for a race other than the
+         * player's - a ghoul cannot bind a human, and an angel is one.
+         */
+        SPAWN_ALIGN,
+
+        /** Drops the player down the tower a race is entered by, which has to kill them. */
+        DROP_TOWER
     }
 
     /** A switch and, when it belongs to one race, whose. */
@@ -246,11 +313,38 @@ public final class Hall {
     }
 
     /**
-     * A step: a title, the lines that teach it, how many slots of the corridor it takes, whether
-     * its ceiling is left open (the ghoul's rain step needs the sky), and what to build in it.
+     * A step of a race's flow, built into a room of its own.
+     *
+     * <p>{@code cells} is how many cells of the grid the step takes: one for everything, four for
+     * the steps that need a space no single room can hold. {@code headroom} overrides the hall's
+     * own height for the steps that need more of it than the rest - a fall that has to kill, a
+     * jump that has to clear seven blocks, a room with a dragon in it. Zero means "whatever the
+     * hall and the cell count say", which is what nearly every step wants.
      */
     private record Section(String title, List<String> lines, int slots, boolean openSky,
-            Station station) {
+            Station station, int cells, int headroom, boolean scene) {
+
+        Section(String title, List<String> lines, int slots, boolean openSky, Station station) {
+            this(title, lines, slots, openSky, station, 1, 0, false);
+        }
+
+        Section(String title, List<String> lines, int slots, boolean openSky, Station station,
+                int cells) {
+            this(title, lines, slots, openSky, station, cells, 0, false);
+        }
+
+        Section(String title, List<String> lines, int slots, boolean openSky, Station station,
+                int cells, int headroom) {
+            this(title, lines, slots, openSky, station, cells, headroom, false);
+        }
+
+        /**
+         * The same, saying that this step's rule reads the hour, the weather or the ground it was
+         * built on - so it owes the player a board saying which of those it is.
+         */
+        Section needsScene() {
+            return new Section(title, lines, slots, openSky, station, cells, headroom, true);
+        }
     }
 
     /** The colours one hall is built from, so each race reads as itself. */
@@ -321,9 +415,78 @@ public final class Hall {
     /** How often a ceiling light is set into the grid, in blocks. */
     private static final int LIGHT_SPACING = 3;
 
+    // -- the room grid ------------------------------------------------------
+    //
+    // A race hall is a grid of rooms, not a corridor. Every step is its own room with its own
+    // walls, its own door to the next one and its own way back to the last, so a step can be
+    // changed without anything else moving - and a room can be walked into, looked at and left
+    // without passing through the four steps on either side of it.
+
+    /** Half of a room's inner space: twenty-one blocks across, so nothing has to be squeezed. */
+    private static final int CHAMBER_HALF = 10;
+
+    /**
+     * Centre-to-centre distance between two neighbouring rooms.
+     *
+     * <p>Twenty-one of inner space plus a two-block shared wall. Two rooms that touch therefore
+     * merge into a 44-wide space with the wall between them taken out, which is what the
+     * vampire's truce room is: 21 + 2 + 21.
+     */
+    private static final int CHAMBER_PITCH = 23;
+
+    /** How wide the door cut through the wall between two neighbouring rooms is. */
+    private static final int DOOR_W = 2;
+
+    /** How many rooms a world holds before the row turns around and comes back. */
+    private static final int COLS = 4;
+
+    /** The four headroom tiers. See the plan's size table for where each number comes from. */
+    private static final int CHAMBER_HEAD = 7;
+    private static final int TALL_HEAD = 11;
+    private static final int MOB_HEAD = 18;
+    private static final int DROP_TOWER = 27;
+
+    /**
+     * Past this headroom the ceiling lights stop lighting the floor.
+     *
+     * <p>Light falls off a level a block, so a lamp seven blocks up leaves the floor at eight and
+     * a lamp eleven up leaves it at four. A room taller than twelve gets a hanging layer instead,
+     * at {@link #HANG_HEIGHT}, where it is five or six blocks off the floor and worth having.
+     */
+    private static final int HANG_ABOVE = 12;
+
+    /** How high a hanging light sits above the floor it is lighting. */
+    private static final int HANG_HEIGHT = 6;
+
+    /** How often a hanging light is set into the grid, in blocks. */
+    private static final int HANG_SPACING = 6;
+
+    /** Where a room's switches and the boards over them hang, relative to the floor. */
+    private static final int SWITCH_Y = 2;
+    private static final int BOARD_Y = 3;
+
+    /** Where a tall room's second band of wall lights goes. */
+    private static final int HIGH_BAND_Y = 12;
+
+    /**
+     * How bright a board or a switch has to be to be read.
+     *
+     * <p>A player standing anywhere in a room has to be able to read every board and see every
+     * switch without carrying a torch: this is the rule that keeps a room from being lit well
+     * enough to look at and not well enough to use.
+     */
+    private static final int LIGHT_MIN = 10;
+
+    /** Boards one step's own teaching may use on its wall, and one scene board's may use. */
+    private static final int TEACH_BOARDS = 17;
+    private static final int SCENE_BOARDS = 4;
+
     private static final Material AIR = Material.AIR;
     private static final Material STELE = Material.CHISELED_STONE_BRICKS;
     private static final Material PAD_TRIM = Material.POLISHED_BLACKSTONE_BRICKS;
+
+    /** The one colour that means "out". Everything else is plain, so this reads instantly. */
+    private static final Material EXIT_WOOL = Material.RED_WOOL;
 
     /**
      * Monsters that cannot be summoned into a hall at all.
@@ -414,9 +577,40 @@ public final class Hall {
      */
     private int boardsDropped;
     private int signCollisions;
+
+    /**
+     * Where boards were dropped, so a report can name the room rather than the total.
+     *
+     * <p>A dropped board is text nobody will ever read, and the total on its own says only that
+     * something, somewhere, ran out of wall. The room is what is actionable.
+     */
+    private final List<String> droppedBoards = new ArrayList<>();
+
+    /** The room being built right now, so a board written from inside a station can be filed. */
+    private String currentRoom;
+
+    /** Rooms that wrote the board about their own hour, weather or ground - and those that owe one. */
+    private final Set<String> scenesWritten = new HashSet<>();
+    private final List<String> scenesMissing = new ArrayList<>();
+
+    /** Rooms that got the way out, and the ones that were supposed to. */
+    private final Set<String> roomsWithExit = new HashSet<>();
+    private int roomsBuilt;
+
+    /** How tall each room was built, so a report can say what is actually there. */
+    private final Map<String, Integer> roomHeads = new LinkedHashMap<>();
     private final Map<Location, Map<Integer, ItemStack>> chests = new LinkedHashMap<>();
     private final Map<String, Location> points = new LinkedHashMap<>();
     private final Map<String, Box> zones = new LinkedHashMap<>();
+
+    /**
+     * Where each race's rooms stand, in the order a player walks them.
+     *
+     * <p>The grid knows where every room is; this is the list, so "the next room" is a step along
+     * the order the steps were written in rather than a guess from coordinates - which is what
+     * makes inserting a room somewhere in the middle work without renumbering anything.
+     */
+    private final Map<String, List<Location>> roomSpawns = new LinkedHashMap<>();
     private final Map<String, Location> sparMarks = new LinkedHashMap<>();
     private final List<Box> boxes = new ArrayList<>();
 
@@ -515,47 +709,406 @@ public final class Hall {
     }
 
     /**
-     * One race's hall: a corridor of sections in a row, with an entry station at the near end.
-     * The stand-in and the power switch are appended to every hall's list of sections, so they are
-     * part of the row rather than bolted onto the end of the room.
+     * One race's hall: a grid of rooms, one step each, in a world of that race's own.
+     *
+     * <p>Rooms, not a corridor. A corridor made every step depend on the ones around it - the
+     * walls, the light and the roof were one long build, so adding a step meant re-flowing the
+     * whole hall, and a player who wanted step eleven walked past ten steps of text to reach it.
+     * A room is self-contained: its own shell, its own light, its own door to each neighbour,
+     * its own way back and its own way out. Steps can be inserted, reordered or rewritten one at
+     * a time, and the grid can grow a row without anything moving.
+     *
+     * <p>The layout is serpentine: a row runs left to right, the next runs right to left, so the
+     * room after the last of a row is directly below the last one - the walk never doubles back
+     * down a corridor. A step that needs more room than a room has (the vampire's truce step
+     * lines up forty-one monsters) takes a two-by-two block of the grid instead and is built as
+     * one space with the walls between those four cells taken out.
      */
     private void raceHall(String race, int[] cell) {
-        World target = OWN_WORLD.contains(race) ? clockWorld(world, race) : world;
-        int centreX = world.getSpawnLocation().getBlockX() + (cell[0] - 1) * CELL;
-        int centreZ = world.getSpawnLocation().getBlockZ() + (cell[1] - 1) * CELL;
+        World target = clockWorld(world, race);
+        Theme theme = THEMES.get(race);
+        int spawnX = world.getSpawnLocation().getBlockX();
+        int spawnZ = world.getSpawnLocation().getBlockZ();
+        int centreX = spawnX + (cell[0] - 1) * CELL;
+        int centreZ = spawnZ + (cell[1] - 1) * CELL;
         int y = oy;
-        int x0 = centreX - 40;
-        int z0 = centreZ - DEPTH / 2;
-        int headroom = cell[2];
+        int baseHead = cell[2];
 
-        List<Section> sections = sectionsFor(race, headroom);
-        int length = 0;
-        for (Section section : sections) {
-            length += section.slots() * SLOT;
+        List<Section> sections = new ArrayList<>();
+        sections.add(entrySection(race));
+        sections.addAll(sectionsFor(race, baseHead));
+        List<Placement> plan = layOut(sections);
+
+        int rows = 0;
+        for (Placement placement : plan) {
+            rows = Math.max(rows, placement.row() + (placement.span() > 1 ? 2 : 1));
         }
-        room(target, x0, y, z0, length, DEPTH, headroom, THEMES.get(race));
-        int x = x0;
-        int index = 0;
-        for (Section section : sections) {
-            int width = section.slots() * SLOT;
-            if (section.openSky()) {
-                // An open section is the point of the ghoul's rain step: a roof, even a glass
-                // one, counts as cover to anybody the plugin asks.
-                box(target, AIR, x, y + headroom + 1, z0, x + width - 1, y + headroom + 1,
-                        z0 + DEPTH - 1);
+        int gridX = centreX - COLS * CHAMBER_PITCH / 2;
+        int gridZ = centreZ - rows * CHAMBER_PITCH / 2;
+
+        // Where each room actually stands, so doors and neighbours can be worked out from the
+        // plan rather than from a guess about which step follows which.
+        Map<Long, Integer> cellOwner = new LinkedHashMap<>();
+        List<int[]> origins = new ArrayList<>();
+        for (int index = 0; index < plan.size(); index++) {
+            Placement placement = plan.get(index);
+            int side = placement.span() > 1 ? CHAMBER_HALF * 4 + 2 * 2 + 4 : CHAMBER_HALF * 2 + 1;
+            int originX = gridX + placement.col() * CHAMBER_PITCH;
+            int originZ = gridZ + placement.row() * CHAMBER_PITCH;
+            origins.add(new int[] {originX, originZ, side});
+            for (int dc = 0; dc < placement.span(); dc++) {
+                for (int dr = 0; dr < placement.span(); dr++) {
+                    cellOwner.put(cellKey(placement.col() + dc, placement.row() + dr), index);
+                }
             }
-            sectionHead(target, y, x, z0, section.title(), section.lines(), width);
-            section.station().build(target, y, x, z0, width);
-            points.put("sec." + race + "." + index, new Location(target, x, y, z0));
-            index++;
-            x += width;
         }
 
-        entryStation(target, race, x0, y, z0);
-        zones.put("hall." + race, new Box(target.getName(), x0 - 1, y - 1, z0 - 1,
-                x0 + length, y + headroom + 1, z0 + DEPTH));
+        // Phase one: the shells, so that a door cut between two of them has a wall to cut.
+        for (int index = 0; index < plan.size(); index++) {
+            int[] at = origins.get(index);
+            Section section = sections.get(index);
+            int head = headroomFor(section, baseHead);
+            chamber(target, at[0], y, at[1], at[2], head, theme);
+            points.put("room." + race + "." + index, landing(target, at[0], y, at[1], at[2]));
+        }
+        for (Long key : cellOwner.keySet()) {
+            int col = (int) (key >> 32);
+            int row = (int) (key & 0xffffffffL);
+            cutSharedDoors(target, y, origins, cellOwner, col, row);
+        }
+
+        // Phase two: what each room is for.
+        for (int index = 0; index < plan.size(); index++) {
+            int[] at = origins.get(index);
+            int x = at[0];
+            int z = at[1];
+            int side = at[2];
+            Section section = sections.get(index);
+            int head = headroomFor(section, baseHead);
+            if (section.openSky()) {
+                // An open room is the point of the weather steps: a roof, even a glass one, is
+                // cover to anybody the plugin asks, and the void never rains at all.
+                box(target, AIR, x, y + head + 1, z, x + side - 1, y + head + 1, z + side - 1);
+            }
+            String key = race + "." + index;
+            currentRoom = key;
+            sectionHead(target, y, x, z, section.title(), section.lines(), TEACH_BOARDS);
+            roomFurniture(target, race, index, y, x, z, side);
+            section.station().build(target, y, x, z, side);
+            roomsBuilt++;
+            roomHeads.put(key, head);
+            if (section.scene() && !scenesWritten.contains(key)) {
+                scenesMissing.add(key);
+            }
+            currentRoom = null;
+            points.put("sec." + race + "." + index, new Location(target, x, y, z));
+            zones.put("room." + race + "." + index, new Box(target.getName(), x - 1, y - 1, z - 1,
+                    x + side, y + head + 1, z + side));
+        }
+
+        zones.put("hall." + race, new Box(target.getName(), gridX - 1, y - 1, gridZ - 1,
+                gridX + COLS * CHAMBER_PITCH, y + MOB_HEAD + 1, gridZ + rows * CHAMBER_PITCH));
+        roomSpawns.put(race, origins.stream()
+                .map(at -> landing(target, at[0], y, at[1], at[2]))
+                .toList());
         points.put("spawn." + race,
-                new Location(target, x0 + 2.5, y + 1, z0 + DEPTH / 2.0 + 0.5));
+                new Location(target, origins.get(0)[0] + 2.5, y + 1, origins.get(0)[1] + 2.5));
+    }
+
+    /**
+     * Where a player arriving in a room is put: in front of the near wall, in the open.
+     *
+     * <p>Standing room is not guaranteed by the coordinates. A step is free to build anything it
+     * likes in its own room - an altar, a pool, a plinth - and did: four rooms had something solid
+     * where the player was supposed to be put down, so arriving there meant being pushed out of a
+     * block by the server, and the light reading for the spot was nothing at all, because light
+     * does not go into a solid block. The spot is therefore searched for rather than assumed: the
+     * middle of the near wall first, then outwards along it, then a row further in.
+     */
+    private static Location landing(World target, int x, int y, int z, int side) {
+        int middle = x + side / 2;
+        for (int row = 2; row < side - 2; row += 2) {
+            for (int step = 0; step < side - 2; step++) {
+                for (int direction : new int[] {1, -1}) {
+                    int at = middle + step * direction;
+                    if (at <= x || at >= x + side - 1) {
+                        continue;
+                    }
+                    if (target.getBlockAt(at, y + 1, z + row).isPassable()
+                            && target.getBlockAt(at, y + 2, z + row).isPassable()
+                            && !target.getBlockAt(at, y, z + row).isPassable()) {
+                        return new Location(target, at + 0.5, y + 1, z + row + 0.5);
+                    }
+                }
+            }
+        }
+        return new Location(target, middle + 0.5, y + 1, z + 2.5);
+    }
+
+    /** One entry of the room plan: which cell of the grid, and how many cells it takes. */
+    private record Placement(int col, int row, int span) {
+    }
+
+    /**
+     * Lays the steps out on the grid, serpentine, and works out which of them take four cells.
+     *
+     * <p>A step that says it needs four cells gets a free two-by-two block; everything else takes
+     * the next free cell. The walk still runs in the order the steps were listed, so the room
+     * after a big one is the next room along.
+     */
+    private static List<Placement> layOut(List<Section> sections) {
+        Set<Long> used = new HashSet<>();
+        List<Placement> out = new ArrayList<>();
+        int cursor = 0;
+        for (Section section : sections) {
+            int span = section.cells() >= 4 ? 2 : 1;
+            while (true) {
+                int row = cursor / COLS;
+                int col = (row % 2 == 0) ? cursor % COLS : COLS - 1 - (cursor % COLS);
+                if (span == 1) {
+                    if (used.add(cellKey(col, row))) {
+                        out.add(new Placement(col, row, 1));
+                        cursor++;
+                        break;
+                    }
+                } else if (col + 1 < COLS && free(used, col, row) && free(used, col + 1, row)
+                        && free(used, col, row + 1) && free(used, col + 1, row + 1)) {
+                    for (int dc = 0; dc <= 1; dc++) {
+                        for (int dr = 0; dr <= 1; dr++) {
+                            used.add(cellKey(col + dc, row + dr));
+                        }
+                    }
+                    out.add(new Placement(col, row, 2));
+                    cursor += 2;
+                    break;
+                }
+                cursor++;
+            }
+        }
+        return out;
+    }
+
+    private static boolean free(Set<Long> used, int col, int row) {
+        return !used.contains(cellKey(col, row));
+    }
+
+    private static long cellKey(int col, int row) {
+        return ((long) col << 32) | (row & 0xffffffffL);
+    }
+
+    /**
+     * Cuts the two-block door through the wall two neighbouring cells share.
+     *
+     * <p>Only where the two cells belong to different steps. Two cells of the same step are the
+     * same room, and the wall between them comes out with the roof: that is what makes a
+     * two-by-two step one space instead of four.
+     */
+    private void cutSharedDoors(World target, int y, List<int[]> origins, Map<Long, Integer> owner,
+            int col, int row) {
+        int here = owner.get(cellKey(col, row));
+        for (int[] step : new int[][] {{1, 0}, {0, 1}}) {
+            Integer there = owner.get(cellKey(col + step[0], row + step[1]));
+            if (there == null || there == here) {
+                continue;
+            }
+            int[] a = origins.get(here);
+            int[] b = origins.get(there);
+            if (step[0] == 1) {
+                int fromX = a[0] + a[2];
+                int toX = b[0] - 1;
+                int atZ = Math.max(a[1], b[1]) + 3;
+                for (int x = fromX; x <= toX; x++) {
+                    box(target, AIR, x, y + 1, atZ, x, y + 3, atZ + DOOR_W - 1);
+                }
+                doorFrame(target, fromX, toX, atZ, y, true);
+            } else {
+                int fromZ = a[1] + a[2];
+                int toZ = b[1] - 1;
+                int atX = Math.max(a[0], b[0]) + 3;
+                for (int z = fromZ; z <= toZ; z++) {
+                    box(target, AIR, atX, y + 1, z, atX + DOOR_W - 1, y + 3, z);
+                }
+                doorFrame(target, fromZ, toZ, atX, y, false);
+            }
+        }
+    }
+
+    /** A plain surround so the door mouth reads as a doorway rather than as a hole. */
+    private void doorFrame(World target, int from, int to, int other, int y, boolean alongX) {
+        for (int i = from; i <= to; i++) {
+            for (int dy = 1; dy <= 3; dy++) {
+                if (alongX) {
+                    set(target, Material.POLISHED_BLACKSTONE_BRICKS, i, y + dy, other - 1);
+                    set(target, Material.POLISHED_BLACKSTONE_BRICKS, i, y + dy, other + DOOR_W);
+                } else {
+                    set(target, Material.POLISHED_BLACKSTONE_BRICKS, other - 1, y + dy, i);
+                    set(target, Material.POLISHED_BLACKSTONE_BRICKS, other + DOOR_W, y + dy, i);
+                }
+            }
+        }
+    }
+
+    private int headroomFor(Section section, int baseHead) {
+        if (section.headroom() > 0) {
+            return section.headroom();
+        }
+        if (section.cells() >= 4) {
+            return MOB_HEAD;
+        }
+        return Math.min(baseHead, CHAMBER_HEAD);
+    }
+
+    /**
+     * A room: a shell, a floor, and light that actually reaches the floor.
+     *
+     * <p>The light is the part that is easy to get wrong. A lamp in the ceiling of a seven-high
+     * room leaves the floor at eight; the same lamp in an eighteen-high room leaves it at
+     * nothing at all - light falls off a level a block and a lamp is worth fifteen. So the height
+     * decides the layout: low rooms are lit from above, tall ones are lit from inside by a band
+     * of lamps in the walls, and anything past twelve gets a hanging layer as well, hung on
+     * chains where a player can see what is lighting the room.
+     */
+    private void chamber(World target, int x, int y, int z, int side, int headroom, Theme theme) {
+        int top = y + headroom;
+        int farX = x + side - 1;
+        int farZ = z + side - 1;
+
+        box(target, theme.wall(), x - 1, y - 1, z - 1, farX + 1, top + 1, farZ + 1);
+        box(target, AIR, x, y + 1, z, farX, top, farZ);
+        box(target, theme.trim(), x, y, z, farX, y, farZ);
+        box(target, theme.floor(), x + 1, y, z + 1, farX - 1, y, farZ - 1);
+        edge(target, x, y, z, side, side, theme.skirting());
+        edge(target, x, y + 1, z, side, side, theme.skirting());
+        edge(target, x, top, z, side, side, theme.window());
+
+        if (headroom <= HANG_ABOVE) {
+            box(target, theme.wall(), x, top + 1, z, farX, top + 1, farZ);
+            for (int dx = 1; dx < side; dx += LIGHT_SPACING) {
+                for (int dz = 1; dz < side; dz += LIGHT_SPACING) {
+                    set(target, theme.light(), x + dx, top + 1, z + dz);
+                }
+            }
+        } else {
+            box(target, theme.wall(), x, top + 1, z, farX, top + 1, farZ);
+        }
+
+        // In every room, at the height the boards hang. A ceiling lamp is a room's general
+        // light and this is its reading light: a board two blocks from the nearest lamp in its
+        // own row reads twelve, and a board lit only from eight blocks overhead reads six - the
+        // same wall, one readable and one not. Every switch stands in this band, so every switch
+        // has a lamp beside it wherever in the room it was put.
+        for (int dx = 1; dx < side; dx += 2) {
+            set(target, theme.light(), x + dx, y + 3, z - 1);
+            set(target, theme.light(), x + dx, y + 3, farZ + 1);
+        }
+        for (int dz = 1; dz < side; dz += 2) {
+            set(target, theme.light(), x - 1, y + 3, z + dz);
+            set(target, theme.light(), farX + 1, y + 3, z + dz);
+        }
+
+        if (headroom > HANG_ABOVE) {
+            int middleX = x + side / 2;
+            int middleZ = z + side / 2;
+            for (int dx = 2; dx < side - 1; dx += HANG_SPACING) {
+                for (int dz = 2; dz < side - 1; dz += HANG_SPACING) {
+                    int lx = x + dx;
+                    int lz = z + dz;
+                    // Keep the middle clear: what stands there is either a dragon hovering over
+                    // the player's head or the shaft of a fall that has to kill.
+                    if (Math.abs(lx - middleX) <= 4 && Math.abs(lz - middleZ) <= 4) {
+                        continue;
+                    }
+                    set(target, theme.light(), lx, y + HANG_HEIGHT, lz);
+                    for (int cy = y + HANG_HEIGHT + 1; cy < top + 1; cy++) {
+                        set(target, Material.IRON_CHAIN, lx, cy, lz);
+                    }
+                }
+            }
+        }
+
+        if (headroom > 20) {
+            for (int dx = 1; dx < side; dx += 4) {
+                set(target, theme.light(), x + dx, y + HIGH_BAND_Y, z - 1);
+                set(target, theme.light(), x + dx, y + HIGH_BAND_Y, farZ + 1);
+            }
+            for (int dz = 1; dz < side; dz += 4) {
+                set(target, theme.light(), x - 1, y + HIGH_BAND_Y, z + dz);
+                set(target, theme.light(), farX + 1, y + HIGH_BAND_Y, z + dz);
+            }
+        }
+
+        boxes.add(new Box(target.getName(), x - 1, y - 1, z - 1, farX + 1, top + 1, farZ + 1));
+    }
+
+    /**
+     * Furniture every room has, in the same place in every room.
+     *
+     * <p>The way out is a block of red wool set into the west wall with a button on it, and a
+     * two-line board over it. Red is the only thing in the building that is allowed to be a
+     * colour of its own, so a player who has had enough of one step never has to read anything
+     * to leave: the red block is the way out, wherever they are. The two navigation switches
+     * hang on the east wall, which is otherwise empty.
+     */
+    private void roomFurniture(World target, String race, int index, int y, int x, int z, int side) {
+        // Everything hangs one block inside the wall, not in it. A wall sign is held up by the
+        // block behind it, so a sign placed in the wall's own layer has nothing to hold it - and
+        // the repair loop then looks at it, finds it wrong, rebuilds it, and finds it wrong
+        // again, once every two seconds, for ever. The wall's inner face is the outer column of
+        // the room, which is where these go.
+        if (currentRoom != null) {
+            roomsWithExit.add(currentRoom);
+        }
+        set(target, EXIT_WOOL, x - 1, y + SWITCH_Y, z + 1);
+        button(target, x, y + SWITCH_Y, z + 1, BlockFace.EAST, Trigger.of(Kind.EXIT_ROOM));
+        sign(target, x, y + BOARD_Y, z + 1, BlockFace.EAST,
+                "§c退出到初始大厅", "§7并恢复人类身份");
+
+        button(target, x + side - 1, y + SWITCH_Y, z + 4, BlockFace.WEST,
+                Trigger.of(Kind.ROOM_PREV, race));
+        sign(target, x + side - 1, y + BOARD_Y, z + 4, BlockFace.WEST,
+                "§f上一间", "§7往回走一间");
+        button(target, x + side - 1, y + SWITCH_Y, z + 7, BlockFace.WEST,
+                Trigger.of(Kind.ROOM_NEXT, race));
+        sign(target, x + side - 1, y + BOARD_Y, z + 7, BlockFace.WEST,
+                "§f下一间", "§7往前走一间");
+
+        if (index == 0) {
+            // The first room has nowhere to go back to; the switch says so rather than doing
+            // nothing, which is the difference between "no previous room" and "broken switch".
+            sign(target, x + side - 1, y + BOARD_Y, z + 1, BlockFace.WEST, "§7这是第一间");
+        }
+    }
+
+    /**
+     * A room's own board about the state of the world it sits in: the hour, the weather, the
+     * ground it was built on, and what is over the player's head.
+     *
+     * <p>These are the rules a player cannot see. A health bar that stops rising, a vampire who
+     * catches fire at noon, a conversion that only works in the nether - in every one of those the
+     * cause is somewhere a player is not looking, so it gets a board of its own rather than a
+     * clause in the middle of a paragraph about something else. It hangs on the wall opposite the
+     * teaching boards, which is otherwise empty, so it never has to fight one for room.
+     *
+     * <p>Written as four parts, and a part may be more than one line: what the room is, why it
+     * matters, which switch changes it, and that the change is local to this hall's own world.
+     */
+    private void sceneBoard(World target, int y, int x, int z, int side, String... parts) {
+        if (currentRoom != null) {
+            scenesWritten.add(currentRoom);
+        }
+        List<String> wrapped = wrapAll(parts);
+        int board = 0;
+        for (int i = 0; i < wrapped.size() && board < SCENE_BOARDS; i += LINES_PER_BOARD) {
+            List<String> page = wrapped.subList(i, Math.min(i + LINES_PER_BOARD, wrapped.size()));
+            sign(target, x + 2 + board, y + BOARD_Y, z + side - 1, BlockFace.NORTH,
+                    page.toArray(new String[0]));
+            board++;
+        }
+        if (wrapped.size() > SCENE_BOARDS * LINES_PER_BOARD) {
+            boardsDropped++;
+            droppedBoards.add(target.getName() + " " + x + "," + (y + BOARD_Y) + "," + (z + side - 1)
+                    + " allowed=" + SCENE_BOARDS + " scene-board text=" + wrapped.get(0));
+        }
     }
 
     /** The demon's conversion hall stays where the plugin wants it: in the nether. */
@@ -617,7 +1170,11 @@ public final class Hall {
         switchpoint(nether, y, x0 + 4 * SLOT + 2, z0 + 3, Trigger.of(Kind.RETURN_OVERWORLD,
                 "demon"),
                 "§a回到主世界大厅", "§7恶魔大厅在另一头");
-        entryStation(nether, "demon_nether", x0, y, z0);
+        wallSign(nether, y, x0, z0, "§f入口 · 退出", "§7随时可以停下");
+        switchpoint(nether, y, x0 + 1, z0 + 3, Trigger.of(Kind.EXIT_TEST, "demon_nether"),
+                "§a退出测试", "§7清道具 · 恢复人类 · 回大厅");
+        switchpoint(nether, y, x0 + 3, z0 + 3, Trigger.of(Kind.RESET_HUMAN, "demon_nether"),
+                "§a恢复人类", "§7留在这里，只改种族");
         points.put("sec.demon_nether.0", new Location(nether, x0, y, z0));
         points.put("sec.demon_nether.1", new Location(nether, x0 + SLOT, y, z0));
         points.put("sec.demon_nether.2", new Location(nether, x0 + 5 * SLOT, y, z0));
@@ -658,7 +1215,11 @@ public final class Hall {
                 "§2放出一只僵尸猪人", "§7它杀死你就会转化");
         switchpoint(nether, y, x0 + 5, z0 + 3, Trigger.of(Kind.RETURN_OVERWORLD, "ghoul"),
                 "§a回到主世界大厅", "§7食尸鬼长廊在另一头");
-        entryStation(nether, "ghoul_nether", x0, y, z0);
+        wallSign(nether, y, x0, z0, "§f入口 · 退出", "§7随时可以停下");
+        switchpoint(nether, y, x0 + 1, z0 + 3, Trigger.of(Kind.EXIT_TEST, "ghoul_nether"),
+                "§a退出测试", "§7清道具 · 恢复人类 · 回大厅");
+        switchpoint(nether, y, x0 + 3, z0 + 3, Trigger.of(Kind.RESET_HUMAN, "ghoul_nether"),
+                "§a恢复人类", "§7留在这里，只改种族");
         points.put("sec.ghoul_nether.0", new Location(nether, x0, y, z0));
         points.put("spawn.ghoul_nether",
                 new Location(nether, x0 + 1.5, y + 1, z0 + DEPTH / 2.0 + 0.5));
@@ -684,14 +1245,6 @@ public final class Hall {
      * three or four boards, so the entry board was sitting on top of the last of them and eating
      * whatever was written there.
      */
-    private void entryStation(World target, String race, int x0, int y, int z0) {
-        wallSign(target, y, x0, z0, "§f入口 · 退出", "§7随时可以停下", "§7按钮就在对面墙上");
-        switchpoint(target, y, x0 + 1, z0 + 3, Trigger.of(Kind.EXIT_TEST, race),
-                "§a退出测试", "§7清道具 · 恢复人类 · 回大厅");
-        switchpoint(target, y, x0 + 3, z0 + 3, Trigger.of(Kind.RESET_HUMAN, race),
-                "§a恢复人类", "§7留在这里，只改种族");
-    }
-
     /**
      * The two steps every race has: a stand-in to hit, and a switch that hands out power.
      *
@@ -701,6 +1254,29 @@ public final class Hall {
      * Kind#SPAR} calls out the hall's real stand-in player instead: he is a player, he is human,
      * he loses health when he is hit, and the button puts him back to full.
      */
+    /**
+     * The room every hall opens with: what this hall is, and the way out of it.
+     *
+     * <p>This used to be furniture bolted onto the corridor after the fact, at the near end, which
+     * is why it once wrote over the first step's signs. It is a room like every other room now,
+     * which is what makes it impossible for it to land on top of anything.
+     */
+    private Section entrySection(String race) {
+        return section("§f入口 · 这一段是什么", 1, (w, y, x, z, width) -> {
+            chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                    new ItemStack(Material.BREAD, 8)));
+            switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.POWER, race),
+                    "§b能量 +1000", "§7点一下加一千");
+            switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.RETURN_START, race),
+                    "§f回到开头", "§7回到本厅第一间");
+        }, "这是" + title(race) + "的测试大厅",
+                "一间房一个环节，墙上写着这一环要讲的东西。屋子可以随便走，门开在相邻两间共用的墙上；"
+                        + "走错了就按「上一间 / 下一间」。每间房同一个角上都有一格红色羊毛——那是出口，"
+                        + "按下就回大厅并恢复人类，随时可以用",
+                "入口这一间没有规则要测，它只是把路指清楚",
+                "先看一圈，然后沿着墙上的门往下走");
+    }
+
     private Section sparSection(String race) {
         return section("§f陪练 伤害测试", 1, (w, y, x, z, width) -> {
             sparMark(w, race, x + SLOT / 2 + 4, y, z + DEPTH / 2);
@@ -1981,6 +2557,40 @@ public final class Hall {
         return zones.get(key);
     }
 
+    /** How many rooms a race's hall has. */
+    public int roomCount(String race) {
+        List<Location> rooms = roomSpawns.get(race);
+        return rooms == null ? 0 : rooms.size();
+    }
+
+    /** Where one room of one hall starts, or {@code null} if there is no such room. */
+    public Location roomSpawn(String race, int index) {
+        List<Location> rooms = roomSpawns.get(race);
+        if (rooms == null || index < 0 || index >= rooms.size()) {
+            return null;
+        }
+        return rooms.get(index);
+    }
+
+    /**
+     * Which room of a race's hall a player is standing in, or {@code -1}.
+     *
+     * <p>"The next room" is a step along the order the steps were written in, and that order is
+     * not the same as the order the rooms sit in - a serpentine row runs one way and the next row
+     * runs back. So the switch asks where the player is and walks the list, rather than adding one
+     * to a coordinate and hoping.
+     */
+    public int roomIndexAt(String race, Location at) {
+        int count = roomCount(race);
+        for (int index = 0; index < count; index++) {
+            Box box = zones.get("room." + race + "." + index);
+            if (box != null && box.holds(at)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
     /**
      * Where each section wants the stand-in to stand, by key.
      *
@@ -2100,8 +2710,23 @@ public final class Hall {
         for (Map.Entry<Location, Fixture> entry : fixtures.entrySet()) {
             Block block = entry.getKey().getBlock();
             if (!asBuilt(block, entry.getValue())) {
-                wrong.add(block.getX() + "," + block.getY() + "," + block.getZ()
-                        + " wanted=" + entry.getValue().type() + " got=" + block.getType());
+                String detail = "";
+                if (entry.getValue().lines() != null && block.getState() instanceof Sign sign) {
+                    for (int line = 0; line < 4; line++) {
+                        String want = line < entry.getValue().lines().size()
+                                ? entry.getValue().lines().get(line) : "";
+                        if (!want.equals(sign.getLine(line))) {
+                            detail = " line" + line + " wanted=[" + want + "] got=["
+                                    + sign.getLine(line) + "]";
+                            break;
+                        }
+                    }
+                }
+                wrong.add(block.getWorld().getName() + " " + block.getX() + "," + block.getY() + ","
+                        + block.getZ() + " wanted=" + entry.getValue().type() + " facing="
+                        + entry.getValue().facing() + " got=" + block.getType() + " facing="
+                        + (block.getBlockData() instanceof Directional directional
+                                ? directional.getFacing() : "-") + detail);
             }
         }
         return wrong;
@@ -2241,12 +2866,16 @@ public final class Hall {
         // exactly what the angel's hall was, and the vampire's was not much better. Rooms with
         // headroom to spare get their lamps set into the walls instead, at a height that reaches
         // the floor: same material, same grid, just somewhere useful.
+        // Every two blocks, not every four. Light falls off a level a block, so a switch two
+        // blocks from the nearest lamp reads twelve and one four away reads eight - and eight is
+        // a board nobody can read. The two halls that still use this builder are the nether's,
+        // where the rooms are corridors and the boards sit right under this band.
         if (headroom > 8) {
-            for (int dx = 1; dx < length; dx += 4) {
+            for (int dx = 1; dx < length; dx += 2) {
                 set(target, theme.light(), x + dx, y + 3, z - 1);
                 set(target, theme.light(), x + dx, y + 3, farZ + 1);
             }
-            for (int dz = 1; dz < depth; dz += 4) {
+            for (int dz = 1; dz < depth; dz += 2) {
                 set(target, theme.light(), x - 1, y + 3, z + dz);
                 set(target, theme.light(), farX + 1, y + 3, z + dz);
             }
@@ -2334,6 +2963,8 @@ public final class Hall {
             int maxBoards, int board, List<String> lines) {
         if (board >= maxBoards) {
             boardsDropped++;
+            droppedBoards.add(target.getName() + " " + (supportX + board) + "," + supportY + ","
+                    + supportZ + " allowed=" + maxBoards + " text=" + lines.get(0));
             return;
         }
         signOn(target, supportX + board, supportY, supportZ, side,
@@ -2343,6 +2974,136 @@ public final class Hall {
     /** Boards a section had nowhere left to write. Zero means every word fitted. */
     public int boardsDropped() {
         return boardsDropped;
+    }
+
+    /**
+     * A light reading for everything a player has to read or press, and for the middle of every
+     * room.
+     *
+     * <p>Two different questions with two different answers. A board or a switch is read from
+     * arm's length, so it is the one thing that has to be bright: mounting a lamp directly over
+     * every switch is what makes that true by construction. The floor and the middle of a room are
+     * looked at from across the room, and only have to be bright enough to walk and fight in.
+     * Reporting them together, with the ones that fail named, is what turns "it feels dark in
+     * here" into a room number.
+     */
+    public List<String> lightReport() {
+        List<String> out = new ArrayList<>();
+        int worstSign = 15;
+        int worstButton = 15;
+        int worstFloor = 15;
+        for (Map.Entry<Location, Fixture> entry : fixtures.entrySet()) {
+            Fixture fixture = entry.getValue();
+            Block block = entry.getKey().getBlock();
+            if (!block.getWorld().isChunkLoaded(block.getX() >> 4, block.getZ() >> 4)) {
+                continue;
+            }
+            int level = block.getLightFromBlocks();
+            if (fixture.type() == Material.OAK_WALL_SIGN) {
+                worstSign = Math.min(worstSign, level);
+                if (level < LIGHT_MIN) {
+                    out.add("sign " + place(block) + " light=" + level + " text=" + entry.getValue()
+                            .lines().get(0));
+                }
+            } else if (fixture.trigger() != null) {
+                worstButton = Math.min(worstButton, level);
+                if (level < LIGHT_MIN) {
+                    out.add("button " + place(block) + " light=" + level + " kind="
+                            + fixture.trigger().kind());
+                }
+            }
+        }
+        for (Map.Entry<String, List<Location>> race : roomSpawns.entrySet()) {
+            for (int index = 0; index < race.getValue().size(); index++) {
+                String key = race.getKey() + "." + index;
+                Box box = zones.get("room." + key);
+                if (box == null) {
+                    continue;
+                }
+                World target = Bukkit.getWorld(box.world());
+                if (target == null) {
+                    continue;
+                }
+                // Not the geometric centre: half the rooms have something standing in the
+                // middle of them, and what matters is the spot a player arrives on.
+                Location landing = race.getValue().get(index);
+                int middleX = landing.getBlockX();
+                int middleZ = landing.getBlockZ();
+                // The middle of a room is often occupied - an altar, a pool, a plinth - and an
+                // opaque block reports no light at all because light does not pass into it. What
+                // is being asked is whether a player can see where they are going, so the reading
+                // is taken at the first block above the floor that somebody could stand in.
+                int level = 0;
+                for (int dy = 2; dy <= 6; dy++) {
+                    Block at = target.getBlockAt(middleX, box.y1() + dy, middleZ);
+                    if (at.isPassable()) {
+                        level = at.getLightFromBlocks();
+                        break;
+                    }
+                }
+                worstFloor = Math.min(worstFloor, level);
+                if (level < 4) {
+                    out.add("floor " + key + " light=" + level + " at " + middleX + ","
+                            + (box.y1() + 2) + "," + middleZ);
+                }
+            }
+        }
+        out.add(0, "boards_min=" + worstSign + " buttons_min=" + worstButton
+                + " floor_min=" + worstFloor);
+        return out;
+    }
+
+    /** Where every room is and how tall it is, so a report can be checked against a tape measure. */
+    public List<String> heightReport() {
+        List<String> out = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : roomHeads.entrySet()) {
+            out.add(entry.getKey() + " headroom=" + entry.getValue());
+        }
+        return out;
+    }
+
+    /** The races whose halls exist, in the order they were built. */
+    public List<String> races() {
+        return List.copyOf(roomSpawns.keySet());
+    }
+
+    private static String place(Block block) {
+        return block.getWorld().getName() + " " + block.getX() + "," + block.getY() + ","
+                + block.getZ();
+    }
+
+    /** How many rooms the halls are made of. */
+    public int roomTotal() {
+        return roomsBuilt;
+    }
+
+    /**
+     * Rooms that owe a board about their own hour, weather or ground and did not write one.
+     *
+     * <p>These are the rules a player cannot see: the cause is in the sky, the clock or a biome
+     * they have no way of looking at. A room like that with no board is not under-decorated, it is
+     * unanswerable.
+     */
+    public List<String> scenesMissing() {
+        return List.copyOf(scenesMissing);
+    }
+
+    /** Rooms with no way out, which should never be anything - the check exists to keep it so. */
+    public List<String> exitsMissing() {
+        List<String> missing = new ArrayList<>();
+        for (String key : roomSpawns.keySet()) {
+            for (int index = 0; index < roomCount(key); index++) {
+                if (!roomsWithExit.contains(key + "." + index)) {
+                    missing.add(key + "." + index);
+                }
+            }
+        }
+        return missing;
+    }
+
+    /** Which boards were dropped, and where. Empty means every word fitted. */
+    public List<String> droppedBoardReport() {
+        return List.copyOf(droppedBoards);
     }
 
     /** Boards two sections both wrote. Zero means no section is reading over another's shoulder. */
@@ -2436,9 +3197,54 @@ public final class Hall {
                     + String.join(" | ", already.lines()) + "] now ["
                     + String.join(" | ", lines) + "]");
         }
-        place(block, Material.OAK_WALL_SIGN, facing, List.of(lines));
+        List<String> text = tidy(List.of(lines));
+        place(block, Material.OAK_WALL_SIGN, facing, text);
         fixtures.put(blockKey(block.getLocation()),
-                new Fixture(Material.OAK_WALL_SIGN, facing, List.of(lines), null));
+                new Fixture(Material.OAK_WALL_SIGN, facing, text, null));
+    }
+
+    /**
+     * The same text with a colour code that repeats itself removed.
+     *
+     * <p>A board is built by joining pieces, and a piece that already starts in the colour the
+     * piece before it ended in produces "§f...§f..." - two instructions in a row saying the same
+     * thing. The server parses a sign's text into a component and back, and the second one is
+     * gone when it comes back out. That is invisible until something compares the two, and the
+     * hall does: it looks at its own signs twice a second to put back anything that was changed,
+     * so a board like that is rewritten every two seconds, for as long as the server is up. One
+     * copy is what actually gets stored, so one copy is what is written and what is remembered.
+     */
+    private static List<String> tidy(List<String> lines) {
+        List<String> out = new ArrayList<>();
+        for (String line : lines) {
+            StringBuilder kept = new StringBuilder();
+            char colour = 0;
+            Set<Character> styles = new HashSet<>();
+            for (int index = 0; index < line.length(); index++) {
+                char c = line.charAt(index);
+                if (c != '\u00a7' || index + 1 >= line.length()) {
+                    kept.append(c);
+                    continue;
+                }
+                char code = Character.toLowerCase(line.charAt(index + 1));
+                index++;
+                if (code == 'r') {
+                    colour = 0;
+                    styles.clear();
+                } else if (code >= '0' && code <= '9' || code >= 'a' && code <= 'f') {
+                    if (code == colour) {
+                        continue;
+                    }
+                    colour = code;
+                    styles.clear();
+                } else if (!styles.add(code)) {
+                    continue;
+                }
+                kept.append('\u00a7').append(line.charAt(index));
+            }
+            out.add(kept.toString());
+        }
+        return out;
     }
 
     /**
@@ -2661,7 +3467,7 @@ public final class Hall {
     }
 
     /** What a race is called on a sign. */
-    private static String title(String race) {
+    static String title(String race) {
         return switch (race) {
             case "vampire" -> "§c吸血鬼";
             case "ghoul" -> "§2食尸鬼";

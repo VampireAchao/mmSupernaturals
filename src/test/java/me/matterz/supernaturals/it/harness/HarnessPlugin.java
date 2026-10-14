@@ -23,6 +23,8 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -298,6 +300,18 @@ public final class HarnessPlugin extends JavaPlugin {
                 return signLine(rest);
             case "signage":
                 return signage();
+            case "light":
+                return light();
+            case "heights":
+                return heights();
+            case "ring":
+                return ring(rest);
+            case "size":
+                return sizeOf(rest);
+            case "sun":
+                return sun(rest);
+            case "equip":
+                return equip(rest);
             case "facing":
                 return facing(rest);
             case "where":
@@ -585,11 +599,186 @@ public final class HarnessPlugin extends JavaPlugin {
      * by looking at one sign at a time. Zero and zero means the halls have room to say what they
      * say.
      */
+    /**
+     * A light reading for everything a player reads or presses, plus the middle of every room.
+     *
+     * <p>Counted rather than eyeballed: "it is a bit dark in here" is not something anybody can
+     * act on, and the difference between a board at 9 and a board at 10 is the difference between
+     * readable and not.
+     */
+    private String light() {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        List<String> report = hall.lightReport();
+        return "ok " + String.join("\n  ", report);
+    }
+
+    /** How tall each room actually was built, for checking against the plan's size table. */
+    private String heights() {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        List<String> report = hall.heightReport();
+        return "ok rooms=" + report.size() + "\n  " + String.join("\n  ", report);
+    }
+
+    /**
+     * Replays the ring the hall's monsters are laid out on, without summoning anything.
+     *
+     * <p>The layout grows a pair of blocks of radius every six monsters, so the question "does
+     * the room hold all of them" has a number for an answer: the outermost ring plus half the
+     * widest monster on it. Printing where each one would stand turns "one of them did not
+     * appear" into a reading - and a monster that will not fit is otherwise only visible as a
+     * count that came up short.
+     */
+    private String ring(String race) {
+        String which = race == null || race.isBlank() ? "vampire" : race.trim();
+        List<?> wanted = "ghoul".equals(which) ? SNConfigHandler.ghoulTruce
+                : SNConfigHandler.vampireTruce;
+        StringBuilder out = new StringBuilder("ok race=" + which + " count=" + wanted.size());
+        double farthest = 0;
+        for (int placed = 0; placed < wanted.size(); placed++) {
+            double radius = 3 + (placed / 6) * 2;
+            double angle = placed * 1.1;
+            farthest = Math.max(farthest, radius);
+            out.append("\n  ").append(placed).append(" ").append(wanted.get(placed))
+                    .append(" r=").append((int) radius)
+                    .append(" at ").append(Math.round(Math.cos(angle) * radius))
+                    .append(",").append(Math.round(Math.sin(angle) * radius));
+        }
+        out.append("\n  farthest ring=").append((int) farthest)
+                .append(" so the floor needs a radius of at least ").append((int) farthest + 1);
+        return out.toString();
+    }
+
+    /**
+     * Measures one or more entity types, by putting one down and reading it back.
+     *
+     * <p>Half the hall's numbers are about things fitting, and the sizes behind those numbers are
+     * remembered rather than known. An entity can be asked how big it is without being left
+     * standing in the building.
+     */
+    private String sizeOf(String rest) {
+        if (rest == null || rest.isBlank()) {
+            return "err usage: size <ENTITY>...";
+        }
+        World target = Bukkit.getWorlds().get(0);
+        StringBuilder out = new StringBuilder("ok world=" + target.getName());
+        for (String one : rest.trim().split("\\s+")) {
+            EntityType type = EntityType.fromName(one);
+            if (type == null) {
+                out.append("\n  ").append(one).append(" unknown");
+                continue;
+            }
+            Location at = target.getSpawnLocation().clone().add(0, 60, 0);
+            try {
+                Entity spawned = target.spawnEntity(at, type);
+                out.append("\n  ").append(type).append(" width=")
+                        .append(String.format("%.2f", spawned.getWidth()))
+                        .append(" height=").append(String.format("%.2f", spawned.getHeight()));
+                spawned.remove();
+            } catch (RuntimeException | LinkageError notPlaceable) {
+                out.append("\n  ").append(type).append(" cannot be spawned: ")
+                        .append(notPlaceable.getMessage());
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * What the plugin itself thinks about the sun over a player's head.
+     *
+     * <p>The answer is not the obvious one. The plugin reads the sky light over the player's eyes,
+     * which is a different question from "is there a block above me" - so whether glass counts as
+     * shelter and whether leaves do is a thing to measure, not to reason about. This asks the
+     * plugin's own method, so the reading is the one the rule will use.
+     */
+    private String sun(String rest) {
+        Player player = player(rest);
+        if (player == null) {
+            return "err no such player";
+        }
+        SuperNPlayer snplayer = SuperNManager.get(player);
+        int eyeSky = player.getEyeLocation().getBlock().getLightFromSky();
+        Material overhead = player.getEyeLocation().getBlock().getType();
+        boolean sunlit = SupernaturalsPlugin.instance.getVampireManager().standsInSunlight(player);
+        return "ok sunlit=" + sunlit + " eyeSky=" + eyeSky + " eyeBlock=" + overhead
+                + " blockAbove=" + player.getLocation().add(0, 3, 0).getBlock().getType()
+                + " night=" + SuperNManager.worldTimeIsNight(player)
+                + " storm=" + player.getWorld().hasStorm()
+                + " race=" + (snplayer == null ? "?" : snplayer.getType());
+    }
+
+    /**
+     * What a stand-in is wearing and holding, and whether any of it is something his race may not
+     * have.
+     *
+     * <p>A race that cannot use a weapon deals nothing with one, and a piece of armour a race may
+     * not wear is taken off and dropped by the plugin the moment it is worn. Both turn a room into
+     * one that quietly does not work, so both are checked against the plugin's own lists rather
+     * than trusted.
+     */
+    private String equip(String rest) {
+        Player player = player(rest);
+        if (player == null) {
+            return "err no such player";
+        }
+        SuperNPlayer snplayer = SuperNManager.get(player);
+        String race = snplayer == null ? "?" : snplayer.getType();
+        PlayerInventory inv = player.getInventory();
+        StringBuilder out = new StringBuilder("ok " + player.getName() + " race=" + race);
+        out.append("\n  hand=").append(inv.getItemInMainHand().getType())
+                .append(legalWeapon(race, inv.getItemInMainHand().getType()));
+        out.append("\n  helmet=").append(worn(race, inv.getHelmet()));
+        out.append("\n  chest=").append(worn(race, inv.getChestplate()));
+        out.append("\n  legs=").append(worn(race, inv.getLeggings()));
+        out.append("\n  boots=").append(worn(race, inv.getBoots()));
+        return out.toString();
+    }
+
+    private String legalWeapon(String race, Material item) {
+        if (item == null || item.isAir()) {
+            return " (empty-handed)";
+        }
+        return HallGuard.bannedWeapons(race).contains(item)
+                ? " ILLEGAL for " + race + " - it deals no damage"
+                : " legal";
+    }
+
+    private String worn(String race, ItemStack stack) {
+        if (stack == null || stack.getType().isAir()) {
+            return "none";
+        }
+        List<Material> allowed = HallGuard.allowedArmor(race);
+        if (allowed == null) {
+            return stack.getType() + " (race wears anything)";
+        }
+        return allowed.contains(stack.getType())
+                ? stack.getType() + " legal"
+                : stack.getType() + " ILLEGAL for " + race + " - the plugin will take it off";
+    }
+
     private String signage() {
         if (hall == null) {
             return "err no hall on this server";
         }
-        return "ok dropped=" + hall.boardsDropped() + " collisions=" + hall.signCollisions();
+        StringBuilder out = new StringBuilder("ok dropped=" + hall.boardsDropped()
+                + " collisions=" + hall.signCollisions()
+                + " rooms=" + hall.roomTotal()
+                + " missingExit=" + hall.exitsMissing().size()
+                + " missingScene=" + hall.scenesMissing().size());
+        if (hall.boardsDropped() > 0) {
+            out.append("\n  dropped where: ")
+                    .append(String.join(" | ", hall.droppedBoardReport()));
+        }
+        if (!hall.exitsMissing().isEmpty()) {
+            out.append("\n  no way out of: ").append(String.join(", ", hall.exitsMissing()));
+        }
+        if (!hall.scenesMissing().isEmpty()) {
+            out.append("\n  owes a scene board: ").append(String.join(", ", hall.scenesMissing()));
+        }
+        return out.toString();
     }
 
     private Block blockAt(String rest) {
