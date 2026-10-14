@@ -204,6 +204,41 @@ public final class HarnessPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * Brings a stand-in up wearing one named skin, and says what he ended up wearing.
+     *
+     * <p>Nothing else on the control channel can reach this. The stand-ins a player meets are
+     * brought up by the hall, in the world the hall is in, and a scenario has no hall - so the
+     * one question a scenario can ask about skins, "does the one handed to the profile arrive on
+     * it", had no way of being asked at all. This is that way.
+     */
+    private String ghost(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length < 2) {
+            return "err usage: ghost <name> <role|race>";
+        }
+        // The world he is built in is the world he stays in: a stand-in moved between worlds
+        // afterwards is left in transit, and being in transit is what makes one untouchable.
+        Player existing = Bukkit.getPlayerExact(args[0]);
+        World world = existing != null ? existing.getWorld() : Bukkit.getWorlds().get(0);
+        Object actor = spawnGhost(args[0], world, Skins.of(args[1]));
+        Player worn = Bukkit.getPlayerExact(args[0]);
+        if (actor == null || worn == null) {
+            return "err " + args[0] + " could not be brought up";
+        }
+        return Nms.skin(worn);
+    }
+
+    /** Takes a stand-in back out, which {@code quit} cannot do - it only knows harness actors. */
+    private String drop(String rest) {
+        String name = rest.trim();
+        if (name.isEmpty()) {
+            return "err usage: drop <name>";
+        }
+        dropGhost(name);
+        return "ok dropped " + name + " online=" + Bukkit.getOnlinePlayers().size();
+    }
+
     @Override
     public void onDisable() {
         if (socket != null) {
@@ -293,6 +328,12 @@ public final class HarnessPlugin extends JavaPlugin {
                 return "ok " + blockAt(rest).getType();
             case "door":
                 return doorAt(rest);
+            case "ghost":
+                return ghost(rest);
+            case "skin":
+                return "ok " + Nms.skin(player(rest.trim()));
+            case "drop":
+                return drop(rest);
             case "hall":
                 return hall();
             case "surface":

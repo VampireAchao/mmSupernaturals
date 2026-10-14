@@ -1,5 +1,7 @@
 package me.matterz.supernaturals.it.harness;
 
+import java.util.Locale;
+
 /**
  * The skin every stand-in in the hall wears, frozen into the source.
  *
@@ -214,9 +216,19 @@ final class Skins {
                     + "Oe76a3SBOmTIq2UAqGTdUtdB/w+NxcW6ldKy4APoDVegloeN8qq7pQj4CoS8JPaZP5ybYVtgSEY+NRtJonzcyKhWW0I5LBQq"
                     + "RAO+VoPPoN0=");
 
-    /** The skin a race's own guides wear; anything unlisted is an ordinary person. */
-    static Skin forRace(String race) {
-        return switch (race) {
+    /**
+     * The skin named, as a race ("vampire") or as a role ("MASTER").
+     *
+     * <p>One name for both because a caller asking for a stand-in's skin is asking the same
+     * question either way: what is this one playing. Anything not on the list is an ordinary
+     * person, which is what "human" means too - so a stand-in whose race this file has never
+     * heard of is still somebody rather than nobody.
+     */
+    static Skin of(String key) {
+        if (key == null) {
+            return HUMAN;
+        }
+        return switch (key.toLowerCase(Locale.ROOT)) {
             case "vampire" -> VAMPIRE;
             case "ghoul" -> GHOUL;
             case "werewolf" -> WEREWOLF;
@@ -225,6 +237,8 @@ final class Skins {
             case "priest" -> PRIEST;
             case "witchhunter" -> WITCHHUNTER;
             case "angel" -> ANGEL;
+            case "master" -> MASTER;
+            case "scribe" -> SCRIBE;
             default -> HUMAN;
         };
     }

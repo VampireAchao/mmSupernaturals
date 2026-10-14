@@ -11,11 +11,16 @@ import org.bukkit.World;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Base64;
+import java.util.Collection;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Creates a real {@code ServerPlayer} with no client behind it, so a scenario can
@@ -70,10 +75,7 @@ final class Nms {
             Object serverLevel = call(world, "getHandle");
 
             Class<?> profileClass = load("com.mojang.authlib.GameProfile");
-            Object profile = profileClass
-                    .getConstructor(UUID.class, String.class)
-                    .newInstance(offlineUuid(name), name);
-            wear(profile, skin);
+            Object profile = profile(name, skin);
 
             Class<?> clientInformationClass = load("net.minecraft.server.level.ClientInformation");
             Object clientInformation = clientInformationClass.getMethod("createDefault").invoke(null);
@@ -106,36 +108,175 @@ final class Nms {
     }
 
     /**
-     * Puts a skin on a profile, before the profile is sent anywhere.
+     * A profile of that name, wearing that skin.
      *
-     * <p>A player's skin is one property of their profile: "textures", a base64 blob naming a
-     * texture on Mojang's own texture server. A profile made by hand has no properties at all,
-     * which is why every stand-in in the hall has always drawn as the default Steve or Alex
-     * whatever race the room was about. It has to be on the profile <em>before</em>
-     * {@code placeNewPlayer} runs - the profile goes out with the player-info packet that call
-     * sends, and nothing sends it a second time.
+     * <p>There is no way to put a skin on a profile afterwards, and that is the whole of it.
+     * {@code PropertyMap} is not a mutable multimap: its constructor copies whatever it is
+     * handed into an {@code ImmutableMultimap}. Nor is the profile's own map any better - the
+     * two-argument {@code GameProfile} constructor fills the field with {@code PropertyMap.EMPTY},
+     * which is one of those. A put on either throws; a caller that swallows the throw (as this
+     * one did, for a while) ends up with a profile that is simply wearing nothing, and no
+     * complaint anywhere. So the texture goes into the map first and the map is frozen second,
+     * because there is no third order to try.
      */
-    private static void wear(Object profile, Skins.Skin skin) throws ReflectiveOperationException {
-        if (skin == null) {
-            return;
+    private static Object profile(String name, Skins.Skin skin) throws ReflectiveOperationException {
+        Class<?> profileClass = load("com.mojang.authlib.GameProfile");
+        Object properties = propertiesWearing(skin);
+        return properties == null
+                ? profileClass.getConstructor(UUID.class, String.class)
+                        .newInstance(offlineUuid(name), name)
+                : profileClass
+                        .getConstructor(UUID.class, String.class,
+                                load("com.mojang.authlib.properties.PropertyMap"))
+                        .newInstance(offlineUuid(name), name, properties);
+    }
+
+    /**
+     * The property map of a profile that is wearing that skin, or {@code null} when this build
+     * will not hand one over.
+     *
+     * <p>Deliberately best-effort. A skin is decoration; a stand-in is not. Throwing here would
+     * turn "this server builds its profiles differently" into "the section that needed somebody
+     * to hit has nobody", and the second is much worse than a plain face. The warning is what
+     * makes a quiet failure visible on a hand-run server; {@code mmp skin <name>} is how to ask
+     * on purpose.
+     */
+    private static Object propertiesWearing(Skins.Skin skin) {
+        try {
+            Object multimap = load("com.google.common.collect.HashMultimap")
+                    .getMethod("create")
+                    .invoke(null);
+            if (skin != null) {
+                Class<?> propertyClass = load("com.mojang.authlib.properties.Property");
+                // A texture with no signature is one a client may refuse; the hall sets
+                // enforce-secure-profile=false, which is what makes one usable - so the
+                // three-argument form is only asked for when there is a signature to give it.
+                Object property = skin.signature() == null
+                        ? propertyClass.getConstructor(String.class, String.class)
+                                .newInstance("textures", skin.value())
+                        : propertyClass.getConstructor(String.class, String.class, String.class)
+                                .newInstance("textures", skin.value(), skin.signature());
+                put(multimap, "textures", property);
+            }
+            return load("com.mojang.authlib.properties.PropertyMap")
+                    .getConstructor(load("com.google.common.collect.Multimap"))
+                    .newInstance(multimap);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Bukkit.getLogger().warning("the stand-in keeps the default skin: " + why(e));
+            return null;
         }
-        Object properties = profile.getClass().getMethod("getProperties").invoke(profile);
-        Class<?> propertyClass = load("com.mojang.authlib.properties.Property");
-        // A texture with no signature is one a client may refuse; the hall sets
-        // enforce-secure-profile=false, which is what makes one usable - so the three-argument
-        // form is only asked for when there is a signature to give it.
-        Object property = skin.signature() == null
-                ? propertyClass.getConstructor(String.class, String.class)
-                        .newInstance("textures", skin.value())
-                : propertyClass.getConstructor(String.class, String.class, String.class)
-                        .newInstance("textures", skin.value(), skin.signature());
-        for (Method candidate : properties.getClass().getMethods()) {
+    }
+
+    /** Puts one entry into a multimap, under whichever {@code put} this build of Guava offers. */
+    private static void put(Object multimap, String key, Object value)
+            throws ReflectiveOperationException {
+        for (Method candidate : multimap.getClass().getMethods()) {
             if (candidate.getName().equals("put") && candidate.getParameterCount() == 2) {
-                candidate.invoke(properties, "textures", property);
+                candidate.invoke(multimap, key, value);
                 return;
             }
         }
-        throw new IllegalStateException("the profile's properties cannot take a texture");
+        throw new NoSuchMethodException("no put on " + multimap.getClass().getName());
+    }
+
+    /**
+     * What a reflection failure actually complained about.
+     *
+     * <p>{@code Method#invoke} wraps whatever the method threw, and the wrapper on its own says
+     * nothing useful. That is not a small thing here: the warning that first reported this one
+     * read "InvocationTargetException" and nothing else, and the answer - an immutable map being
+     * written to - was two levels down.
+     */
+    private static String why(Throwable failure) {
+        Throwable real = failure instanceof InvocationTargetException && failure.getCause() != null
+                ? failure.getCause()
+                : failure;
+        return real.getClass().getName()
+                + (real.getMessage() == null ? "" : ": " + real.getMessage());
+    }
+
+    /**
+     * What a player's profile says he is wearing, read back off the server.
+     *
+     * <p>A skin is a property of the profile and nothing on the server prints it, so "did the
+     * skin get there" has no other answer than this: whether the property is on him at all, and
+     * what the blob it carries decodes to. A player without one is a player the client will draw
+     * as the default, which is the thing worth being able to see rather than assume.
+     */
+    static String skin(org.bukkit.entity.Player player) {
+        try {
+            Object handle = call(player, "getHandle");
+            Object profile = call(handle, "getGameProfile");
+            Object worn = textureOf(propertyMap(profile));
+            if (worn == null) {
+                return player.getName() + " textures=no (the client draws the default)";
+            }
+            String value = String.valueOf(read(worn, "value"));
+            String decoded = new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+            return player.getName()
+                    + " textures=yes signature=" + (read(worn, "signature") == null ? "no" : "yes")
+                    + " model=" + firstMatch(decoded, "\"model\"\\s*:\\s*\"([a-z]+)\"")
+                    + " url=" + firstMatch(decoded, "\"url\"\\s*:\\s*\"([^\"]+)\"")
+                    + " value=" + value.substring(0, Math.min(24, value.length())) + "...";
+        } catch (ReflectiveOperationException | IllegalArgumentException e) {
+            return player.getName() + " textures=? (" + e + ")";
+        }
+    }
+
+    /**
+     * A profile's property map, under whichever name this build of the auth library gives it.
+     *
+     * <p>The library turned {@code GameProfile} into a record between the version this was first
+     * written against and the one Paper ships now: {@code getProperties()} became
+     * {@code properties()}, and the old name is not merely deprecated but gone. Both are tried,
+     * because a harness that breaks on the spelling of a getter is a harness that breaks.
+     */
+    private static Object propertyMap(Object profile) throws ReflectiveOperationException {
+        for (String name : new String[] {"properties", "getProperties"}) {
+            for (Method candidate : profile.getClass().getMethods()) {
+                if (candidate.getName().equals(name) && candidate.getParameterCount() == 0) {
+                    return candidate.invoke(profile);
+                }
+            }
+        }
+        throw new NoSuchMethodException("no properties accessor on " + profile.getClass().getName());
+    }
+
+    /** The first "textures" property in a property map, or {@code null} when there is none. */
+    private static Object textureOf(Object properties) {
+        for (Method candidate : properties.getClass().getMethods()) {
+            if (!candidate.getName().equals("get") || candidate.getParameterCount() != 1) {
+                continue;
+            }
+            try {
+                if (candidate.invoke(properties, "textures") instanceof Collection<?> found
+                        && !found.isEmpty()) {
+                    return found.iterator().next();
+                }
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // A get that takes something other than a name - the next candidate is the one.
+            }
+        }
+        return null;
+    }
+
+    /** A property's value or signature, under either the record name or the bean one. */
+    private static Object read(Object property, String name) {
+        String bean = "get" + Character.toUpperCase(name.charAt(0)) + name.substring(1);
+        for (String candidate : new String[] {name, bean}) {
+            try {
+                return call(property, candidate);
+            } catch (ReflectiveOperationException ignored) {
+                // The other spelling, then.
+            }
+        }
+        return null;
+    }
+
+    /** The first group of a pattern in some text, or {@code -} when it is not there. */
+    private static String firstMatch(String text, String pattern) {
+        Matcher found = Pattern.compile(pattern).matcher(text);
+        return found.find() ? found.group(1) : "-";
     }
 
     /** Takes a fake player back out, the same way a quitting client would. */

@@ -624,6 +624,18 @@ public final class TestServer implements AutoCloseable {
         return control.call("run " + command);
     }
 
+    /**
+     * Asks the harness about the server rather than about a player.
+     *
+     * <p>The same channel every other call goes through, for the questions that are nobody's
+     * turn: what a stand-in is really wearing, whether a switch is reachable, how many rooms the
+     * hall has. A scenario that has to look at the server to say anything true about it comes
+     * through here.
+     */
+    public String probe(String request) {
+        return control.call(request);
+    }
+
     public Path directory() {
         return directory;
     }

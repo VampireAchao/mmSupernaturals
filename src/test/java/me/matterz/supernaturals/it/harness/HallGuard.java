@@ -1295,7 +1295,7 @@ final class HallGuard implements Listener {
         // property of the profile the server player is built from, and nothing re-sends it
         // afterwards. A stand-in who is playing a race is read before he is listened to, and the
         // label over his head now says the same thing his face does.
-        Object ghost = plugin.spawnGhost(name, player.getWorld(), Skins.forRace(race));
+        Object ghost = plugin.spawnGhost(name, player.getWorld(), Skins.of(race));
         Player npc = Bukkit.getPlayerExact(name);
         if (ghost == null || npc == null) {
             plugin.dropGhost(name);
