@@ -1291,7 +1291,11 @@ final class HallGuard implements Listener {
      */
     private Player putPrey(Player player, int seat, String race, Material hand) {
         String name = PREY_NAMES.get(seat);
-        Object ghost = plugin.spawnGhost(name, player.getWorld(), Skins.HUMAN);
+        // Wearing the race he is about to become, and chosen before he exists: a skin is a
+        // property of the profile the server player is built from, and nothing re-sends it
+        // afterwards. A stand-in who is playing a race is read before he is listened to, and the
+        // label over his head now says the same thing his face does.
+        Object ghost = plugin.spawnGhost(name, player.getWorld(), Skins.forRace(race));
         Player npc = Bukkit.getPlayerExact(name);
         if (ghost == null || npc == null) {
             plugin.dropGhost(name);

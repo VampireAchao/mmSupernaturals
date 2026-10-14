@@ -121,9 +121,14 @@ final class Nms {
         }
         Object properties = profile.getClass().getMethod("getProperties").invoke(profile);
         Class<?> propertyClass = load("com.mojang.authlib.properties.Property");
-        Object property = propertyClass
-                .getConstructor(String.class, String.class, String.class)
-                .newInstance("textures", skin.value(), skin.signature());
+        // A texture with no signature is one a client may refuse; the hall sets
+        // enforce-secure-profile=false, which is what makes one usable - so the three-argument
+        // form is only asked for when there is a signature to give it.
+        Object property = skin.signature() == null
+                ? propertyClass.getConstructor(String.class, String.class)
+                        .newInstance("textures", skin.value())
+                : propertyClass.getConstructor(String.class, String.class, String.class)
+                        .newInstance("textures", skin.value(), skin.signature());
         for (Method candidate : properties.getClass().getMethods()) {
             if (candidate.getName().equals("put") && candidate.getParameterCount() == 2) {
                 candidate.invoke(properties, "textures", property);
