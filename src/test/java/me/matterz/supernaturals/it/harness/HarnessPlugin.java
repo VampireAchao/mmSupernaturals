@@ -23,6 +23,8 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -167,13 +169,20 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
-     * Brings a stand-in up in the world it is needed in, and remembers its handle so it can be
-     * taken back out. Any older one of the same name goes first - two players cannot share a name.
+     * Brings a stand-in up in the world it is needed in, in a particular skin, and remembers its
+     * handle so it can be taken back out. Any older one of the same name goes first - two players
+     * cannot share a name.
+     *
+     * <p>The skin is not decoration here: a stand-in who is playing a race, or a teacher who is
+     * playing a job, is read before he is listened to. It has to be handed over at the moment he
+     * is built - see {@link Nms#spawn(String, World, Skins.Skin)}. There is no skinless overload
+     * on purpose: one would be the one a caller reaches for by accident, and a stand-in in the
+     * default skin is exactly the thing this exists to stop.
      */
-    Object spawnGhost(String name, World world) {
+    Object spawnGhost(String name, World world, Skins.Skin skin) {
         dropGhost(name);
         try {
-            Object actor = Nms.spawn(name, world);
+            Object actor = Nms.spawn(name, world, skin);
             // Out of transit before anybody tries to hit him: a stand-in nobody can hurt makes
             // every section that asks for a hit look broken.
             Nms.arrive(actor);
@@ -193,6 +202,41 @@ public final class HarnessPlugin extends JavaPlugin {
         if (actor != null) {
             Nms.disconnect(actor);
         }
+    }
+
+    /**
+     * Brings a stand-in up wearing one named skin, and says what he ended up wearing.
+     *
+     * <p>Nothing else on the control channel can reach this. The stand-ins a player meets are
+     * brought up by the hall, in the world the hall is in, and a scenario has no hall - so the
+     * one question a scenario can ask about skins, "does the one handed to the profile arrive on
+     * it", had no way of being asked at all. This is that way.
+     */
+    private String ghost(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length < 2) {
+            return "err usage: ghost <name> <role|race>";
+        }
+        // The world he is built in is the world he stays in: a stand-in moved between worlds
+        // afterwards is left in transit, and being in transit is what makes one untouchable.
+        Player existing = Bukkit.getPlayerExact(args[0]);
+        World world = existing != null ? existing.getWorld() : Bukkit.getWorlds().get(0);
+        Object actor = spawnGhost(args[0], world, Skins.of(args[1]));
+        Player worn = Bukkit.getPlayerExact(args[0]);
+        if (actor == null || worn == null) {
+            return "err " + args[0] + " could not be brought up";
+        }
+        return Nms.skin(worn);
+    }
+
+    /** Takes a stand-in back out, which {@code quit} cannot do - it only knows harness actors. */
+    private String drop(String rest) {
+        String name = rest.trim();
+        if (name.isEmpty()) {
+            return "err usage: drop <name>";
+        }
+        dropGhost(name);
+        return "ok dropped " + name + " online=" + Bukkit.getOnlinePlayers().size();
     }
 
     @Override
@@ -284,6 +328,18 @@ public final class HarnessPlugin extends JavaPlugin {
                 return "ok " + blockAt(rest).getType();
             case "door":
                 return doorAt(rest);
+            case "ghost":
+                return ghost(rest);
+            case "skin":
+                return "ok " + Nms.skin(player(rest.trim()));
+            case "grace":
+                return "ok " + guard.graceReport(player(rest.trim()));
+            case "guides":
+                return guard.guideReport(rest.trim());
+            case "talk":
+                return guard.talkReport(rest.trim());
+            case "drop":
+                return drop(rest);
             case "hall":
                 return hall();
             case "surface":
@@ -298,6 +354,18 @@ public final class HarnessPlugin extends JavaPlugin {
                 return signLine(rest);
             case "signage":
                 return signage();
+            case "light":
+                return light();
+            case "heights":
+                return heights();
+            case "ring":
+                return ring(rest);
+            case "size":
+                return sizeOf(rest);
+            case "sun":
+                return sun(rest);
+            case "equip":
+                return equip(rest);
             case "facing":
                 return facing(rest);
             case "where":
@@ -348,6 +416,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return teleportPoint(rest);
             case "biome":
                 return biome(rest);
+            case "rain":
+                return rain(rest);
             case "race":
                 return race(rest);
             case "loot":
@@ -583,11 +653,205 @@ public final class HarnessPlugin extends JavaPlugin {
      * by looking at one sign at a time. Zero and zero means the halls have room to say what they
      * say.
      */
+    /**
+     * A light reading for everything a player reads or presses, plus the middle of every room.
+     *
+     * <p>Counted rather than eyeballed: "it is a bit dark in here" is not something anybody can
+     * act on, and the difference between a board at 9 and a board at 10 is the difference between
+     * readable and not.
+     */
+    private String light() {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        List<String> report = hall.lightReport();
+        return "ok " + String.join("\n  ", report);
+    }
+
+    /** How tall each room actually was built, for checking against the plan's size table. */
+    private String heights() {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        List<String> report = hall.heightReport();
+        return "ok rooms=" + report.size() + "\n  " + String.join("\n  ", report);
+    }
+
+    /**
+     * Replays the ring the hall's monsters are laid out on, without summoning anything.
+     *
+     * <p>The layout grows a pair of blocks of radius every six monsters, so the question "does
+     * the room hold all of them" has a number for an answer: the outermost ring plus half the
+     * widest monster on it. Printing where each one would stand turns "one of them did not
+     * appear" into a reading - and a monster that will not fit is otherwise only visible as a
+     * count that came up short.
+     */
+    private String ring(String race) {
+        String which = race == null || race.isBlank() ? "vampire" : race.trim();
+        List<?> wanted = "ghoul".equals(which) ? SNConfigHandler.ghoulTruce
+                : SNConfigHandler.vampireTruce;
+        StringBuilder out = new StringBuilder("ok race=" + which + " count=" + wanted.size());
+        double farthest = 0;
+        for (int placed = 0; placed < wanted.size(); placed++) {
+            double radius = 3 + (placed / 6) * 2;
+            double angle = placed * 1.1;
+            farthest = Math.max(farthest, radius);
+            out.append("\n  ").append(placed).append(" ").append(wanted.get(placed))
+                    .append(" r=").append((int) radius)
+                    .append(" at ").append(Math.round(Math.cos(angle) * radius))
+                    .append(",").append(Math.round(Math.sin(angle) * radius));
+        }
+        out.append("\n  farthest ring=").append((int) farthest)
+                .append(" so the floor needs a radius of at least ").append((int) farthest + 1);
+        return out.toString();
+    }
+
+    /**
+     * Measures one or more entity types, by putting one down and reading it back.
+     *
+     * <p>Half the hall's numbers are about things fitting, and the sizes behind those numbers are
+     * remembered rather than known. An entity can be asked how big it is without being left
+     * standing in the building.
+     */
+    private String sizeOf(String rest) {
+        if (rest == null || rest.isBlank()) {
+            return "err usage: size <ENTITY>...";
+        }
+        World target = Bukkit.getWorlds().get(0);
+        StringBuilder out = new StringBuilder("ok world=" + target.getName());
+        for (String one : rest.trim().split("\\s+")) {
+            EntityType type = EntityType.fromName(one);
+            if (type == null) {
+                out.append("\n  ").append(one).append(" unknown");
+                continue;
+            }
+            Location at = target.getSpawnLocation().clone().add(0, 60, 0);
+            try {
+                Entity spawned = target.spawnEntity(at, type);
+                out.append("\n  ").append(type).append(" width=")
+                        .append(String.format("%.2f", spawned.getWidth()))
+                        .append(" height=").append(String.format("%.2f", spawned.getHeight()));
+                spawned.remove();
+            } catch (RuntimeException | LinkageError notPlaceable) {
+                out.append("\n  ").append(type).append(" cannot be spawned: ")
+                        .append(notPlaceable.getMessage());
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * What the plugin itself thinks about the sun over a player's head.
+     *
+     * <p>The answer is not the obvious one. The plugin reads the sky light over the player's eyes,
+     * which is a different question from "is there a block above me" - so whether glass counts as
+     * shelter and whether leaves do is a thing to measure, not to reason about. This asks the
+     * plugin's own method, so the reading is the one the rule will use.
+     */
+    private String sun(String rest) {
+        Player player = player(rest);
+        if (player == null) {
+            return "err no such player";
+        }
+        SuperNPlayer snplayer = SuperNManager.get(player);
+        int eyeSky = player.getEyeLocation().getBlock().getLightFromSky();
+        Material overhead = player.getEyeLocation().getBlock().getType();
+        boolean sunlit = SupernaturalsPlugin.instance.getVampireManager().standsInSunlight(player);
+        return "ok sunlit=" + sunlit + " eyeSky=" + eyeSky + " eyeBlock=" + overhead
+                + " blockAbove=" + player.getLocation().add(0, 3, 0).getBlock().getType()
+                + " night=" + SuperNManager.worldTimeIsNight(player)
+                + " storm=" + player.getWorld().hasStorm()
+                + " race=" + (snplayer == null ? "?" : snplayer.getType());
+    }
+
+    /**
+     * What a stand-in is wearing and holding, and whether any of it is something his race may not
+     * have.
+     *
+     * <p>A race that cannot use a weapon deals nothing with one, and a piece of armour a race may
+     * not wear is taken off and dropped by the plugin the moment it is worn. Both turn a room into
+     * one that quietly does not work, so both are checked against the plugin's own lists rather
+     * than trusted.
+     */
+    private String equip(String rest) {
+        Player player = player(rest);
+        if (player == null) {
+            return "err no such player";
+        }
+        SuperNPlayer snplayer = SuperNManager.get(player);
+        String race = snplayer == null ? "?" : snplayer.getType();
+        PlayerInventory inv = player.getInventory();
+        StringBuilder out = new StringBuilder("ok " + player.getName() + " race=" + race);
+        out.append("\n  hand=").append(inv.getItemInMainHand().getType())
+                .append(legalWeapon(race, inv.getItemInMainHand().getType()));
+        out.append("\n  helmet=").append(worn(race, inv.getHelmet()));
+        out.append("\n  chest=").append(worn(race, inv.getChestplate()));
+        out.append("\n  legs=").append(worn(race, inv.getLeggings()));
+        out.append("\n  boots=").append(worn(race, inv.getBoots()));
+        return out.toString();
+    }
+
+    private String legalWeapon(String race, Material item) {
+        if (item == null || item.isAir()) {
+            return " (empty-handed)";
+        }
+        return HallGuard.bannedWeapons(race).contains(item)
+                ? " ILLEGAL for " + race + " - it deals no damage"
+                : " legal";
+    }
+
+    private String worn(String race, ItemStack stack) {
+        if (stack == null || stack.getType().isAir()) {
+            return "none";
+        }
+        List<Material> allowed = HallGuard.allowedArmor(race);
+        if (allowed == null) {
+            return stack.getType() + " (race wears anything)";
+        }
+        return allowed.contains(stack.getType())
+                ? stack.getType() + " legal"
+                : stack.getType() + " ILLEGAL for " + race + " - the plugin will take it off";
+    }
+
     private String signage() {
         if (hall == null) {
             return "err no hall on this server";
         }
-        return "ok dropped=" + hall.boardsDropped() + " collisions=" + hall.signCollisions();
+        StringBuilder out = new StringBuilder("ok dropped=" + hall.boardsDropped()
+                + " collisions=" + hall.signCollisions()
+                + " rooms=" + hall.roomTotal()
+                + " missingExit=" + hall.exitsMissing().size()
+                + " missingScene=" + hall.scenesMissing().size()
+                + " unsupported=" + hall.unsupportedSwitches().size()
+                + " outOfReach=" + hall.outOfReach().size()
+                + " signsOffIdeal=" + hall.signsOffIdeal().size()
+                + " signsAtKnee=" + hall.signsAtKnee().size());
+        if (hall.boardsDropped() > 0) {
+            out.append("\n  dropped where: ")
+                    .append(String.join(" | ", hall.droppedBoardReport()));
+        }
+        if (!hall.unsupportedSwitches().isEmpty()) {
+            out.append("\n  hanging on nothing: ")
+                    .append(String.join(" | ", hall.unsupportedSwitches()));
+        }
+        if (!hall.outOfReach().isEmpty()) {
+            out.append("\n  too high to use: ").append(String.join(" | ", hall.outOfReach()));
+        }
+        if (!hall.signsOffIdeal().isEmpty()) {
+            out.append("\n  outside the band a player reads: ")
+                    .append(String.join(" | ", hall.signsOffIdeal()));
+        }
+        if (!hall.signsAtKnee().isEmpty()) {
+            out.append("\n  down at the player's feet: ")
+                    .append(String.join(" | ", hall.signsAtKnee()));
+        }
+        if (!hall.exitsMissing().isEmpty()) {
+            out.append("\n  no way out of: ").append(String.join(", ", hall.exitsMissing()));
+        }
+        if (!hall.scenesMissing().isEmpty()) {
+            out.append("\n  owes a scene board: ").append(String.join(", ", hall.scenesMissing()));
+        }
+        return out.toString();
     }
 
     private Block blockAt(String rest) {
@@ -1208,7 +1472,17 @@ public final class HarnessPlugin extends JavaPlugin {
                     + (trigger.race() == null ? "" : "/" + trigger.race())
                     + (trigger.detail() == null ? "" : "/" + trigger.detail()));
         }
-        return "ok " + found.size() + " " + String.join(" | ", found);
+        List<Location> buttons = new ArrayList<>();
+        for (Location at : hall.buttonFixtures()) {
+            if (zone != null ? zone.holds(at) : insideAnyHall(at)) {
+                buttons.add(at);
+            }
+        }
+        return "ok " + found.size() + " buttons=" + buttons.size()
+                + (buttons.isEmpty() ? "" : " at " + buttons.stream()
+                        .map(at -> at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ())
+                        .collect(java.util.stream.Collectors.joining(" ")))
+                + " | " + String.join(" | ", found);
     }
 
     /** Whether a switch sits in one of the race halls rather than out in the lobby. */
@@ -1363,6 +1637,28 @@ public final class HarnessPlugin extends JavaPlugin {
         int x = intOf(args[1]);
         int z = intOf(args[2]);
         return "ok y0=" + world.getBiome(x, 0, z) + " here=" + world.getBiome(x, 200, z);
+    }
+
+    /**
+     * What the weather over one column would actually look like.
+     *
+     * <p>Three things have to agree before a tester sees rain: the world's storm flag, an unbroken
+     * column, and a biome that precipitates. A section can only set the first, and the client draws
+     * nothing in a biome whose precipitation is none - so a rain switch in the wrong biome is a
+     * switch whose only visible effect is on rules nobody can see it causing. This prints the flag
+     * and the biome's own answer side by side.
+     */
+    private String rain(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        if (args.length != 3) {
+            return "err usage: rain <world> <x> <z>";
+        }
+        World world = Bukkit.getWorld(args[0]);
+        if (world == null) {
+            return "err no such world: " + args[0];
+        }
+        return "ok storm=" + world.hasStorm()
+                + " " + Nms.precipitation(world, intOf(args[1]), intOf(args[2]));
     }
 
     /**

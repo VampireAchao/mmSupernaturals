@@ -535,6 +535,23 @@ public class SuperNManager {
 		SupernaturalsPlugin.instance.getServer().getScheduler().cancelTask(timer);
 	}
 
+	/**
+	 * Moves the shared clock on by one tick of the plugin's timer.
+	 *
+	 * <p>The counter lives here, and the timer used to bump it inside {@link #advanceTime} - which
+	 * runs once per online player. Every rule that reads the counter therefore ran faster the more
+	 * people were on the server: with a stand-in online the ghoul regenerated every five seconds
+	 * instead of ten, and a vampire paid its healing cost twice as often and healed twice as often.
+	 * One bump per timer tick makes the cadences the plugin documents true whatever the player
+	 * count is.
+	 */
+	public void advanceClock() {
+		taskCounter++;
+		if (taskCounter >= 30) {
+			taskCounter = 0;
+		}
+	}
+
 	public void advanceTime(SuperNPlayer snplayer) {
 		Player player = plugin.getServer().getPlayer(snplayer.getName());
 
@@ -545,11 +562,6 @@ public class SuperNManager {
 		if (!SupernaturalsPlugin.hasPermissions(player, worldPermission)
 				&& SNConfigHandler.multiworld) {
 			return;
-		}
-
-		taskCounter++;
-		if (taskCounter >= 30) {
-			taskCounter = 0;
 		}
 
 		if (snplayer.isVampire()) {

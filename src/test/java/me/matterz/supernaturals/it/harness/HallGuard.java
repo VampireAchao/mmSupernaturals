@@ -48,8 +48,10 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
@@ -60,6 +62,7 @@ import org.bukkit.util.Vector;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -200,8 +203,61 @@ final class HallGuard implements Listener {
     private static final List<String> SUPERNATURAL = List.of(
             "vampire", "ghoul", "werewolf", "demon", "priest", "witchhunter", "enderborn", "angel");
 
+    /**
+     * The plugin's own conversion chance, while a room is holding it open at a hundred percent.
+     *
+     * <p>{@code null} means nothing is holding it: the number in the setting is the number the
+     * plugin was configured with, and no room is responsible for putting anything back.
+     */
+    private Double spreadWas;
+
     /** The walk the stand-in is currently on, so a second section cannot start another. */
     private BukkitTask walkTask;
+
+    /**
+     * How long a player is left alone after a room kills them into a race.
+     *
+     * <p>Three seconds. Long enough to read the line in chat that says what they are now and to see
+     * the room they are standing in, short enough that it is not a pause. Without it a player who
+     * comes back on their own mark with a stand-in still swinging at them is killed again before
+     * they can move, which is not a test of anything.
+     */
+    private static final int GRACE_TICKS = 60;
+
+    /**
+     * How long a player has to wait before a guide will tell him the same room again.
+     *
+     * <p>Half a second. One right-click is one answer, but asking twice on purpose - because the
+     * first answer scrolled past - has to stay possible, so this is short and it is per player
+     * rather than per guide.
+     */
+    private static final int TALK_GAP = 10;
+
+    /** When each player was last told a room's teaching, so one click is one answer. */
+    private final Map<String, Integer> toldAt = new HashMap<>();
+
+    /**
+     * Where a player fell, and what killed them, from the death to the moment they get up.
+     *
+     * <p>Both keys are names, and both are cleared the moment they are used. The place is a snapshot
+     * rather than a live location because a location object follows whoever it belongs to, and by
+     * the time this is read the player has been through a respawn.
+     */
+    private final Map<String, Location> fellAt = new HashMap<>();
+    private final Map<String, String> killedBy = new HashMap<>();
+
+    /**
+     * Players inside their grace window, and the tick their protection runs out on.
+     *
+     * <p>Two things enforce this, deliberately. An invulnerability flag is what says it to the
+     * engine, but {@link #land} clears that same flag on whoever it is about to hit - it has to, or
+     * nothing in this building could be hit at all - so a stand-in that was still there could take
+     * the protection off. The flag is the English; the cancelled damage event is the guarantee.
+     */
+    private final Map<String, Integer> protectedUntil = new HashMap<>();
+
+    /** Ticks since the guard came up, for the grace window to be measured against. */
+    private int ticks;
 
     HallGuard(HarnessPlugin plugin) {
         this.plugin = plugin;
@@ -217,35 +273,47 @@ final class HallGuard implements Listener {
     /**
      * Lands one real blow from a player onto a stand-in.
      *
-     * <p>A stand-in cannot normally be hit on this server build. It is a player whose client never
-     * confirms anything, and the server keeps a flag on such a player that refuses damage - a flag
-     * that comes straight back when it is cleared. There is exactly one exception inside the damage
-     * path itself: a blow struck by a creative player is allowed past that flag. So the attacker is
-     * borrowed as creative for the length of a single blow - changed and changed back inside one
-     * tick, which is not something a client is told about - and the blow then travels the ordinary
-     * route: the plugin's handlers, the health bar, the armour, the knockback.
+     * <p>A stand-in cannot normally be hit on this server build: it is a player whose client never
+     * confirms anything, and the server keeps a flag on such a player that refuses damage. The flag
+     * that matters is on the <em>victim</em>, which is why this clears three things on him and
+     * nothing on the attacker. Two earlier readings of this were wrong and are worth not repeating:
+     * the attacker's creative mode was said to be the exception that let a blow through, and it is
+     * not - a hit from a creative attacker measured 20.0 to 20.0 - and the flag was said to come
+     * back on its own, which it does not; what comes back is the arrival flag, and that is what
+     * {@link #unfreezeStandIns} clears every tick.
      *
-     * <p>If the health still does not move, the damage is taken off directly. That is the last
-     * resort rather than the method: it is what a section shows when everything else refused, and
-     * it is better than a switch that reports a spell landed while nobody lost anything.
+     * <p>Once the victim's three are cleared the blow travels the ordinary route: the plugin's
+     * handlers, the health bar, the armour, the knockback.
      */
     private static void land(Player attacker, Player victim, double damage) {
-        GameMode before = attacker.getGameMode();
-        if (before != GameMode.CREATIVE) {
-            attacker.setGameMode(GameMode.CREATIVE);
-        }
+        // What is in the way is on the victim, not on the attacker - measured both ways on the
+        // console: a hit from a creative attacker went 20.0 -> 20.0, and the same hit after clearing
+        // the victim's flag went 20.0 -> 17.0.
+        Nms.arrive(victim);
+        victim.setInvulnerable(false);
+        victim.setNoDamageTicks(0);
         victim.damage(damage, attacker);
-        if (attacker.getGameMode() != before) {
-            attacker.setGameMode(before);
-        }
     }
 
     /** Lifts the invulnerability the server puts on a player it has never heard from. */
     private void unfreezeStandIns() {
+        ticks++;
         for (Player npc : standIns()) {
             if (npc.isInvulnerable()) {
                 npc.setInvulnerable(false);
                 Nms.arrive(npc);
+            }
+        }
+        for (Iterator<Map.Entry<String, Integer>> ends = protectedUntil.entrySet().iterator();
+                ends.hasNext();) {
+            Map.Entry<String, Integer> entry = ends.next();
+            if (ticks < entry.getValue()) {
+                continue;
+            }
+            ends.remove();
+            Player player = Bukkit.getPlayerExact(entry.getKey());
+            if (player != null) {
+                player.setInvulnerable(false);
             }
         }
     }
@@ -266,6 +334,320 @@ final class HallGuard implements Listener {
         return all;
     }
 
+    // -- dying in a room ---------------------------------------------------
+
+    /**
+     * Notes who killed a player and where they fell, and does nothing else.
+     *
+     * <p>LOWEST, and deliberately a notepad rather than an action. The plugin's own conversion runs
+     * on MONITOR and reads the killer off the damage event, so a stand-in taken out of the world
+     * here - or anywhere before that - would leave the plugin unable to see who did it, and the
+     * conversion the room exists to show would never happen. The stand-in is therefore taken away
+     * two ticks later, from {@link #putBack}, once everything that reads this death has run.
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onKilledByPrey(PlayerDeathEvent event) {
+        Player dead = event.getEntity();
+        if (prey.containsKey(dead.getName())) {
+            return;
+        }
+        String killer = killerOf(dead);
+        if (killer == null) {
+            return;
+        }
+        fellAt.put(dead.getName(), dead.getLocation().clone());
+        killedBy.put(dead.getName(), killer);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> putBack(dead.getName()), 2L);
+    }
+
+    /** The stand-in that landed the fatal blow, or {@code null} when a room did not do this. */
+    private String killerOf(Player dead) {
+        if (!(dead.getLastDamageCause() instanceof EntityDamageByEntityEvent hit)
+                || hit.getDamager() == null) {
+            return null;
+        }
+        return prey.containsKey(hit.getDamager().getName()) ? hit.getDamager().getName() : null;
+    }
+
+    /**
+     * Takes the killer away and puts the player back on their feet where they fell.
+     *
+     * <p>Three things, in this order, and the order is the point. The stand-in goes first: his job
+     * was to kill somebody into a race and that is done, and a stand-in still standing there is one
+     * that would hit the player again the instant they got up. Then the player is put back on the
+     * mark they fell on rather than at the hall's entrance - the room is what they were looking at
+     * when they died, and coming back somewhere else makes dying read as being sent to your room.
+     * Then full health and a grace window, because a blow that lands before they have seen the
+     * screen is indistinguishable from the room being broken.
+     *
+     * <p>No respawn-location handler and no respawn event: this runs two ticks after the death and
+     * does the respawn itself, so there is one place that decides where a player comes back. A
+     * handler would be a second, which would also outlive the room that set it.
+     */
+    private void putBack(String name) {
+        String killer = killedBy.remove(name);
+        Location where = fellAt.remove(name);
+        cancelWalk();
+        if (killer != null) {
+            clearPrey(killer);
+        }
+        Player player = Bukkit.getPlayerExact(name);
+        if (player == null) {
+            return;
+        }
+        if (killer != null) {
+            note(player, "§7他杀完就退场了——你已经转化，想再试就再右键一次那块牌");
+        }
+        if (player.isDead()) {
+            player.spigot().respawn();
+        }
+        if (where != null) {
+            player.teleport(where);
+        }
+        resetVitals(player);
+        protectedUntil.put(name, ticks + GRACE_TICKS);
+        player.setInvulnerable(true);
+        note(player, "§a你回到了倒下的地方，" + (GRACE_TICKS / 20) + " 秒内不会再受伤");
+    }
+
+    /** Where a player's grace window has got to, for the probe. */
+    String graceReport(Player player) {
+        Integer until = protectedUntil.get(player.getName());
+        return player.getName()
+                + " protected=" + (until == null ? "no" : (until - ticks) + "t")
+                + " invulnerable=" + player.isInvulnerable();
+    }
+
+    /**
+     * Refuses every blow while a player is inside their grace window.
+     *
+     * <p>This, and not the invulnerability flag, is what actually holds: {@link #land} clears that
+     * flag on whoever it is about to hit - it has to, or nothing in this building could be hit at
+     * all - so the flag on its own would be taken off by the first stand-in still in the room. It
+     * only ever cancels damage, so it cannot make a room pass when it should have failed.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onProtectedHit(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player player
+                && protectedUntil.containsKey(player.getName())) {
+            event.setCancelled(true);
+        }
+    }
+
+    // -- guides ------------------------------------------------------------
+
+    /** A short code per race, so a guide's account name fits in the sixteen a player name gets. */
+    private static final Map<String, String> RACE_CODE = Map.of(
+            "vampire", "v", "ghoul", "g", "werewolf", "w", "demon", "d",
+            "priest", "p", "witchhunter", "h", "enderborn", "e", "angel", "a");
+
+    /**
+     * The guides that are up, by account name, and the room each one belongs to.
+     *
+     * <p>One per room that has somebody in it, and no more. A hall of eleven rooms with a guide in
+     * each would be a hundred-odd extra players on the server for a feature nobody is looking at -
+     * so a guide exists while his room has a visitor and is gone the moment it does not.
+     */
+    private final Map<String, String> guides = new LinkedHashMap<>();
+
+    /** The account name a room's guide answers to. */
+    private static String guideName(String race, int index) {
+        return "Guide_" + RACE_CODE.getOrDefault(race, "x") + "_" + String.format("%02d", index);
+    }
+
+    /**
+     * Brings the guides up to date: one in every room somebody is standing in, none in the rest.
+     *
+     * <p>Called from the slow sweep rather than every tick. A guide is a whole player as far as the
+     * server is concerned - the account, the connection, the player-info packet - so building one is
+     * not a thing to do sixty times a second; two seconds is faster than anybody walks into a room.
+     */
+    private void refreshGuides(Hall hall) {
+        Set<String> wanted = new HashSet<>();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (guides.containsKey(player.getName())) {
+                continue;
+            }
+            String room = hall.roomAt(player.getLocation());
+            if (room != null) {
+                wanted.add(room);
+            }
+        }
+        for (Iterator<Map.Entry<String, String>> up = guides.entrySet().iterator(); up.hasNext();) {
+            Map.Entry<String, String> entry = up.next();
+            if (wanted.contains(entry.getValue())) {
+                continue;
+            }
+            up.remove();
+            unstamp(entry.getKey());
+            plugin.dropGhost(entry.getKey());
+        }
+        for (String room : wanted) {
+            if (!guides.containsValue(room)) {
+                spawnGuide(hall, room);
+            }
+        }
+    }
+
+    /**
+     * Puts one room's guide up: a real player in creative, wearing the scribe's clothes.
+     *
+     * <p>Not the race's own skin. The stand-ins a section brings up wear the race they are playing -
+     * that is the point of them - so a guide wearing one would be read as the thing being tested.
+     * The scribe is nobody's race, which is what somebody whose only job is to talk should look
+     * like.
+     *
+     * <p>Creative and invulnerable, and not in the tab list: he is furniture that answers, and a
+     * visitor should not be able to kill him, shove him or mistake him for a target. {@code
+     * unlistPlayer} is per-observer, so it is done for everybody on the server and again for anybody
+     * who logs in later.
+     */
+    private void spawnGuide(Hall hall, String room) {
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return;
+        }
+        String race = room.substring(0, dot);
+        int index;
+        try {
+            index = Integer.parseInt(room.substring(dot + 1));
+        } catch (NumberFormatException notARoom) {
+            return;
+        }
+        Location spot = hall.guideSpot(race, index);
+        if (spot == null || spot.getWorld() == null) {
+            return;
+        }
+        String name = guideName(race, index);
+        Object ghost = plugin.spawnGhost(name, spot.getWorld(), Skins.SCRIBE);
+        Player guide = Bukkit.getPlayerExact(name);
+        if (ghost == null || guide == null) {
+            plugin.dropGhost(name);
+            return;
+        }
+        guide.setGameMode(GameMode.CREATIVE);
+        guide.setInvulnerable(true);
+        guide.teleport(spot);
+        labelGuide(guide, race);
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+            if (!viewer.equals(guide)) {
+                viewer.unlistPlayer(guide);
+            }
+        }
+        guides.put(name, room);
+    }
+
+    /** A guide's name says what he is, in the one place a server may write next to a name. */
+    private void labelGuide(Player guide, String race) {
+        Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
+        Team team = board.getTeam("mmg_" + race);
+        if (team == null) {
+            team = board.registerNewTeam("mmg_" + race);
+        }
+        team.setPrefix("§7导览 §f" + RACE_LABEL.getOrDefault(race, race) + " §r");
+        for (Team other : board.getTeams()) {
+            if (other.hasEntry(guide.getName())) {
+                other.removeEntry(guide.getName());
+            }
+        }
+        team.addEntry(guide.getName());
+    }
+
+    /**
+     * Right-clicking a guide gets the room's long teaching, in chat.
+     *
+     * <p>This is where the cooldowns, the permission nodes and the exceptions live. The board says
+     * what to do and what should happen - four lines, read at arm's length - and the rest is said
+     * by somebody standing in the room, which is the only medium in the building that can hold a
+     * sentence and be asked again.
+     */
+    @EventHandler
+    public void onGuideTapped(PlayerInteractEntityEvent event) {
+        // One right-click arrives as two events, one per hand, and a player holding the button down
+        // produces more. Saying the whole room's teaching twice in a row is not a second answer, it
+        // is the same answer in a louder voice - so the off hand is ignored and the same player
+        // cannot be told again for half a second.
+        if (event.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+        String room = guides.get(event.getRightClicked().getName());
+        if (room == null) {
+            return;
+        }
+        event.setCancelled(true);
+        Player listener = event.getPlayer();
+        Integer lastTold = toldAt.get(listener.getName());
+        if (lastTold != null && ticks - lastTold < TALK_GAP) {
+            return;
+        }
+        toldAt.put(listener.getName(), ticks);
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return;
+        }
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return;
+        }
+        sayGuide(listener, hall.guideTalk(room.substring(0, dot),
+                Integer.parseInt(room.substring(dot + 1))));
+    }
+
+    /** Reads a room's long teaching out, a line at a time. */
+    private void sayGuide(Player player, List<String> talk) {
+        for (String line : talk) {
+            player.sendMessage(line);
+        }
+    }
+
+    /** What the guides look like from outside, for the probe. */
+    String guideReport(String race) {
+        List<String> found = new ArrayList<>();
+        for (Map.Entry<String, String> entry : guides.entrySet()) {
+            if (!race.isEmpty() && !entry.getValue().startsWith(race + ".")) {
+                continue;
+            }
+            Player guide = Bukkit.getPlayerExact(entry.getKey());
+            boolean listed = false;
+            if (guide != null) {
+                for (Player viewer : Bukkit.getOnlinePlayers()) {
+                    if (viewer.isListed(guide)) {
+                        listed = true;
+                        break;
+                    }
+                }
+            }
+            found.add(entry.getKey() + "=" + entry.getValue()
+                    + (guide == null ? " missing"
+                            : " mode=" + guide.getGameMode() + " listed=" + listed
+                                    + " invulnerable=" + guide.isInvulnerable()));
+        }
+        return "ok guides=" + found.size() + " " + String.join(" | ", found);
+    }
+
+    /** Right-clicks a guide's text out, for the probe, and says how many lines there were. */
+    String talkReport(String rest) {
+        String[] parts = rest.split("\\s+", 2);
+        String name = parts.length > 1 ? parts[1] : parts[0];
+        Player listener = Bukkit.getPlayerExact(parts[0]);
+        String room = guides.get(name);
+        Hall hall = plugin.hallOrNull();
+        if (room == null || hall == null) {
+            return "err no such guide: " + name;
+        }
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return "err no room for: " + name;
+        }
+        List<String> talk = hall.guideTalk(room.substring(0, dot),
+                Integer.parseInt(room.substring(dot + 1)));
+        if (listener != null) {
+            sayGuide(listener, talk);
+        }
+        return "ok " + name + " room=" + room + " lines=" + talk.size()
+                + (listener == null ? " (nothing to say it to)" : "");
+    }
+
     /**
      * A joining player starts at the lobby. The world spawn is already there and the spawn radius
      * is zero, so this is normally a no-op - it is here because a player who arrives outside the
@@ -274,11 +656,26 @@ final class HallGuard implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Hall hall = plugin.hallOrNull();
-        if (hall == null || SPAR.equals(event.getPlayer().getName())) {
+        if (hall == null) {
             return;
         }
-        if (!hall.inside(event.getPlayer().getLocation())) {
-            event.getPlayer().teleport(hall.lobbySpawn());
+        Player joining = event.getPlayer();
+        if (guides.containsKey(joining.getName())) {
+            // One of our own guides coming up. He is placed by spawnGuide a moment from now, and
+            // sending him to the lobby first would only mean moving him twice.
+            return;
+        }
+        for (String name : guides.keySet()) {
+            Player guide = Bukkit.getPlayerExact(name);
+            if (guide != null) {
+                joining.unlistPlayer(guide);
+            }
+        }
+        if (SPAR.equals(joining.getName())) {
+            return;
+        }
+        if (!hall.inside(joining.getLocation())) {
+            joining.teleport(hall.lobbySpawn());
         }
     }
 
@@ -305,10 +702,18 @@ final class HallGuard implements Listener {
     }
 
     private void use(Player player, Hall hall, Hall.Trigger trigger, Block block) {
+        // A player who has just been killed into a race is not to be touched for three seconds, and
+        // that has to include the boards: without this the first thing a player can do is press
+        // "be killed by one" again and be dead before the grace window they were given has run out,
+        // which is the same bug wearing a different hat.
+        if (protectedUntil.containsKey(player.getName())) {
+            note(player, "§7刚复活，等无敌结束再动");
+            return;
+        }
         switch (trigger.kind()) {
             case ENTER_LOBBY -> backToHuman(player, hall, hall.lobbySpawn(), "§a回到测试大厅");
             case LEAVE_HALL -> backToHuman(player, hall, hall.outsideSpawn(),
-                    "§a已离开测试大厅，踩返回垫的按钮可以回来");
+                    "§a已离开测试大厅，右键返回垫上那块牌可以回来");
             case ENTER_AREA -> enter(player, hall, trigger.race());
             case RESET_HUMAN -> {
                 restore(player);
@@ -351,12 +756,15 @@ final class HallGuard implements Listener {
             case USE_ON_NPC -> useOnNpc(player, trigger.detail());
             case SPAWN_TARGET -> spawnTarget(player, trigger.detail());
             case NPC_HITS_NPC -> npcHitsNpc(player, trigger.detail());
-            case SPAR -> bringSpar(player);
+            case SPAR -> bringSpar(player, trigger.detail());
             case HURT -> hurt(player);
             case SELF_KILL -> selfKill(player);
             case SPAWN_NPCS -> spawnNpcs(player, trigger.detail());
             case SUN_SPOT -> teleport(player, hall.point(trigger.race() + ".sun"),
                     "§6站到露天台上：这一格头顶没有屋顶");
+            case ROOF_SPOT -> teleport(player, hall.point(trigger.race() + ".roof"),
+                    "§a站到有顶处：这一格头顶有方块，雨落在棚子上");
+            case RESTORE_HEALTH -> restoreHealth(player);
             case RETURN_START -> teleport(player, hall.point("spawn." + trigger.race()),
                     "§a回到这一族的入口");
             case GO_NETHER -> teleport(player,
@@ -375,7 +783,339 @@ final class HallGuard implements Listener {
                     "§4下池子了：恶魔在岩浆里回血回能，别的种族会被烧、还会掉进去");
             case POWER_READ -> readPower(player);
             case SPAWN_MOB -> spawnMob(player, trigger.detail());
+            case ROOM_NEXT -> walkRoom(player, hall, trigger.race(), 1);
+            case ROOM_PREV -> walkRoom(player, hall, trigger.race(), -1);
+            case EXIT_ROOM -> backToHuman(player, hall, hall.lobbySpawn(),
+                    "§a已退出测试：道具已清空，种族已恢复人类，回到大厅");
+            case GO_ROOM -> goRoom(player, hall, trigger.detail());
+            case SUN_MAT -> standUnder(player, hall, trigger.race(), trigger.detail());
+            case ARM_ME -> armMe(player, trigger.detail());
+            case SELF_CONVERT -> selfConvert(player, trigger.detail());
+            case SPREAD -> toggleSpread(player);
+            case SPAWN_ALIGN -> spawnAlign(player, trigger.detail());
+            case NPC_KILL_ME -> npcKillMe(player, trigger.detail());
+            case NPC_CAST_ME -> npcCastMe(player, trigger.detail());
+            case DROP_TOWER -> dropTower(player, hall, trigger.race());
         }
+    }
+
+    // -- walking the grid ---------------------------------------------------
+
+    /**
+     * Walks the player one room on or back.
+     *
+     * <p>Where the player is comes from the room they are standing in, not from a number they were
+     * told: the rooms of a serpentine row run one way and the next row runs back, and a room that
+     * takes four cells is still one step. A player standing between two rooms (in a doorway) is
+     * taken to have left the one they were in, and a player past either end is told so rather than
+     * moved somewhere arbitrary.
+     */
+    private void walkRoom(Player player, Hall hall, String race, int delta) {
+        if (hall == null || race == null) {
+            return;
+        }
+        restoreSpread();
+        int count = hall.roomCount(race);
+        int here = hall.roomIndexAt(race, player.getLocation());
+        if (count == 0 || here < 0) {
+            note(player, "§7你现在不在任何一间房里——按「回入口大厅」再挑一间");
+            return;
+        }
+        int next = here + delta;
+        if (next < 0) {
+            note(player, "§7这已经是第一间了");
+            return;
+        }
+        if (next >= count) {
+            note(player, "§7这已经是最后一间了");
+            return;
+        }
+        Location at = hall.roomSpawn(race, next);
+        teleport(player, at, delta > 0 ? "§a下一间" : "§a上一间");
+    }
+
+    /** Sends the player to a named room of a named hall. The detail is {@code RACE:INDEX}. */
+    private void goRoom(Player player, Hall hall, String detail) {
+        if (hall == null || detail == null) {
+            return;
+        }
+        restoreSpread();
+        String[] parts = detail.split(":", 2);
+        if (parts.length < 2) {
+            return;
+        }
+        int index;
+        try {
+            index = Integer.parseInt(parts[1].trim());
+        } catch (NumberFormatException notANumber) {
+            return;
+        }
+        Location at = hall.roomSpawn(parts[0].trim(), index);
+        if (at == null) {
+            note(player, "§c那间房不存在");
+            return;
+        }
+        teleport(player, at, "§a到了 " + Hall.title(parts[0].trim()) + " 的第 " + index + " 间");
+    }
+
+    /**
+     * Stands the player under one of the four roofs a step about the sun is about.
+     *
+     * <p>The four are one click apart on purpose. Whether glass counts as cover and whether leaves
+     * do is the whole question, and a player who has to walk somewhere else between the two
+     * answers cannot compare them.
+     */
+    private void standUnder(Player player, Hall hall, String race, String mat) {
+        Location at = hall == null || race == null ? null
+                : hall.point(race + ".sun." + (mat == null ? "open" : mat));
+        if (at == null) {
+            note(player, "§c这一格还没建好");
+            return;
+        }
+        String what = switch (mat == null ? "open" : mat) {
+            case "glass" -> "§b头顶是玻璃";
+            case "leaves" -> "§a头顶是树叶";
+            case "solid" -> "§7头顶是石头";
+            default -> "§6头顶什么都没有，完全露天";
+        };
+        teleport(player, at, what);
+    }
+
+    /** Puts the player on the release platform of a race's entry tower. */
+    private void dropTower(Player player, Hall hall, String race) {
+        Location at = hall == null || race == null ? null : hall.point(race + ".tower");
+        if (at == null) {
+            note(player, "§c入族塔还没建好");
+            return;
+        }
+        teleport(player, at, "§6站到塔顶了：手上要拿着羽毛，然后按「放手」");
+    }
+
+    // -- being changed by somebody else -------------------------------------
+
+    /**
+     * Puts the item a conversion needs into the player's hand.
+     *
+     * <p>Two of the conversions need the person being converted to be holding something - a
+     * demon's blow only heats a body that is holding netherrack, and an enderborn's only takes
+     * hold of a body holding a pearl. Which is the sort of detail a room can describe all day and
+     * a player will still not have in their hand.
+     */
+    private void armMe(Player player, String material) {
+        Material item = material == null ? null : Material.matchMaterial(material);
+        if (item == null) {
+            note(player, "§c这个环节没有配置物品");
+            return;
+        }
+        player.getInventory().setItemInMainHand(new ItemStack(item, 1));
+        note(player, "§7已把 " + item.name() + " 放到你手上");
+    }
+
+    /**
+     * Hands the player what one of the self-service conversions wants, and says what to do with
+     * it. The interaction itself has to be the player's - the plugin reads a right-click on a
+     * block, and a right-click a section performs is not one.
+     */
+    private void selfConvert(Player player, String detail) {
+        if (detail == null || detail.isBlank()) {
+            return;
+        }
+        for (String one : detail.split(",")) {
+            armMe(player, one.trim());
+        }
+        note(player, "§7拿着它右键旁边的方块，转换就发生在插件自己的判定里");
+    }
+
+    /**
+     * Puts one stand-in out as a named race, to see what a rule answers for somebody other than
+     * the player.
+     *
+     * <p>A ghoul cannot bind a human, and an angel counts as one; a priest's cure takes a
+     * supernatural target and refuses the same four. The interesting half of those rules is the
+     * refusal, so the room has to be able to put the refused target in front of the player.
+     */
+    private void spawnAlign(Player player, String race) {
+        spawnNpcs(player, race);
+    }
+
+    /**
+     * Sends a stand-in of a named race at the player until the player is dead.
+     *
+     * <p>This is the "I am the one being turned" half of every race's conversion. The plugin turns
+     * whoever a race kills, so the only honest way to show it is for a member of that race to
+     * actually kill the player: the dice, the message and the new race all come out of the same
+     * path a real fight would take.
+     *
+     * <p>What he is holding matters more than it looks. Each race has its own list of weapons it
+     * cannot use, and a race that cannot use a weapon deals nothing with one - so a stand-in whose
+     * race bans swords has to arrive empty-handed or the kill never lands and the section looks
+     * broken for a reason nobody can see. The check below is against the plugin's own list, so it
+     * stays right when the list changes.
+     */
+    private void npcKillMe(Player player, String detail) {
+        String[] parts = detail == null ? new String[0] : detail.trim().split(":", 2);
+        String race = parts.length > 0 ? parts[0].trim() : "";
+        Material wanted = parts.length > 1 ? Material.matchMaterial(parts[1].trim()) : null;
+        if (race.isEmpty()) {
+            return;
+        }
+        Material hand = legalWeapon(race, wanted, player);
+        Player npc = putPrey(player, 0, race, hand);
+        if (npc == null) {
+            note(player, "§c他起不来，这个环节暂时不能用");
+            return;
+        }
+        fullPower(npc);
+        revives.put(npc.getName(), npc.getLocation().clone());
+        Bukkit.getScheduler().runTaskLater(plugin, () -> hunt(player, npc), 30L);
+    }
+
+    /**
+     * Sends a stand-in of a named race over to cast one of its spells on the player.
+     *
+     * <p>Every spell the plugin has is hung on a damage event - the manager for whoever dealt the
+     * blow is asked what that blow does - so "cast at the player" and "hit the player" are the
+     * same action. A stand-in that walks up and swings is therefore casting; one that stands
+     * still is not. He is topped up first because a cast costs power and the power is spent for
+     * real: exorcising costs nine thousand of a possible ten, so a stand-in that has cast once
+     * cannot cast again until somebody fills him up.
+     */
+    private void npcCastMe(Player player, String detail) {
+        String[] parts = detail == null ? new String[0] : detail.trim().split(":", 2);
+        String race = parts.length > 0 ? parts[0].trim() : "";
+        Material item = parts.length > 1 ? Material.matchMaterial(parts[1].trim()) : null;
+        if (race.isEmpty()) {
+            return;
+        }
+        Player npc = putPrey(player, 0, race, item);
+        if (npc == null) {
+            note(player, "§c他起不来，这个环节暂时不能用");
+            return;
+        }
+        fullPower(npc);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> hunt(player, npc), 30L);
+    }
+
+    /** Walks a stand-in over to the player and swings until something changes. */
+    private void hunt(Player player, Player npc) {
+        if (!npc.isOnline() || !player.isOnline()) {
+            return;
+        }
+        walkIn(npc, player, () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            strike(npc, player);
+            // A blow worth two is a demonstration, not a fight: what these rooms are about is
+            // being killed, and a stand-in that lands a hit every two seconds takes half a
+            // minute over it. The rest of the job is done by the same swing, faster.
+            for (int i = 0; i < 12 && player.isOnline() && !player.isDead(); i++) {
+                strike(npc, player);
+            }
+        });
+    }
+
+    /**
+     * Makes the chance of being turned certain, for the room whose whole subject is being turned.
+     *
+     * <p>The roll stays the plugin's - this writes the number the roll is compared against, which
+     * the plugin reads at the moment of the kill, so the kill, the message and the new race all
+     * still come out of the plugin's own path. It is a toggle as well as a switch because a player
+     * who has just watched the certain version should be able to watch the real one without
+     * leaving the room, and it is put back automatically on the way out either way.
+     */
+    private void toggleSpread(Player player) {
+        if (spreadWas == null) {
+            spreadWas = SNConfigHandler.spreadChance;
+            SNConfigHandler.spreadChance = 1.0;
+            note(player, "§c这一间的转化已改成必定成功（原值 " + percent(spreadWas)
+                    + "，离开这间房会自动恢复）");
+            return;
+        }
+        SNConfigHandler.spreadChance = spreadWas;
+        double restored = spreadWas;
+        spreadWas = null;
+        note(player, "§a这一间的转化已恢复成原来的概率（" + percent(restored) + "）");
+    }
+
+    /** A probability as the percentage it is configured as: 0.35 reads "35%", not "0.4". */
+    private static String percent(double chance) {
+        return Math.round(chance * 100) + "%";
+    }
+
+    /**
+     * Puts the plugin's conversion chance back to what it was configured as.
+     *
+     * <p>Called everywhere a player leaves the room that borrowed it. A teaching setting that
+     * outlived the room would be a lie the next room tells, and the rooms after this one are about
+     * the real chance.
+     */
+    private void restoreSpread() {
+        if (spreadWas != null) {
+            SNConfigHandler.spreadChance = spreadWas;
+            spreadWas = null;
+        }
+    }
+
+    /**
+     * Fills a stand-in's power up, because spells are paid for out of it.
+     *
+     * <p>The ceiling is ten thousand whatever is asked for - the setter clamps - and a priest's
+     * exorcism costs nine of it, so "full power" is not a one-off gift at spawn: a second casting
+     * needs a second fill.
+     */
+    private void fullPower(Player npc) {
+        SuperNPlayer snplayer = SuperNManager.get(npc);
+        if (snplayer != null) {
+            snplayer.setPower(10000);
+        }
+    }
+
+    /**
+     * The weapon a stand-in of this race may swing, or nothing.
+     *
+     * <p>Each race has a list of things it cannot use, taken from the plugin's own configuration
+     * rather than copied - a copy is right until the day the list changes, and this one has to be
+     * right every day. A race whose list is empty or unset can hold anything.
+     */
+    private Material legalWeapon(String race, Material wanted, Player player) {
+        if (wanted == null || wanted.isAir()) {
+            return null;
+        }
+        List<Material> banned = bannedWeapons(race);
+        if (banned.contains(wanted)) {
+            note(player, "§e" + Hall.title(race) + " 用不了 " + wanted.name()
+                    + "（在它的禁用名单里），所以让他空手出手");
+            return null;
+        }
+        return wanted;
+    }
+
+    /** What a race may not swing, straight out of the plugin's own configuration. */
+    static List<Material> bannedWeapons(String race) {
+        return switch (race) {
+            case "ghoul" -> SNConfigHandler.ghoulWeapons;
+            case "werewolf" -> SNConfigHandler.wereWeapons;
+            case "witchhunter" -> SNConfigHandler.hunterWeapons;
+            case "enderborn" -> SNConfigHandler.enderWeapons;
+            case "vampire" -> SNConfigHandler.vampireWeapons;
+            case "demon" -> SNConfigHandler.demonWeapons;
+            case "priest" -> SNConfigHandler.priestWeapons;
+            default -> List.of();
+        };
+    }
+
+    /** What a race may wear, or {@code null} when it may wear anything the API can name. */
+    static List<Material> allowedArmor(String race) {
+        return switch (race) {
+            case "vampire" -> SNConfigHandler.vampireArmor;
+            case "ghoul" -> SNConfigHandler.ghoulArmor;
+            case "werewolf" -> SNConfigHandler.wereArmor;
+            case "demon" -> SNConfigHandler.demonArmor;
+            case "priest" -> SNConfigHandler.priestArmor;
+            case "witchhunter" -> SNConfigHandler.hunterArmor;
+            default -> null;
+        };
     }
 
     /**
@@ -502,8 +1242,18 @@ final class HallGuard implements Listener {
             world.setClearWeatherDuration(20 * 60 * 5);
         }
         note(player, raining ? "§9这个大厅开始下雨了（下 5 分钟）" : "§7这个大厅的雨停了");
-        if (raining && !openToSky(player)) {
+        if (!raining) {
+            return;
+        }
+        if (!openToSky(player)) {
             note(player, "§7不过你头顶有屋顶，雨落不到你身上 —— 点旁边的「站到露天台」");
+        } else if (SuperNManager.get(player).isGhoul()) {
+            // The one place where "it is raining" is not just scenery. A ghoul that is standing in
+            // the rain stops regenerating, and since this switch is right next to the regeneration
+            // step, a reader who flips it watches their health bar stop moving with nothing on
+            // screen to explain it. So the switch says what it just did to the rule.
+            note(player, "§7你在露天淋着雨：食尸鬼的回血现在被关掉了，"
+                    + "点「站到有顶处」就恢复（不用关雨）");
         }
     }
 
@@ -569,6 +1319,7 @@ final class HallGuard implements Listener {
 
     /** Empties the props, takes the hall's monsters back, restores humanity and moves the player. */
     private void backToHuman(Player player, Hall hall, Location where, String what) {
+        restoreSpread();
         cancelWalk();
         clearHallMobs(player, null);
         clearPrey();
@@ -612,6 +1363,19 @@ final class HallGuard implements Listener {
         double full = max == null ? 20 : max.getValue();
         player.setHealth(Math.max(1, full / 2));
         note(player, "§c已把你打到半血，现在可以看回血了");
+    }
+
+    /**
+     * Puts the player back on a full bar.
+     *
+     * <p>The mirror of {@link #hurt}, and the one two steps needed without having it: a step about
+     * damage over time wants a full bar to start from, and the switch that said "top yourself up
+     * first" was wired to the wound it was meant to undo.
+     */
+    private void restoreHealth(Player player) {
+        AttributeInstance max = player.getAttribute(Attribute.MAX_HEALTH);
+        player.setHealth(max == null ? 20 : max.getValue());
+        note(player, "§a血已经补满，可以开始了");
     }
 
     /**
@@ -921,7 +1685,11 @@ final class HallGuard implements Listener {
      */
     private Player putPrey(Player player, int seat, String race, Material hand) {
         String name = PREY_NAMES.get(seat);
-        Object ghost = plugin.spawnGhost(name, player.getWorld());
+        // Wearing the race he is about to become, and chosen before he exists: a skin is a
+        // property of the profile the server player is built from, and nothing re-sends it
+        // afterwards. A stand-in who is playing a race is read before he is listened to, and the
+        // label over his head now says the same thing his face does.
+        Object ghost = plugin.spawnGhost(name, player.getWorld(), Skins.of(race));
         Player npc = Bukkit.getPlayerExact(name);
         if (ghost == null || npc == null) {
             plugin.dropGhost(name);
@@ -986,7 +1754,7 @@ final class HallGuard implements Listener {
         // shows the tester a split that was not the one they set up.
         List<Player> here = preyOnline(player);
         if (here.isEmpty()) {
-            note(player, "§c这一格还没有同伴：先点旁边那个「放出一个」按钮");
+            note(player, "§c这一格还没有同伴：先右键旁边那块「放出一个」的牌");
             return;
         }
         Player npc = here.get(0);
@@ -1021,7 +1789,7 @@ final class HallGuard implements Listener {
     private void npcHitsNpc(Player player, String spec) {
         List<Player> here = preyOnline(player);
         if (here.isEmpty()) {
-            note(player, "§c这一格还没有同伴：先点旁边那个「放出一个」按钮");
+            note(player, "§c这一格还没有同伴：先右键旁边那块「放出一个」的牌");
             return;
         }
         Player target = here.get(0);
@@ -1078,25 +1846,69 @@ final class HallGuard implements Listener {
      * checked for a floor and two clear blocks, and checked against the stand-ins already put
      * down, so a spot that is taken is not handed out twice.
      */
+    /**
+     * Where a stand-in stands so that he can reach the player who asked for him.
+     *
+     * <p>Not in front of the player, which is what this did and what was wrong with it. A player
+     * asks for a stand-in by right-clicking a board, and a board is on a wall they are facing - so
+     * the space in front of them is the far side of that wall. The stand-in arrived outside the
+     * room, out of reach, and could not walk to the person he was supposed to attack: the section
+     * looked broken rather than misplaced. Nothing caught it either, because "is there floor and
+     * room for a body here" is true on both sides of a wall.
+     *
+     * <p>So the candidates are tried from the player's back first, then his sides, then his front,
+     * and <em>every one of them has to be inside the room the player is standing in</em>. That last
+     * condition is the real fix: the search can now fail, and failing means falling through to
+     * {@link #spotFor}, which is a short walk from the middle of the room. In front of the player is
+     * still allowed, because across a room it is the natural place for somebody to walk in from -
+     * it is just no longer preferred over a place he can actually get to.
+     */
     private Location seatFor(Player player, int seat, List<Location> taken) {
         Location centre = player.getLocation();
-        Vector facing = centre.getDirection().setY(0);
-        if (facing.lengthSquared() < 0.01) {
-            facing = new Vector(0, 0, 1);
-        }
-        facing.normalize();
-        Vector right = new Vector(-facing.getZ(), 0, facing.getX());
-        for (int attempt = 0; attempt < 9; attempt++) {
-            double across = ((seat + attempt) % 3 - 1) * 1.8;
-            double ahead = 3.0 + ((seat + attempt) / 3) * 2.2;
-            Location at = centre.clone()
-                    .add(facing.clone().multiply(ahead))
-                    .add(right.clone().multiply(across));
-            if (canStand(at) && clearOf(at, taken)) {
+        String room = roomOf(player);
+        Vector facing = flat(centre.getDirection());
+        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
+        List<Vector> directions = List.of(facing.clone().multiply(-1), left,
+                left.clone().multiply(-1), facing);
+        for (int attempt = 0; attempt < 12; attempt++) {
+            Vector direction = directions.get(Math.min(attempt / 3, directions.size() - 1));
+            double ahead = 3.0 + (attempt % 3) * 1.6;
+            Location at = centre.clone().add(direction.clone().multiply(ahead));
+            if (insideRoom(room, at) && canStand(at) && clearOf(at, taken)) {
                 return at;
             }
         }
         return spotFor(player);
+    }
+
+    /** A horizontal unit vector, with a fallback when a player is looking straight up or down. */
+    private static Vector flat(Vector direction) {
+        Vector flat = direction.clone().setY(0);
+        if (flat.lengthSquared() < 0.01) {
+            return new Vector(0, 0, 1);
+        }
+        return flat.normalize();
+    }
+
+    /** Which room a player is standing in, or {@code null} when they are not in one. */
+    private String roomOf(Player player) {
+        Hall hall = plugin.hallOrNull();
+        return hall == null ? null : hall.roomAt(player.getLocation());
+    }
+
+    /**
+     * Whether a spot is inside the room being worked in.
+     *
+     * <p>Always true when there is no room to speak of - outside a hall there is nothing to be
+     * inside of - but inside one this is what stops a stand-in being put down behind a wall.
+     */
+    private boolean insideRoom(String room, Location at) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null || room == null) {
+            return true;
+        }
+        Hall.Box zone = hall.zone("room." + room);
+        return zone == null || zone.holds(at);
     }
 
     /** True when nothing has already been put down within a block of that spot. */
@@ -1188,6 +2000,12 @@ final class HallGuard implements Listener {
         if (!prey.containsKey(name)) {
             return;
         }
+        // Nothing he was carrying hits the floor. A stand-in killed while holding a pearl, a
+        // sword and a label drops all of it, and the next person through the room picks it up -
+        // which turns a demonstration into a loot run and puts items the hall did not hand out
+        // into a player's inventory.
+        event.getDrops().clear();
+        event.setDroppedExp(0);
         Location home = revives.get(name);
         if (home != null) {
             // One of the targets that is meant to be killed again. Nothing puts a player back on
@@ -1369,14 +2187,31 @@ final class HallGuard implements Listener {
      * <p>The swing is the part that was missing: a target that never hits back tests nothing
      * about a fight, and half these sections are "let him hit you first, then watch". He swings
      * once and then stops, because a stand-in that keeps swinging is a fight, not a test.
+     *
+     * <p>What race he plays comes from the section, because it decides whether the section works at
+     * all. Most of these steps are about damage - swing at him, read the number - and for those he
+     * is a person, which is what a player is. A few are about an ability that only applies to a
+     * supernatural target, and for those a person makes the ability refuse: the angel's paper
+     * answers "Player is not a supernatural!" and the section reads as broken while working
+     * perfectly. So a step that needs a target says which one, and everything else gets a person.
      */
-    private void bringSpar(Player player) {
+    private void bringSpar(Player player, String race) {
         Player spar = stageSpar(player, new ItemStack(Material.IRON_SWORD));
         if (spar == null) {
             return;
         }
-        humanise(spar);
-        note(player, "§f陪练从 " + Math.round(spar.getLocation().distance(player.getLocation()))
+        SuperNPlayer asPlayer = SuperNManager.get(spar);
+        String plays = race == null || race.isBlank() ? "human" : race;
+        if ("human".equalsIgnoreCase(plays)) {
+            humanise(spar);
+        } else if (!plays.equalsIgnoreCase(asPlayer.getType())) {
+            SuperNManager.convert(asPlayer, plays, SNConfigHandler.vampirePowerStart);
+            spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
+            Nms.pushEquipment(spar);
+        }
+        labelRace(spar, SuperNManager.get(spar).getType());
+        note(player, "§f陪练（现在是 " + SuperNManager.get(spar).getType() + "）从 "
+                + Math.round(spar.getLocation().distance(player.getLocation()))
                 + " 格外走过来（他叫 " + SPAR + "），他会砍你一下");
         walkIn(spar, player, () -> strike(spar, player));
     }
@@ -1514,7 +2349,11 @@ final class HallGuard implements Listener {
         faceThe(spar, player);
         spar.swingMainHand();
         double before = player.getHealth();
-        player.damage(raw, spar);
+        // Through `land`, not straight at the health bar. A player with no client behind them is
+        // refused damage by the server, and the one thing that gets past it is a blow from somebody
+        // in creative - so the blow is thrown the same way every other hit in this building is
+        // thrown, and a stand-in standing in for the tester loses health for real.
+        land(spar, player, raw);
         double lost = Math.max(0, before - player.getHealth());
         floatNumber(player.getLocation().add(0, 1.8, 0), lost);
         note(player, "§7陪练的" + bladeName(held.getType()) + "落在你身上：§f" + trim(lost)
@@ -1629,7 +2468,7 @@ final class HallGuard implements Listener {
             if (spar != null) {
                 plugin.dropGhost(SPAR);
             }
-            Object ghost = plugin.spawnGhost(SPAR, world);
+            Object ghost = plugin.spawnGhost(SPAR, world, Skins.MASTER);
             spar = Bukkit.getPlayerExact(SPAR);
             if (spar == null) {
                 if (ghost != null) {
@@ -1658,27 +2497,27 @@ final class HallGuard implements Listener {
      * wall is one nobody can see or hit. Nearer spots are tried next, then the player's own feet,
      * then the four sides.
      */
+    /**
+     * The stand-in's place when there is no room left in front to try: close to the player, in a
+     * direction he can get to.
+     *
+     * <p>The old version of this reached for the player's own block, then for a step that was still
+     * ahead of him - so a player standing against the wall he just clicked got a stand-in inside the
+     * wall or past it. Directions and the room check are the same as {@link #seatFor}, only the
+     * distances are smaller because this is the attempt that has to work.
+     */
     private Location spotFor(Player player) {
         Location at = player.getLocation();
-        Vector facing = at.getDirection().setY(0);
-        if (facing.lengthSquared() < 0.01) {
-            facing = new Vector(0, 0, 1);
-        }
-        facing.normalize();
-        for (int distance = 2; distance >= 1; distance--) {
-            Location candidate = at.clone().add(facing.clone().multiply(distance));
-            if (canStand(candidate)) {
-                return candidate;
-            }
-        }
-        if (canStand(at)) {
-            return at;
-        }
-        for (BlockFace side : new BlockFace[] {BlockFace.EAST, BlockFace.WEST,
-                BlockFace.NORTH, BlockFace.SOUTH}) {
-            Location candidate = at.clone().add(side.getModX(), 0, side.getModZ());
-            if (canStand(candidate)) {
-                return candidate;
+        String room = roomOf(player);
+        Vector facing = flat(at.getDirection());
+        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
+        for (Vector direction : List.of(facing.clone().multiply(-1), left,
+                left.clone().multiply(-1), facing)) {
+            for (int distance = 3; distance >= 1; distance--) {
+                Location candidate = at.clone().add(direction.clone().multiply(distance));
+                if (insideRoom(room, candidate) && canStand(candidate)) {
+                    return candidate;
+                }
             }
         }
         return at;
@@ -1970,6 +2809,7 @@ final class HallGuard implements Listener {
             return;
         }
         List<String> before = hall.wrongFixtures();
+        refreshGuides(hall);
         if (hall.repair()) {
             plugin.getLogger().info("put the hall's switches back: " + before);
         }
