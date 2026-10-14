@@ -713,7 +713,7 @@ final class HallGuard implements Listener {
         switch (trigger.kind()) {
             case ENTER_LOBBY -> backToHuman(player, hall, hall.lobbySpawn(), "§a回到测试大厅");
             case LEAVE_HALL -> backToHuman(player, hall, hall.outsideSpawn(),
-                    "§a已离开测试大厅，踩返回垫的按钮可以回来");
+                    "§a已离开测试大厅，右键返回垫上那块牌可以回来");
             case ENTER_AREA -> enter(player, hall, trigger.race());
             case RESET_HUMAN -> {
                 restore(player);
@@ -1754,7 +1754,7 @@ final class HallGuard implements Listener {
         // shows the tester a split that was not the one they set up.
         List<Player> here = preyOnline(player);
         if (here.isEmpty()) {
-            note(player, "§c这一格还没有同伴：先点旁边那个「放出一个」按钮");
+            note(player, "§c这一格还没有同伴：先右键旁边那块「放出一个」的牌");
             return;
         }
         Player npc = here.get(0);
@@ -1789,7 +1789,7 @@ final class HallGuard implements Listener {
     private void npcHitsNpc(Player player, String spec) {
         List<Player> here = preyOnline(player);
         if (here.isEmpty()) {
-            note(player, "§c这一格还没有同伴：先点旁边那个「放出一个」按钮");
+            note(player, "§c这一格还没有同伴：先右键旁边那块「放出一个」的牌");
             return;
         }
         Player target = here.get(0);
