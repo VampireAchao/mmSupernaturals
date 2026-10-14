@@ -860,6 +860,18 @@ public final class Hall {
         sections.addAll(sectionsFor(race, baseHead));
         List<Placement> plan = layOut(sections);
 
+        // The entry room's two ways in point at rooms one and two by number, and numbers that have
+        // to agree with an insert made in another method are numbers that will disagree sooner or
+        // later - these did, for every hall at once. So the one thing the entry room claims about
+        // the list is checked here, where both the claim and the list are in view: room two is the
+        // room about being killed. Anything else is a warning on the console rather than a report
+        // from a player who walked into the wrong room.
+        if (sections.size() > 2 && !sections.get(2).title().contains("被杀")) {
+            Bukkit.getLogger().warning("the entry room of " + race
+                    + " points at room 2 for being killed, but room 2 is '"
+                    + sections.get(2).title() + "' - the entry room's two ways in are mislabelled");
+        }
+
         int rows = 0;
         for (Placement placement : plan) {
             rows = Math.max(rows, placement.row() + (placement.span() > 1 ? 2 : 1));
@@ -1417,11 +1429,17 @@ public final class Hall {
                     new ItemStack(Material.BREAD, 8)));
             // Two ways into the race, and the three ways out every room has. No directory: the
             // rest of the hall is walked, room by room, each board naming the one after it.
+            // Two ways in, and the numbers are not what they look like. Room one is the shrine and
+            // room two is the kill - not the other way round, which is how this was first written
+            // and how it was wrong for every one of the eight halls. The kill room is spliced into
+            // the step list at position one, and the entry room is put in front of that list
+            // afterwards, so what is one over there is two in here. The check in raceHall says so
+            // out loud rather than leaving it to a player to report.
             switchpoint(w, y, x + 1, z + 3,
-                    Trigger.with(Kind.GO_ROOM, race, race + ":2"),
+                    Trigger.with(Kind.GO_ROOM, race, race + ":1"),
                     "§c去 转化祭坛", "§7第①间：变成这一族");
             switchpoint(w, y, x + 5, z + 3,
-                    Trigger.with(Kind.GO_ROOM, race, race + ":1"),
+                    Trigger.with(Kind.GO_ROOM, race, race + ":2"),
                     "§c被本族杀死", "§7第②间：杀死也转化");
             switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.RETURN_START, race),
                     "§f回大厅中央", "§7站回入口正中");
