@@ -1291,7 +1291,7 @@ final class HallGuard implements Listener {
      */
     private Player putPrey(Player player, int seat, String race, Material hand) {
         String name = PREY_NAMES.get(seat);
-        Object ghost = plugin.spawnGhost(name, player.getWorld());
+        Object ghost = plugin.spawnGhost(name, player.getWorld(), Skins.HUMAN);
         Player npc = Bukkit.getPlayerExact(name);
         if (ghost == null || npc == null) {
             plugin.dropGhost(name);
@@ -2009,7 +2009,7 @@ final class HallGuard implements Listener {
             if (spar != null) {
                 plugin.dropGhost(SPAR);
             }
-            Object ghost = plugin.spawnGhost(SPAR, world);
+            Object ghost = plugin.spawnGhost(SPAR, world, Skins.MASTER);
             spar = Bukkit.getPlayerExact(SPAR);
             if (spar == null) {
                 if (ghost != null) {

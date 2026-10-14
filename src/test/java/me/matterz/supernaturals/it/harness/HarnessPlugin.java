@@ -173,9 +173,20 @@ public final class HarnessPlugin extends JavaPlugin {
      * taken back out. Any older one of the same name goes first - two players cannot share a name.
      */
     Object spawnGhost(String name, World world) {
+        return spawnGhost(name, world, null);
+    }
+
+    /**
+     * The same, in a particular skin.
+     *
+     * <p>The skin is not decoration here: a stand-in who is playing a race, or a teacher who is
+     * playing a job, is read before he is listened to. It has to be handed over at the moment he
+     * is built - see {@link Nms#spawn(String, World, Skins.Skin)}.
+     */
+    Object spawnGhost(String name, World world, Skins.Skin skin) {
         dropGhost(name);
         try {
-            Object actor = Nms.spawn(name, world);
+            Object actor = Nms.spawn(name, world, skin);
             // Out of transit before anybody tries to hit him: a stand-in nobody can hurt makes
             // every section that asks for a hit look broken.
             Nms.arrive(actor);

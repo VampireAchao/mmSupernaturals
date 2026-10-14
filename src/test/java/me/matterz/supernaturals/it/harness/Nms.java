@@ -59,6 +59,11 @@ final class Nms {
      * world the hitting happens in, not wherever the first world is.
      */
     static Object spawn(String name, World world) {
+        return spawn(name, world, null);
+    }
+
+    /** The same, wearing one of {@link Skins}'s textures - or nothing, for a default skin. */
+    static Object spawn(String name, World world, Skins.Skin skin) {
         try {
             Object bukkit = Bukkit.getServer();
             Object minecraftServer = call(bukkit, "getServer");
@@ -68,6 +73,7 @@ final class Nms {
             Object profile = profileClass
                     .getConstructor(UUID.class, String.class)
                     .newInstance(offlineUuid(name), name);
+            wear(profile, skin);
 
             Class<?> clientInformationClass = load("net.minecraft.server.level.ClientInformation");
             Object clientInformation = clientInformationClass.getMethod("createDefault").invoke(null);
@@ -97,6 +103,34 @@ final class Nms {
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("could not create a fake player named " + name, e);
         }
+    }
+
+    /**
+     * Puts a skin on a profile, before the profile is sent anywhere.
+     *
+     * <p>A player's skin is one property of their profile: "textures", a base64 blob naming a
+     * texture on Mojang's own texture server. A profile made by hand has no properties at all,
+     * which is why every stand-in in the hall has always drawn as the default Steve or Alex
+     * whatever race the room was about. It has to be on the profile <em>before</em>
+     * {@code placeNewPlayer} runs - the profile goes out with the player-info packet that call
+     * sends, and nothing sends it a second time.
+     */
+    private static void wear(Object profile, Skins.Skin skin) throws ReflectiveOperationException {
+        if (skin == null) {
+            return;
+        }
+        Object properties = profile.getClass().getMethod("getProperties").invoke(profile);
+        Class<?> propertyClass = load("com.mojang.authlib.properties.Property");
+        Object property = propertyClass
+                .getConstructor(String.class, String.class, String.class)
+                .newInstance("textures", skin.value(), skin.signature());
+        for (Method candidate : properties.getClass().getMethods()) {
+            if (candidate.getName().equals("put") && candidate.getParameterCount() == 2) {
+                candidate.invoke(properties, "textures", property);
+                return;
+            }
+        }
+        throw new IllegalStateException("the profile's properties cannot take a texture");
     }
 
     /** Takes a fake player back out, the same way a quitting client would. */
