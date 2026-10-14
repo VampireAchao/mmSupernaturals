@@ -200,6 +200,14 @@ final class HallGuard implements Listener {
     private static final List<String> SUPERNATURAL = List.of(
             "vampire", "ghoul", "werewolf", "demon", "priest", "witchhunter", "enderborn", "angel");
 
+    /**
+     * The plugin's own conversion chance, while a room is holding it open at a hundred percent.
+     *
+     * <p>{@code null} means nothing is holding it: the number in the setting is the number the
+     * plugin was configured with, and no room is responsible for putting anything back.
+     */
+    private Double spreadWas;
+
     /** The walk the stand-in is currently on, so a second section cannot start another. */
     private BukkitTask walkTask;
 
@@ -230,14 +238,17 @@ final class HallGuard implements Listener {
      * it is better than a switch that reports a spell landed while nobody lost anything.
      */
     private static void land(Player attacker, Player victim, double damage) {
-        GameMode before = attacker.getGameMode();
-        if (before != GameMode.CREATIVE) {
-            attacker.setGameMode(GameMode.CREATIVE);
-        }
+        // What is in the way is on the victim, not on the attacker. A player with no client behind
+        // it is flagged permanently invulnerable by the server the moment it is put in a world, and
+        // that flag is what refuses every blow in this building - measured both ways on the console:
+        // a hit from a creative attacker went 20.0 -> 20.0, and the same hit after clearing the
+        // victim's flag went 20.0 -> 17.0. Borrowing creative for the attacker was a guess that
+        // never was the mechanism, and it also told the plugin something untrue about whoever was
+        // swinging - that they were in creative - which some of these rules read.
+        Nms.arrive(victim);
+        victim.setInvulnerable(false);
+        victim.setNoDamageTicks(0);
         victim.damage(damage, attacker);
-        if (attacker.getGameMode() != before) {
-            attacker.setGameMode(before);
-        }
     }
 
     /** Lifts the invulnerability the server puts on a player it has never heard from. */
@@ -386,6 +397,7 @@ final class HallGuard implements Listener {
             case SUN_MAT -> standUnder(player, hall, trigger.race(), trigger.detail());
             case ARM_ME -> armMe(player, trigger.detail());
             case SELF_CONVERT -> selfConvert(player, trigger.detail());
+            case SPREAD -> toggleSpread(player);
             case SPAWN_ALIGN -> spawnAlign(player, trigger.detail());
             case NPC_KILL_ME -> npcKillMe(player, trigger.detail());
             case NPC_CAST_ME -> npcCastMe(player, trigger.detail());
@@ -408,10 +420,11 @@ final class HallGuard implements Listener {
         if (hall == null || race == null) {
             return;
         }
+        restoreSpread();
         int count = hall.roomCount(race);
         int here = hall.roomIndexAt(race, player.getLocation());
         if (count == 0 || here < 0) {
-            note(player, "§7你现在不在任何一间房里，用墙上的门走");
+            note(player, "§7你现在不在任何一间房里——按「回入口大厅」再挑一间");
             return;
         }
         int next = here + delta;
@@ -432,6 +445,7 @@ final class HallGuard implements Listener {
         if (hall == null || detail == null) {
             return;
         }
+        restoreSpread();
         String[] parts = detail.split(":", 2);
         if (parts.length < 2) {
             return;
@@ -605,6 +619,48 @@ final class HallGuard implements Listener {
                 strike(npc, player);
             }
         });
+    }
+
+    /**
+     * Makes the chance of being turned certain, for the room whose whole subject is being turned.
+     *
+     * <p>The roll stays the plugin's - this writes the number the roll is compared against, which
+     * the plugin reads at the moment of the kill, so the kill, the message and the new race all
+     * still come out of the plugin's own path. It is a toggle as well as a switch because a player
+     * who has just watched the certain version should be able to watch the real one without
+     * leaving the room, and it is put back automatically on the way out either way.
+     */
+    private void toggleSpread(Player player) {
+        if (spreadWas == null) {
+            spreadWas = SNConfigHandler.spreadChance;
+            SNConfigHandler.spreadChance = 1.0;
+            note(player, "§c这一间的转化已改成必定成功（原值 " + percent(spreadWas)
+                    + "，离开这间房会自动恢复）");
+            return;
+        }
+        SNConfigHandler.spreadChance = spreadWas;
+        double restored = spreadWas;
+        spreadWas = null;
+        note(player, "§a这一间的转化已恢复成原来的概率（" + percent(restored) + "）");
+    }
+
+    /** A probability as the percentage it is configured as: 0.35 reads "35%", not "0.4". */
+    private static String percent(double chance) {
+        return Math.round(chance * 100) + "%";
+    }
+
+    /**
+     * Puts the plugin's conversion chance back to what it was configured as.
+     *
+     * <p>Called everywhere a player leaves the room that borrowed it. A teaching setting that
+     * outlived the room would be a lie the next room tells, and the rooms after this one are about
+     * the real chance.
+     */
+    private void restoreSpread() {
+        if (spreadWas != null) {
+            SNConfigHandler.spreadChance = spreadWas;
+            spreadWas = null;
+        }
     }
 
     /**
@@ -869,6 +925,7 @@ final class HallGuard implements Listener {
 
     /** Empties the props, takes the hall's monsters back, restores humanity and moves the player. */
     private void backToHuman(Player player, Hall hall, Location where, String what) {
+        restoreSpread();
         cancelWalk();
         clearHallMobs(player, null);
         clearPrey();
@@ -1833,7 +1890,11 @@ final class HallGuard implements Listener {
         faceThe(spar, player);
         spar.swingMainHand();
         double before = player.getHealth();
-        player.damage(raw, spar);
+        // Through `land`, not straight at the health bar. A player with no client behind them is
+        // refused damage by the server, and the one thing that gets past it is a blow from somebody
+        // in creative - so the blow is thrown the same way every other hit in this building is
+        // thrown, and a stand-in standing in for the tester loses health for real.
+        land(spar, player, raw);
         double lost = Math.max(0, before - player.getHealth());
         floatNumber(player.getLocation().add(0, 1.8, 0), lost);
         note(player, "§7陪练的" + bladeName(held.getType()) + "落在你身上：§f" + trim(lost)
