@@ -51,6 +51,7 @@ import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
@@ -222,6 +223,18 @@ final class HallGuard implements Listener {
      * they can move, which is not a test of anything.
      */
     private static final int GRACE_TICKS = 60;
+
+    /**
+     * How long a player has to wait before a guide will tell him the same room again.
+     *
+     * <p>Half a second. One right-click is one answer, but asking twice on purpose - because the
+     * first answer scrolled past - has to stay possible, so this is short and it is per player
+     * rather than per guide.
+     */
+    private static final int TALK_GAP = 10;
+
+    /** When each player was last told a room's teaching, so one click is one answer. */
+    private final Map<String, Integer> toldAt = new HashMap<>();
 
     /**
      * Where a player fell, and what killed them, from the death to the moment they get up.
@@ -550,11 +563,24 @@ final class HallGuard implements Listener {
      */
     @EventHandler
     public void onGuideTapped(PlayerInteractEntityEvent event) {
+        // One right-click arrives as two events, one per hand, and a player holding the button down
+        // produces more. Saying the whole room's teaching twice in a row is not a second answer, it
+        // is the same answer in a louder voice - so the off hand is ignored and the same player
+        // cannot be told again for half a second.
+        if (event.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
         String room = guides.get(event.getRightClicked().getName());
         if (room == null) {
             return;
         }
         event.setCancelled(true);
+        Player listener = event.getPlayer();
+        Integer lastTold = toldAt.get(listener.getName());
+        if (lastTold != null && ticks - lastTold < TALK_GAP) {
+            return;
+        }
+        toldAt.put(listener.getName(), ticks);
         Hall hall = plugin.hallOrNull();
         if (hall == null) {
             return;
@@ -563,7 +589,7 @@ final class HallGuard implements Listener {
         if (dot < 0) {
             return;
         }
-        sayGuide(event.getPlayer(), hall.guideTalk(room.substring(0, dot),
+        sayGuide(listener, hall.guideTalk(room.substring(0, dot),
                 Integer.parseInt(room.substring(dot + 1))));
     }
 
@@ -1820,25 +1846,69 @@ final class HallGuard implements Listener {
      * checked for a floor and two clear blocks, and checked against the stand-ins already put
      * down, so a spot that is taken is not handed out twice.
      */
+    /**
+     * Where a stand-in stands so that he can reach the player who asked for him.
+     *
+     * <p>Not in front of the player, which is what this did and what was wrong with it. A player
+     * asks for a stand-in by right-clicking a board, and a board is on a wall they are facing - so
+     * the space in front of them is the far side of that wall. The stand-in arrived outside the
+     * room, out of reach, and could not walk to the person he was supposed to attack: the section
+     * looked broken rather than misplaced. Nothing caught it either, because "is there floor and
+     * room for a body here" is true on both sides of a wall.
+     *
+     * <p>So the candidates are tried from the player's back first, then his sides, then his front,
+     * and <em>every one of them has to be inside the room the player is standing in</em>. That last
+     * condition is the real fix: the search can now fail, and failing means falling through to
+     * {@link #spotFor}, which is a short walk from the middle of the room. In front of the player is
+     * still allowed, because across a room it is the natural place for somebody to walk in from -
+     * it is just no longer preferred over a place he can actually get to.
+     */
     private Location seatFor(Player player, int seat, List<Location> taken) {
         Location centre = player.getLocation();
-        Vector facing = centre.getDirection().setY(0);
-        if (facing.lengthSquared() < 0.01) {
-            facing = new Vector(0, 0, 1);
-        }
-        facing.normalize();
-        Vector right = new Vector(-facing.getZ(), 0, facing.getX());
-        for (int attempt = 0; attempt < 9; attempt++) {
-            double across = ((seat + attempt) % 3 - 1) * 1.8;
-            double ahead = 3.0 + ((seat + attempt) / 3) * 2.2;
-            Location at = centre.clone()
-                    .add(facing.clone().multiply(ahead))
-                    .add(right.clone().multiply(across));
-            if (canStand(at) && clearOf(at, taken)) {
+        String room = roomOf(player);
+        Vector facing = flat(centre.getDirection());
+        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
+        List<Vector> directions = List.of(facing.clone().multiply(-1), left,
+                left.clone().multiply(-1), facing);
+        for (int attempt = 0; attempt < 12; attempt++) {
+            Vector direction = directions.get(Math.min(attempt / 3, directions.size() - 1));
+            double ahead = 3.0 + (attempt % 3) * 1.6;
+            Location at = centre.clone().add(direction.clone().multiply(ahead));
+            if (insideRoom(room, at) && canStand(at) && clearOf(at, taken)) {
                 return at;
             }
         }
         return spotFor(player);
+    }
+
+    /** A horizontal unit vector, with a fallback when a player is looking straight up or down. */
+    private static Vector flat(Vector direction) {
+        Vector flat = direction.clone().setY(0);
+        if (flat.lengthSquared() < 0.01) {
+            return new Vector(0, 0, 1);
+        }
+        return flat.normalize();
+    }
+
+    /** Which room a player is standing in, or {@code null} when they are not in one. */
+    private String roomOf(Player player) {
+        Hall hall = plugin.hallOrNull();
+        return hall == null ? null : hall.roomAt(player.getLocation());
+    }
+
+    /**
+     * Whether a spot is inside the room being worked in.
+     *
+     * <p>Always true when there is no room to speak of - outside a hall there is nothing to be
+     * inside of - but inside one this is what stops a stand-in being put down behind a wall.
+     */
+    private boolean insideRoom(String room, Location at) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null || room == null) {
+            return true;
+        }
+        Hall.Box zone = hall.zone("room." + room);
+        return zone == null || zone.holds(at);
     }
 
     /** True when nothing has already been put down within a block of that spot. */
@@ -2410,27 +2480,27 @@ final class HallGuard implements Listener {
      * wall is one nobody can see or hit. Nearer spots are tried next, then the player's own feet,
      * then the four sides.
      */
+    /**
+     * The stand-in's place when there is no room left in front to try: close to the player, in a
+     * direction he can get to.
+     *
+     * <p>The old version of this reached for the player's own block, then for a step that was still
+     * ahead of him - so a player standing against the wall he just clicked got a stand-in inside the
+     * wall or past it. Directions and the room check are the same as {@link #seatFor}, only the
+     * distances are smaller because this is the attempt that has to work.
+     */
     private Location spotFor(Player player) {
         Location at = player.getLocation();
-        Vector facing = at.getDirection().setY(0);
-        if (facing.lengthSquared() < 0.01) {
-            facing = new Vector(0, 0, 1);
-        }
-        facing.normalize();
-        for (int distance = 2; distance >= 1; distance--) {
-            Location candidate = at.clone().add(facing.clone().multiply(distance));
-            if (canStand(candidate)) {
-                return candidate;
-            }
-        }
-        if (canStand(at)) {
-            return at;
-        }
-        for (BlockFace side : new BlockFace[] {BlockFace.EAST, BlockFace.WEST,
-                BlockFace.NORTH, BlockFace.SOUTH}) {
-            Location candidate = at.clone().add(side.getModX(), 0, side.getModZ());
-            if (canStand(candidate)) {
-                return candidate;
+        String room = roomOf(player);
+        Vector facing = flat(at.getDirection());
+        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
+        for (Vector direction : List.of(facing.clone().multiply(-1), left,
+                left.clone().multiply(-1), facing)) {
+            for (int distance = 3; distance >= 1; distance--) {
+                Location candidate = at.clone().add(direction.clone().multiply(distance));
+                if (insideRoom(room, candidate) && canStand(candidate)) {
+                    return candidate;
+                }
             }
         }
         return at;

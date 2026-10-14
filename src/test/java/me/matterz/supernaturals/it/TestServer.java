@@ -184,13 +184,19 @@ public final class TestServer implements AutoCloseable {
         System.out.println("  console       : type a server command here, e.g.  op YourName");
         if (hallAt != null) {
             System.out.println("  hall          : you spawn in the lobby at " + hallAt);
-            System.out.println("                  eight race buttons on the lobby wall, plus leaving."
-                    + " Each race hall is");
-            System.out.println("                  a corridor of numbered sections, read left to"
-                    + " right; every row ends");
-            System.out.println("                  with a sparring stand-in, a +1000 power switch, and"
-                    + " switches back to");
-            System.out.println("                  the start or out of the test");
+            System.out.println("                  eight boards on the lobby wall, one per"
+                    + " race - right-click one.");
+            System.out.println("                  A race's hall is its own world: one room per"
+                    + " step, and the rooms");
+            System.out.println("                  do not connect. In a room the boards on the far"
+                    + " wall are the actions");
+            System.out.println("                  (right-click), the near wall is the short"
+                    + " version of what to do, the");
+            System.out.println("                  east wall is the way back / on / out, and the"
+                    + " red wool on the west");
+            System.out.println("                  wall is the exit button. A guide stands in"
+                    + " each room - right-click");
+            System.out.println("                  him for the long version, as often as you like.");
         }
         System.out.println("  world         : " + (flat
                 ? "flat test world, -Dit.flat=false for real terrain"
