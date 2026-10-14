@@ -48,6 +48,7 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
@@ -60,6 +61,7 @@ import org.bukkit.util.Vector;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -211,6 +213,39 @@ final class HallGuard implements Listener {
     /** The walk the stand-in is currently on, so a second section cannot start another. */
     private BukkitTask walkTask;
 
+    /**
+     * How long a player is left alone after a room kills them into a race.
+     *
+     * <p>Three seconds. Long enough to read the line in chat that says what they are now and to see
+     * the room they are standing in, short enough that it is not a pause. Without it a player who
+     * comes back on their own mark with a stand-in still swinging at them is killed again before
+     * they can move, which is not a test of anything.
+     */
+    private static final int GRACE_TICKS = 60;
+
+    /**
+     * Where a player fell, and what killed them, from the death to the moment they get up.
+     *
+     * <p>Both keys are names, and both are cleared the moment they are used. The place is a snapshot
+     * rather than a live location because a location object follows whoever it belongs to, and by
+     * the time this is read the player has been through a respawn.
+     */
+    private final Map<String, Location> fellAt = new HashMap<>();
+    private final Map<String, String> killedBy = new HashMap<>();
+
+    /**
+     * Players inside their grace window, and the tick their protection runs out on.
+     *
+     * <p>Two things enforce this, deliberately. An invulnerability flag is what says it to the
+     * engine, but {@link #land} clears that same flag on whoever it is about to hit - it has to, or
+     * nothing in this building could be hit at all - so a stand-in that was still there could take
+     * the protection off. The flag is the English; the cancelled damage event is the guarantee.
+     */
+    private final Map<String, Integer> protectedUntil = new HashMap<>();
+
+    /** Ticks since the guard came up, for the grace window to be measured against. */
+    private int ticks;
+
     HallGuard(HarnessPlugin plugin) {
         this.plugin = plugin;
         // A player the server has never heard from is left invulnerable: it is waiting for a
@@ -225,26 +260,22 @@ final class HallGuard implements Listener {
     /**
      * Lands one real blow from a player onto a stand-in.
      *
-     * <p>A stand-in cannot normally be hit on this server build. It is a player whose client never
-     * confirms anything, and the server keeps a flag on such a player that refuses damage - a flag
-     * that comes straight back when it is cleared. There is exactly one exception inside the damage
-     * path itself: a blow struck by a creative player is allowed past that flag. So the attacker is
-     * borrowed as creative for the length of a single blow - changed and changed back inside one
-     * tick, which is not something a client is told about - and the blow then travels the ordinary
-     * route: the plugin's handlers, the health bar, the armour, the knockback.
+     * <p>A stand-in cannot normally be hit on this server build: it is a player whose client never
+     * confirms anything, and the server keeps a flag on such a player that refuses damage. The flag
+     * that matters is on the <em>victim</em>, which is why this clears three things on him and
+     * nothing on the attacker. Two earlier readings of this were wrong and are worth not repeating:
+     * the attacker's creative mode was said to be the exception that let a blow through, and it is
+     * not - a hit from a creative attacker measured 20.0 to 20.0 - and the flag was said to come
+     * back on its own, which it does not; what comes back is the arrival flag, and that is what
+     * {@link #unfreezeStandIns} clears every tick.
      *
-     * <p>If the health still does not move, the damage is taken off directly. That is the last
-     * resort rather than the method: it is what a section shows when everything else refused, and
-     * it is better than a switch that reports a spell landed while nobody lost anything.
+     * <p>Once the victim's three are cleared the blow travels the ordinary route: the plugin's
+     * handlers, the health bar, the armour, the knockback.
      */
     private static void land(Player attacker, Player victim, double damage) {
-        // What is in the way is on the victim, not on the attacker. A player with no client behind
-        // it is flagged permanently invulnerable by the server the moment it is put in a world, and
-        // that flag is what refuses every blow in this building - measured both ways on the console:
-        // a hit from a creative attacker went 20.0 -> 20.0, and the same hit after clearing the
-        // victim's flag went 20.0 -> 17.0. Borrowing creative for the attacker was a guess that
-        // never was the mechanism, and it also told the plugin something untrue about whoever was
-        // swinging - that they were in creative - which some of these rules read.
+        // What is in the way is on the victim, not on the attacker - measured both ways on the
+        // console: a hit from a creative attacker went 20.0 -> 20.0, and the same hit after clearing
+        // the victim's flag went 20.0 -> 17.0.
         Nms.arrive(victim);
         victim.setInvulnerable(false);
         victim.setNoDamageTicks(0);
@@ -253,10 +284,23 @@ final class HallGuard implements Listener {
 
     /** Lifts the invulnerability the server puts on a player it has never heard from. */
     private void unfreezeStandIns() {
+        ticks++;
         for (Player npc : standIns()) {
             if (npc.isInvulnerable()) {
                 npc.setInvulnerable(false);
                 Nms.arrive(npc);
+            }
+        }
+        for (Iterator<Map.Entry<String, Integer>> ends = protectedUntil.entrySet().iterator();
+                ends.hasNext();) {
+            Map.Entry<String, Integer> entry = ends.next();
+            if (ticks < entry.getValue()) {
+                continue;
+            }
+            ends.remove();
+            Player player = Bukkit.getPlayerExact(entry.getKey());
+            if (player != null) {
+                player.setInvulnerable(false);
             }
         }
     }
@@ -277,6 +321,307 @@ final class HallGuard implements Listener {
         return all;
     }
 
+    // -- dying in a room ---------------------------------------------------
+
+    /**
+     * Notes who killed a player and where they fell, and does nothing else.
+     *
+     * <p>LOWEST, and deliberately a notepad rather than an action. The plugin's own conversion runs
+     * on MONITOR and reads the killer off the damage event, so a stand-in taken out of the world
+     * here - or anywhere before that - would leave the plugin unable to see who did it, and the
+     * conversion the room exists to show would never happen. The stand-in is therefore taken away
+     * two ticks later, from {@link #putBack}, once everything that reads this death has run.
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onKilledByPrey(PlayerDeathEvent event) {
+        Player dead = event.getEntity();
+        if (prey.containsKey(dead.getName())) {
+            return;
+        }
+        String killer = killerOf(dead);
+        if (killer == null) {
+            return;
+        }
+        fellAt.put(dead.getName(), dead.getLocation().clone());
+        killedBy.put(dead.getName(), killer);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> putBack(dead.getName()), 2L);
+    }
+
+    /** The stand-in that landed the fatal blow, or {@code null} when a room did not do this. */
+    private String killerOf(Player dead) {
+        if (!(dead.getLastDamageCause() instanceof EntityDamageByEntityEvent hit)
+                || hit.getDamager() == null) {
+            return null;
+        }
+        return prey.containsKey(hit.getDamager().getName()) ? hit.getDamager().getName() : null;
+    }
+
+    /**
+     * Takes the killer away and puts the player back on their feet where they fell.
+     *
+     * <p>Three things, in this order, and the order is the point. The stand-in goes first: his job
+     * was to kill somebody into a race and that is done, and a stand-in still standing there is one
+     * that would hit the player again the instant they got up. Then the player is put back on the
+     * mark they fell on rather than at the hall's entrance - the room is what they were looking at
+     * when they died, and coming back somewhere else makes dying read as being sent to your room.
+     * Then full health and a grace window, because a blow that lands before they have seen the
+     * screen is indistinguishable from the room being broken.
+     *
+     * <p>No respawn-location handler and no respawn event: this runs two ticks after the death and
+     * does the respawn itself, so there is one place that decides where a player comes back. A
+     * handler would be a second, which would also outlive the room that set it.
+     */
+    private void putBack(String name) {
+        String killer = killedBy.remove(name);
+        Location where = fellAt.remove(name);
+        cancelWalk();
+        if (killer != null) {
+            clearPrey(killer);
+        }
+        Player player = Bukkit.getPlayerExact(name);
+        if (player == null) {
+            return;
+        }
+        if (killer != null) {
+            note(player, "§7他杀完就退场了——你已经转化，想再试就再右键一次那块牌");
+        }
+        if (player.isDead()) {
+            player.spigot().respawn();
+        }
+        if (where != null) {
+            player.teleport(where);
+        }
+        resetVitals(player);
+        protectedUntil.put(name, ticks + GRACE_TICKS);
+        player.setInvulnerable(true);
+        note(player, "§a你回到了倒下的地方，" + (GRACE_TICKS / 20) + " 秒内不会再受伤");
+    }
+
+    /** Where a player's grace window has got to, for the probe. */
+    String graceReport(Player player) {
+        Integer until = protectedUntil.get(player.getName());
+        return player.getName()
+                + " protected=" + (until == null ? "no" : (until - ticks) + "t")
+                + " invulnerable=" + player.isInvulnerable();
+    }
+
+    /**
+     * Refuses every blow while a player is inside their grace window.
+     *
+     * <p>This, and not the invulnerability flag, is what actually holds: {@link #land} clears that
+     * flag on whoever it is about to hit - it has to, or nothing in this building could be hit at
+     * all - so the flag on its own would be taken off by the first stand-in still in the room. It
+     * only ever cancels damage, so it cannot make a room pass when it should have failed.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onProtectedHit(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player player
+                && protectedUntil.containsKey(player.getName())) {
+            event.setCancelled(true);
+        }
+    }
+
+    // -- guides ------------------------------------------------------------
+
+    /** A short code per race, so a guide's account name fits in the sixteen a player name gets. */
+    private static final Map<String, String> RACE_CODE = Map.of(
+            "vampire", "v", "ghoul", "g", "werewolf", "w", "demon", "d",
+            "priest", "p", "witchhunter", "h", "enderborn", "e", "angel", "a");
+
+    /**
+     * The guides that are up, by account name, and the room each one belongs to.
+     *
+     * <p>One per room that has somebody in it, and no more. A hall of eleven rooms with a guide in
+     * each would be a hundred-odd extra players on the server for a feature nobody is looking at -
+     * so a guide exists while his room has a visitor and is gone the moment it does not.
+     */
+    private final Map<String, String> guides = new LinkedHashMap<>();
+
+    /** The account name a room's guide answers to. */
+    private static String guideName(String race, int index) {
+        return "Guide_" + RACE_CODE.getOrDefault(race, "x") + "_" + String.format("%02d", index);
+    }
+
+    /**
+     * Brings the guides up to date: one in every room somebody is standing in, none in the rest.
+     *
+     * <p>Called from the slow sweep rather than every tick. A guide is a whole player as far as the
+     * server is concerned - the account, the connection, the player-info packet - so building one is
+     * not a thing to do sixty times a second; two seconds is faster than anybody walks into a room.
+     */
+    private void refreshGuides(Hall hall) {
+        Set<String> wanted = new HashSet<>();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (guides.containsKey(player.getName())) {
+                continue;
+            }
+            String room = hall.roomAt(player.getLocation());
+            if (room != null) {
+                wanted.add(room);
+            }
+        }
+        for (Iterator<Map.Entry<String, String>> up = guides.entrySet().iterator(); up.hasNext();) {
+            Map.Entry<String, String> entry = up.next();
+            if (wanted.contains(entry.getValue())) {
+                continue;
+            }
+            up.remove();
+            unstamp(entry.getKey());
+            plugin.dropGhost(entry.getKey());
+        }
+        for (String room : wanted) {
+            if (!guides.containsValue(room)) {
+                spawnGuide(hall, room);
+            }
+        }
+    }
+
+    /**
+     * Puts one room's guide up: a real player in creative, wearing the scribe's clothes.
+     *
+     * <p>Not the race's own skin. The stand-ins a section brings up wear the race they are playing -
+     * that is the point of them - so a guide wearing one would be read as the thing being tested.
+     * The scribe is nobody's race, which is what somebody whose only job is to talk should look
+     * like.
+     *
+     * <p>Creative and invulnerable, and not in the tab list: he is furniture that answers, and a
+     * visitor should not be able to kill him, shove him or mistake him for a target. {@code
+     * unlistPlayer} is per-observer, so it is done for everybody on the server and again for anybody
+     * who logs in later.
+     */
+    private void spawnGuide(Hall hall, String room) {
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return;
+        }
+        String race = room.substring(0, dot);
+        int index;
+        try {
+            index = Integer.parseInt(room.substring(dot + 1));
+        } catch (NumberFormatException notARoom) {
+            return;
+        }
+        Location spot = hall.guideSpot(race, index);
+        if (spot == null || spot.getWorld() == null) {
+            return;
+        }
+        String name = guideName(race, index);
+        Object ghost = plugin.spawnGhost(name, spot.getWorld(), Skins.SCRIBE);
+        Player guide = Bukkit.getPlayerExact(name);
+        if (ghost == null || guide == null) {
+            plugin.dropGhost(name);
+            return;
+        }
+        guide.setGameMode(GameMode.CREATIVE);
+        guide.setInvulnerable(true);
+        guide.teleport(spot);
+        labelGuide(guide, race);
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+            if (!viewer.equals(guide)) {
+                viewer.unlistPlayer(guide);
+            }
+        }
+        guides.put(name, room);
+    }
+
+    /** A guide's name says what he is, in the one place a server may write next to a name. */
+    private void labelGuide(Player guide, String race) {
+        Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
+        Team team = board.getTeam("mmg_" + race);
+        if (team == null) {
+            team = board.registerNewTeam("mmg_" + race);
+        }
+        team.setPrefix("§7导览 §f" + RACE_LABEL.getOrDefault(race, race) + " §r");
+        for (Team other : board.getTeams()) {
+            if (other.hasEntry(guide.getName())) {
+                other.removeEntry(guide.getName());
+            }
+        }
+        team.addEntry(guide.getName());
+    }
+
+    /**
+     * Right-clicking a guide gets the room's long teaching, in chat.
+     *
+     * <p>This is where the cooldowns, the permission nodes and the exceptions live. The board says
+     * what to do and what should happen - four lines, read at arm's length - and the rest is said
+     * by somebody standing in the room, which is the only medium in the building that can hold a
+     * sentence and be asked again.
+     */
+    @EventHandler
+    public void onGuideTapped(PlayerInteractEntityEvent event) {
+        String room = guides.get(event.getRightClicked().getName());
+        if (room == null) {
+            return;
+        }
+        event.setCancelled(true);
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return;
+        }
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return;
+        }
+        sayGuide(event.getPlayer(), hall.guideTalk(room.substring(0, dot),
+                Integer.parseInt(room.substring(dot + 1))));
+    }
+
+    /** Reads a room's long teaching out, a line at a time. */
+    private void sayGuide(Player player, List<String> talk) {
+        for (String line : talk) {
+            player.sendMessage(line);
+        }
+    }
+
+    /** What the guides look like from outside, for the probe. */
+    String guideReport(String race) {
+        List<String> found = new ArrayList<>();
+        for (Map.Entry<String, String> entry : guides.entrySet()) {
+            if (!race.isEmpty() && !entry.getValue().startsWith(race + ".")) {
+                continue;
+            }
+            Player guide = Bukkit.getPlayerExact(entry.getKey());
+            boolean listed = false;
+            if (guide != null) {
+                for (Player viewer : Bukkit.getOnlinePlayers()) {
+                    if (viewer.isListed(guide)) {
+                        listed = true;
+                        break;
+                    }
+                }
+            }
+            found.add(entry.getKey() + "=" + entry.getValue()
+                    + (guide == null ? " missing"
+                            : " mode=" + guide.getGameMode() + " listed=" + listed
+                                    + " invulnerable=" + guide.isInvulnerable()));
+        }
+        return "ok guides=" + found.size() + " " + String.join(" | ", found);
+    }
+
+    /** Right-clicks a guide's text out, for the probe, and says how many lines there were. */
+    String talkReport(String rest) {
+        String[] parts = rest.split("\\s+", 2);
+        String name = parts.length > 1 ? parts[1] : parts[0];
+        Player listener = Bukkit.getPlayerExact(parts[0]);
+        String room = guides.get(name);
+        Hall hall = plugin.hallOrNull();
+        if (room == null || hall == null) {
+            return "err no such guide: " + name;
+        }
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return "err no room for: " + name;
+        }
+        List<String> talk = hall.guideTalk(room.substring(0, dot),
+                Integer.parseInt(room.substring(dot + 1)));
+        if (listener != null) {
+            sayGuide(listener, talk);
+        }
+        return "ok " + name + " room=" + room + " lines=" + talk.size()
+                + (listener == null ? " (nothing to say it to)" : "");
+    }
+
     /**
      * A joining player starts at the lobby. The world spawn is already there and the spawn radius
      * is zero, so this is normally a no-op - it is here because a player who arrives outside the
@@ -285,11 +630,26 @@ final class HallGuard implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Hall hall = plugin.hallOrNull();
-        if (hall == null || SPAR.equals(event.getPlayer().getName())) {
+        if (hall == null) {
             return;
         }
-        if (!hall.inside(event.getPlayer().getLocation())) {
-            event.getPlayer().teleport(hall.lobbySpawn());
+        Player joining = event.getPlayer();
+        if (guides.containsKey(joining.getName())) {
+            // One of our own guides coming up. He is placed by spawnGuide a moment from now, and
+            // sending him to the lobby first would only mean moving him twice.
+            return;
+        }
+        for (String name : guides.keySet()) {
+            Player guide = Bukkit.getPlayerExact(name);
+            if (guide != null) {
+                joining.unlistPlayer(guide);
+            }
+        }
+        if (SPAR.equals(joining.getName())) {
+            return;
+        }
+        if (!hall.inside(joining.getLocation())) {
+            joining.teleport(hall.lobbySpawn());
         }
     }
 
@@ -316,6 +676,14 @@ final class HallGuard implements Listener {
     }
 
     private void use(Player player, Hall hall, Hall.Trigger trigger, Block block) {
+        // A player who has just been killed into a race is not to be touched for three seconds, and
+        // that has to include the boards: without this the first thing a player can do is press
+        // "be killed by one" again and be dead before the grace window they were given has run out,
+        // which is the same bug wearing a different hat.
+        if (protectedUntil.containsKey(player.getName())) {
+            note(player, "§7刚复活，等无敌结束再动");
+            return;
+        }
         switch (trigger.kind()) {
             case ENTER_LOBBY -> backToHuman(player, hall, hall.lobbySpawn(), "§a回到测试大厅");
             case LEAVE_HALL -> backToHuman(player, hall, hall.outsideSpawn(),
@@ -2354,6 +2722,7 @@ final class HallGuard implements Listener {
             return;
         }
         List<String> before = hall.wrongFixtures();
+        refreshGuides(hall);
         if (hall.repair()) {
             plugin.getLogger().info("put the hall's switches back: " + before);
         }

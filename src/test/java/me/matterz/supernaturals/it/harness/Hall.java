@@ -29,6 +29,7 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -332,21 +333,33 @@ public final class Hall {
      * jump that has to clear seven blocks, a room with a dragon in it. Zero means "whatever the
      * hall and the cell count say", which is what nearly every step wants.
      */
-    private record Section(String title, List<String> lines, int slots, boolean openSky,
-            Station station, int cells, int headroom, boolean scene) {
+    /**
+     * A step: what it is called, the short boards it hangs on its wall, the long text its guide
+     * tells, how many slots of the corridor it takes, whether its ceiling is left open (the ghoul's
+     * rain step needs the sky), and what to build in it.
+     *
+     * <p>Two texts rather than one, because a wall and a person are not the same medium. A board is
+     * read at arm's length and holds four lines: a goal and an expectation fit, the numbers and the
+     * exceptions do not - and a wall of seventeen boards is not teaching, it is a wall. The guide
+     * standing in the room says the rest, which is where the cooldowns, the permission nodes and
+     * the "except when it is raining" belong.
+     */
+    private record Section(String title, List<String> lines, List<String> talk, int slots,
+            boolean openSky, Station station, int cells, int headroom, boolean scene) {
 
-        Section(String title, List<String> lines, int slots, boolean openSky, Station station) {
-            this(title, lines, slots, openSky, station, 1, 0, false);
+        Section(String title, List<String> lines, List<String> talk, int slots, boolean openSky,
+                Station station) {
+            this(title, lines, talk, slots, openSky, station, 1, 0, false);
         }
 
-        Section(String title, List<String> lines, int slots, boolean openSky, Station station,
-                int cells) {
-            this(title, lines, slots, openSky, station, cells, 0, false);
+        Section(String title, List<String> lines, List<String> talk, int slots, boolean openSky,
+                Station station, int cells) {
+            this(title, lines, talk, slots, openSky, station, cells, 0, false);
         }
 
-        Section(String title, List<String> lines, int slots, boolean openSky, Station station,
-                int cells, int headroom) {
-            this(title, lines, slots, openSky, station, cells, headroom, false);
+        Section(String title, List<String> lines, List<String> talk, int slots, boolean openSky,
+                Station station, int cells, int headroom) {
+            this(title, lines, talk, slots, openSky, station, cells, headroom, false);
         }
 
         /**
@@ -354,7 +367,7 @@ public final class Hall {
          * built on - so it owes the player a board saying which of those it is.
          */
         Section needsScene() {
-            return new Section(title, lines, slots, openSky, station, cells, headroom, true);
+            return new Section(title, lines, talk, slots, openSky, station, cells, headroom, true);
         }
     }
 
@@ -687,6 +700,16 @@ public final class Hall {
     private final Map<String, Integer> roomHeads = new LinkedHashMap<>();
     private final Map<Location, Map<Integer, ItemStack>> chests = new LinkedHashMap<>();
     private final Map<String, Location> points = new LinkedHashMap<>();
+
+    /**
+     * Each room's guide: where he stands, and what he says, keyed {@code race.index}.
+     *
+     * <p>A room's long teaching lives here rather than on its wall - see {@link Section} - and the
+     * guide is the only thing that reads it. Keyed the same way as the room's own spawn and zone,
+     * because it is the same room being described from three angles.
+     */
+    private final Map<String, Location> guideSpot = new HashMap<>();
+    private final Map<String, List<String>> guideTalk = new HashMap<>();
     private final Map<String, Box> zones = new LinkedHashMap<>();
 
     /**
@@ -901,6 +924,12 @@ public final class Hall {
             // by laySwitchWall above, like every other room's.
             currentRoom = null;
             points.put("sec." + race + "." + index, new Location(target, x, y, z));
+            // Where the room's guide stands, and what he says. The south-west corner of the room,
+            // two blocks in: clear of the landing in the middle, of the boards on the far wall, of
+            // the teaching wall behind him, of the red wool on the west wall, and of the way out on
+            // the east - and facing the middle of the room, which is where the player arrives.
+            guideTalk.put(race + "." + index, section.talk());
+            guideSpot.put(race + "." + index, new Location(target, x + 2.5, y + 1, z + 2.5, 45f, 0f));
             zones.put("room." + race + "." + index, new Box(target.getName(), x - 1, y - 1, z - 1,
                     x + side, y + head + 1, z + side));
         }
@@ -2751,12 +2780,14 @@ public final class Hall {
      */
     private static Section section(String title, int slots, Station station,
             String goal, String ability, String expect, String... steps) {
-        return new Section(title, brief(goal, ability, expect, steps), slots, false, station);
+        return new Section(title, board(goal, expect), brief(goal, ability, expect, steps), slots,
+                false, station);
     }
 
     private static Section section(String title, int slots, boolean openSky, Station station,
             String goal, String ability, String expect, String... steps) {
-        return new Section(title, brief(goal, ability, expect, steps), slots, openSky, station);
+        return new Section(title, board(goal, expect), brief(goal, ability, expect, steps), slots,
+                openSky, station);
     }
 
     /**
@@ -2766,8 +2797,23 @@ public final class Hall {
      */
     private static Section section(String title, int slots, int cells, int headroom,
             Station station, String goal, String ability, String expect, String... steps) {
-        return new Section(title, brief(goal, ability, expect, steps), slots, false, station, cells,
-                headroom);
+        return new Section(title, board(goal, expect), brief(goal, ability, expect, steps), slots,
+                false, station, cells, headroom);
+    }
+
+    /**
+     * The two lines a step hangs on its wall: what to do, and what should happen.
+     *
+     * <p>Not the whole teaching - see {@link Section}. These two are the ones that survive being
+     * read once while standing in front of the board, and they are the two a player needs before
+     * touching anything. Everything else is the guide's to say.
+     */
+    private static List<String> board(String goal, String expect) {
+        List<String> lines = new ArrayList<>();
+        lines.add("§e" + goal);
+        lines.add(BREAK);
+        lines.add("§b" + expect);
+        return lines;
     }
 
     /**
@@ -2819,6 +2865,32 @@ public final class Hall {
     public int roomCount(String race) {
         List<Location> rooms = roomSpawns.get(race);
         return rooms == null ? 0 : rooms.size();
+    }
+
+    /** Where the guide of one room stands, or {@code null} if there is no such room. */
+    public Location guideSpot(String race, int index) {
+        return guideSpot.get(race + "." + index);
+    }
+
+    /**
+     * Which room a place is in, as {@code race.index}, or {@code null} when it is in none.
+     *
+     * <p>The same lookup the reach checks do, turned outwards: a guide is brought up for the room
+     * somebody is standing in, so "which room is this" has to be answerable from a location.
+     */
+    public String roomAt(Location at) {
+        for (Map.Entry<String, Box> zone : zones.entrySet()) {
+            if (zone.getKey().startsWith("room.") && zone.getValue().holds(at)) {
+                return zone.getKey().substring("room.".length());
+            }
+        }
+        return null;
+    }
+
+    /** What the guide of one room says, as a list of lines to be read out in order. */
+    public List<String> guideTalk(String race, int index) {
+        List<String> talk = guideTalk.get(race + "." + index);
+        return talk == null ? List.of() : talk;
     }
 
     /** Where one room of one hall starts, or {@code null} if there is no such room. */

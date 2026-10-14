@@ -332,6 +332,12 @@ public final class HarnessPlugin extends JavaPlugin {
                 return ghost(rest);
             case "skin":
                 return "ok " + Nms.skin(player(rest.trim()));
+            case "grace":
+                return "ok " + guard.graceReport(player(rest.trim()));
+            case "guides":
+                return guard.guideReport(rest.trim());
+            case "talk":
+                return guard.talkReport(rest.trim());
             case "drop":
                 return drop(rest);
             case "hall":
