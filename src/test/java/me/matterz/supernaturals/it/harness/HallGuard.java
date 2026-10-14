@@ -756,7 +756,7 @@ final class HallGuard implements Listener {
             case USE_ON_NPC -> useOnNpc(player, trigger.detail());
             case SPAWN_TARGET -> spawnTarget(player, trigger.detail());
             case NPC_HITS_NPC -> npcHitsNpc(player, trigger.detail());
-            case SPAR -> bringSpar(player);
+            case SPAR -> bringSpar(player, trigger.detail());
             case HURT -> hurt(player);
             case SELF_KILL -> selfKill(player);
             case SPAWN_NPCS -> spawnNpcs(player, trigger.detail());
@@ -2187,14 +2187,31 @@ final class HallGuard implements Listener {
      * <p>The swing is the part that was missing: a target that never hits back tests nothing
      * about a fight, and half these sections are "let him hit you first, then watch". He swings
      * once and then stops, because a stand-in that keeps swinging is a fight, not a test.
+     *
+     * <p>What race he plays comes from the section, because it decides whether the section works at
+     * all. Most of these steps are about damage - swing at him, read the number - and for those he
+     * is a person, which is what a player is. A few are about an ability that only applies to a
+     * supernatural target, and for those a person makes the ability refuse: the angel's paper
+     * answers "Player is not a supernatural!" and the section reads as broken while working
+     * perfectly. So a step that needs a target says which one, and everything else gets a person.
      */
-    private void bringSpar(Player player) {
+    private void bringSpar(Player player, String race) {
         Player spar = stageSpar(player, new ItemStack(Material.IRON_SWORD));
         if (spar == null) {
             return;
         }
-        humanise(spar);
-        note(player, "§f陪练从 " + Math.round(spar.getLocation().distance(player.getLocation()))
+        SuperNPlayer asPlayer = SuperNManager.get(spar);
+        String plays = race == null || race.isBlank() ? "human" : race;
+        if ("human".equalsIgnoreCase(plays)) {
+            humanise(spar);
+        } else if (!plays.equalsIgnoreCase(asPlayer.getType())) {
+            SuperNManager.convert(asPlayer, plays, SNConfigHandler.vampirePowerStart);
+            spar.setHealth(spar.getAttribute(Attribute.MAX_HEALTH).getValue());
+            Nms.pushEquipment(spar);
+        }
+        labelRace(spar, SuperNManager.get(spar).getType());
+        note(player, "§f陪练（现在是 " + SuperNManager.get(spar).getType() + "）从 "
+                + Math.round(spar.getLocation().distance(player.getLocation()))
                 + " 格外走过来（他叫 " + SPAR + "），他会砍你一下");
         walkIn(spar, player, () -> strike(spar, player));
     }

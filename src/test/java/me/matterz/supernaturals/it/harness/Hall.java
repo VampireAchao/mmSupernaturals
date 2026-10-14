@@ -2636,21 +2636,31 @@ public final class Hall {
                         "摔死的那一刻你会变成天使：掉落伤害被免除，但死亡本身照常触发",
                         "从箱子里拿一根羽毛拿在手上",
                         "点「上到高台」，走到中间的洞里跳下去"));
-                sections.add(section("§e② 道具 跳与治疗", 1, (w, y, x, z, width) -> {
+                sections.add(section("§e② 道具 跳 · 治疗 · 净化", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DANDELION, 8),
                             new ItemStack(Material.FEATHER, 8),
                             new ItemStack(Material.PAPER, 8)));
-                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
-                            "§f叫陪练过来", "§7治疗要有伤口才看得出来");
+                    // He plays a vampire here, and that is not decoration. The angel's paper cures a
+                    // supernatural being back to human, and the plugin refuses it on anybody else
+                    // with "Player is not a supernatural!" - so against an ordinary person the
+                    // section would look broken while working exactly as written. The step asks for
+                    // a vampire, which is a race that can be cured.
+                    switchpoint(w, y, x + 6, z + 3, Trigger.with(Kind.SPAR, "angel", "vampire"),
+                            "§f叫陪练过来", "§7他是吸血鬼，纸才用得着");
                     powerButton(w, y, x + 9, z, "angel");
-                }, "验证天使的超级跳与治疗法术",
+                }, "验证天使的超级跳、治疗与净化",
                         "蒲公英左键＝超级跳，往上窜一截，耗 1000；羽毛＝治疗，"
-                                + "攻击目标（不是右键）给他回 5 点生命，耗 3000。"
-                                + "天使另外还免疫摔落伤害、在水里每 10 秒 +50 能量",
-                        "蒲公英左键往上窜一截；拿羽毛打受伤的目标，他会回 5 点血",
-                        "先点「叫陪练过来」，用剑把他打掉一点血",
-                        "拿羽毛打他一下，看他回血；再拿蒲公英左键跳一次"));
+                                + "攻击目标（不是右键）给他回 5 点生命，耗 3000；"
+                                + "纸＝净化，攻击目标把他变回人类，耗 6000——这一下"
+                                + "只对超自然目标有效，打人类会说「Player is not a supernatural」。"
+                                + "所以陪练在这一间扮的是吸血鬼。天使另外还免疫摔落伤害、在水里每 10 秒 +50 能量",
+                        "蒲公英左键往上窜一截；拿羽毛打受伤的目标，他会回 5 点血；"
+                                + "拿纸打吸血鬼，他变成人类",
+                        "先点「叫陪练过来」——他这一间扮吸血鬼，别用打人类的思路看他",
+                        "用剑把他打掉一点血，再拿羽毛打他一下，看他回血",
+                        "拿纸打他一下，看他从 vampire 变成 human",
+                        "最后拿蒲公英左键跳一次"));
                 sections.add(section("§b③ 召唤 三种动物", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BEEF, 8),
