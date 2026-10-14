@@ -817,7 +817,9 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " missingExit=" + hall.exitsMissing().size()
                 + " missingScene=" + hall.scenesMissing().size()
                 + " unsupported=" + hall.unsupportedSwitches().size()
-                + " outOfReach=" + hall.outOfReach().size());
+                + " outOfReach=" + hall.outOfReach().size()
+                + " signsOffIdeal=" + hall.signsOffIdeal().size()
+                + " signsAtKnee=" + hall.signsAtKnee().size());
         if (hall.boardsDropped() > 0) {
             out.append("\n  dropped where: ")
                     .append(String.join(" | ", hall.droppedBoardReport()));
@@ -828,6 +830,14 @@ public final class HarnessPlugin extends JavaPlugin {
         }
         if (!hall.outOfReach().isEmpty()) {
             out.append("\n  too high to use: ").append(String.join(" | ", hall.outOfReach()));
+        }
+        if (!hall.signsOffIdeal().isEmpty()) {
+            out.append("\n  outside the band a player reads: ")
+                    .append(String.join(" | ", hall.signsOffIdeal()));
+        }
+        if (!hall.signsAtKnee().isEmpty()) {
+            out.append("\n  down at the player's feet: ")
+                    .append(String.join(" | ", hall.signsAtKnee()));
         }
         if (!hall.exitsMissing().isEmpty()) {
             out.append("\n  no way out of: ").append(String.join(", ", hall.exitsMissing()));
@@ -1456,7 +1466,17 @@ public final class HarnessPlugin extends JavaPlugin {
                     + (trigger.race() == null ? "" : "/" + trigger.race())
                     + (trigger.detail() == null ? "" : "/" + trigger.detail()));
         }
-        return "ok " + found.size() + " " + String.join(" | ", found);
+        List<Location> buttons = new ArrayList<>();
+        for (Location at : hall.buttonFixtures()) {
+            if (zone != null ? zone.holds(at) : insideAnyHall(at)) {
+                buttons.add(at);
+            }
+        }
+        return "ok " + found.size() + " buttons=" + buttons.size()
+                + (buttons.isEmpty() ? "" : " at " + buttons.stream()
+                        .map(at -> at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ())
+                        .collect(java.util.stream.Collectors.joining(" ")))
+                + " | " + String.join(" | ", found);
     }
 
     /** Whether a switch sits in one of the race halls rather than out in the lobby. */

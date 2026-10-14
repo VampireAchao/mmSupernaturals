@@ -473,15 +473,32 @@ public final class Hall {
     private static final int HANG_SPACING = 6;
 
     /**
-     * Where a room's switches and the boards over them hang, relative to the floor.
+     * Where a room's boards hang, relative to the floor.
      *
-     * <p>The floor is the block they stand on, so a switch at two is at the player's waist and a
-     * board at three is where their eyes are. One lower than that - which is where these are - puts
-     * the switch at the top of their feet and the board across their chest: still in reach, and low
-     * enough that nothing on any wall has to be looked up at.
+     * <p>The floor is the block the player stands on, so a board at two is across their chest and
+     * a board at three is where their eyes are. Everything meant to be read or clicked lives in
+     * that band, and {@link #BOARD_MAX} is the ceiling of it: past four a board is read by tipping
+     * the head back, and at one - the top of the player's own feet - it is below the line of sight
+     * of anybody standing in front of it. This hall put its teaching wall at one for a while and
+     * it read like gravel. Both ends are now checked rather than remembered.
      */
-    private static final int SWITCH_Y = 1;
     private static final int BOARD_Y = 2;
+    private static final int BOARD_ROW2_Y = 3;
+
+    /** The band a board may hang in, over the floor of its room. */
+    private static final int BOARD_MIN = 2;
+    private static final int BOARD_MAX = 4;
+
+    /**
+     * Where the one button left in the building sits: on the red wool of a room's exit.
+     *
+     * <p>Every other action is a board a player right-clicks, because a board is where the words
+     * are and a switch is not - the action and its name are then the same object, which is what
+     * stops a wall of switches from meaning "guess". The exit keeps its button because the red
+     * wool is the one landmark a player learns once and then finds in every room without reading
+     * anything.
+     */
+    private static final int EXIT_BUTTON_Y = 1;
 
     /** Where a tall room's second band of wall lights goes. */
     private static final int HIGH_BAND_Y = 12;
@@ -496,48 +513,38 @@ public final class Hall {
     private static final int LIGHT_MIN = 10;
 
     /**
-     * How high a switch and a board may hang over the floor of their room.
+     * How high a board may hang over the floor of its room.
      *
-     * <p>A player stands on the floor with their eyes about one and a half blocks up and reaches a
-     * little over four; a switch at {@link #BUTTON_REACH} is at the top of what an arm will do, and
-     * a board at {@link #BOARD_REACH} is read by looking up rather than by tipping the head back.
-     * Past those, a wall of text is scenery.
+     * <p>A player stands on the floor with their eyes about one and a half blocks up; a board at
+     * {@link #BOARD_MAX} is read by looking slightly up rather than by tipping the head back.
+     * Anything taller, or anything down at {@link #BOARD_MIN} minus one, is scenery. The one
+     * button left in the building hangs at {@link #EXIT_BUTTON_Y}, which is well inside reach.
      */
     private static final int BUTTON_REACH = 4;
-    private static final int BOARD_REACH = 5;
+    private static final int BOARD_REACH = BOARD_MAX;
 
     /** Boards one step's own teaching may use on its wall, and one scene board's may use. */
-    private static final int TEACH_BOARDS = 17;
+    private static final int TEACH_BOARDS = 4;
     private static final int SCENE_BOARDS = 4;
 
     /**
-     * How a room's switches are laid out along the wall they hang on.
+     * How a room's boards are laid out along the wall they hang on.
      *
-     * <p>Four columns each: the switch, and up to three boards over it. Five of them fit along a
-     * wall of the standard room, and a step with more than that starts a second row.
+     * <p>Four columns each: up to three boards for one action, and a column of wall between it and
+     * the next. Five of them fit along a wall of the standard room, and a room with more than that
+     * starts a second row.
      *
-     * <p>The gap between rows is two, not four, and that is the whole point of the number. A
-     * player's reach is a few blocks and their eyes are one and a half up, so a switch at five or
-     * six blocks over the floor is a switch nobody can press - it looks like furniture and it is
-     * scenery. Rows at two and four put every switch in the building between the floor and one
-     * block over the player's head, and every board between their eyes and their hair. This has
-     * been got wrong twice; `mmp signage` now checks it rather than anybody remembering it.
+     * <p>Rows at two and three, and that is the whole point of the numbers. A player's eyes are
+     * one and a half blocks up and their reach is a few; the band from two to four is the one they
+     * can read and press without moving their head, with two and three the best of it. Rows at two
+     * and four put the second row at the edge of that band, which is legal but is not the best
+     * place to put the wall a player is meant to read. Nothing may sit at one: that is the top of
+     * their feet. This has been got wrong twice; `mmp signage` now checks it rather than anybody
+     * remembering it.
      */
     private static final int SWITCH_PITCH = 4;
-    private static final int SWITCH_ROW_Y = 1;
-    private static final int SWITCH_ROW_GAP = 2;
-
-    /**
-     * The same, for the entry room's wall of doors.
-     *
-     * <p>Two rows of ten: a wall forty-four wide holds ten entries four columns apart, and two
-     * rows hold the twenty rooms the largest hall has. Height is the other half - the first
-     * version put the third row nine blocks over the floor, which is a wall of text nobody can
-     * read and a row of switches nobody can press.
-     */
-    private static final int DIRECTORY_PITCH = 4;
-    private static final int DIRECTORY_Y = 1;
-    private static final int DIRECTORY_ROW = 2;
+    private static final int SWITCH_ROW_Y = 2;
+    private static final int SWITCH_ROW_GAP = 1;
 
     private static final Material AIR = Material.AIR;
     private static final Material STELE = Material.CHISELED_STONE_BRICKS;
@@ -648,18 +655,20 @@ public final class Hall {
     private String currentRoom;
 
     /**
-     * Where the switch wall of the room being built is, or {@code null} when no room is open.
+     * The switches the room being built has asked for, in the order it asked for them.
      *
-     * <p>A switch belongs on a wall. It used to hang on a stone post standing in the middle of the
-     * floor, which reads as a button floating in the room: its back is turned to a block that is
+     * <p>A switch belongs on a wall, and it used to hang on a stone post standing in the middle of
+     * the floor, which reads as a button floating in the room: its back is turned to a block that is
      * part of nothing, what lights it is whatever lamp happens to be nearest, and the boards around
-     * it give no clue which of them goes with which button. A room's switches are collected while
-     * the step is being built and laid out along one wall afterwards, in the order the step asked
-     * for them.
+     * it give no clue which of them goes with which button. So a room's switches are not placed
+     * where the step asked for them - they are collected here while the step is built, and laid out
+     * along the far wall afterwards, in the order the step asked.
+     *
+     * <p>There used to be a second field beside this one holding the coordinates of that wall, and a
+     * branch in {@code switchpoint} that built the post when no room was open. The two nether cells
+     * have since called {@code laySwitchWall} like everybody else, so the branch was unreachable and
+     * the field had nothing left to be read by. Both are gone.
      */
-    private int[] switchWall;
-
-    /** The switches the room being built has asked for, in the order it asked for them. */
     private final List<PlannedSwitch> switchPlans = new ArrayList<>();
 
     /** One switch a room asked for, before the wall it will hang on has been worked out. */
@@ -763,14 +772,14 @@ public final class Hall {
         for (String race : CELLS.keySet()) {
             set(world, LOBBY.light(), x, y, oz - 1);
             set(world, LOBBY.light(), x, y + 1, oz - 1);
-            button(world, x, y, oz, BlockFace.SOUTH, Trigger.to(race));
-            signOn(world, x, y + 1, oz - 1, BlockFace.SOUTH, title(race), "§7点击下方按钮进入");
+            signOn(world, x, y + 1, oz - 1, BlockFace.SOUTH, Trigger.to(race), title(race),
+                    "§7右键这块牌进入");
             x += 2;
         }
         set(world, LOBBY.light(), x, y, oz - 1);
         set(world, LOBBY.light(), x, y + 1, oz - 1);
-        button(world, x, y, oz, BlockFace.SOUTH, Trigger.of(Kind.LEAVE_HALL));
-        signOn(world, x, y + 1, oz - 1, BlockFace.SOUTH, "§a离开大厅", "§7点击下方按钮去下面的世界");
+        signOn(world, x, y + 1, oz - 1, BlockFace.SOUTH, Trigger.of(Kind.LEAVE_HALL),
+                "§a离开大厅", "§7右键这块牌去下面的世界");
         lobbySpawn = new Location(world, ox + LOBBY_HALF + 0.5, oy + 1, oz + LOBBY_HALF + 4.5);
     }
 
@@ -875,20 +884,21 @@ public final class Hall {
             String key = race + "." + index;
             currentRoom = key;
             switchPlans.clear();
-            switchWall = new int[] {x, y, z, side};
             sectionHead(target, y, x, z, section.title(), section.lines(), TEACH_BOARDS);
             roomFurniture(target, race, index, y, x, z, side, sections, theme);
             section.station().build(target, y, x, z, side);
             laySwitchWall(target, y, x, z, side, side, theme);
-            switchWall = null;
             roomsBuilt++;
             roomHeads.put(key, head);
             if (section.scene() && !scenesWritten.contains(key)) {
                 scenesMissing.add(key);
             }
-            if (index == 0) {
-                directory(target, race, y, x, z, side, theme, sections);
-            }
+            // The entry room used to list every other room on its far wall, one switch each, and
+            // that is gone. The reason is the one the user gave: a wall of twenty switches is not
+            // a welcome, it is homework. The entry room now offers the two ways into the race -
+            // the shrine, or being killed by one - and the same three ways out every room has, and
+            // the rest of the hall is walked rather than picked off a menu. Its own boards are hung
+            // by laySwitchWall above, like every other room's.
             currentRoom = null;
             points.put("sec." + race + "." + index, new Location(target, x, y, z));
             zones.put("room." + race + "." + index, new Box(target.getName(), x - 1, y - 1, z - 1,
@@ -1109,23 +1119,27 @@ public final class Hall {
         if (currentRoom != null) {
             roomsWithExit.add(currentRoom);
         }
-        set(target, EXIT_WOOL, x - 1, y + SWITCH_Y, z + 1);
-        button(target, x, y + SWITCH_Y, z + 1, BlockFace.EAST, Trigger.of(Kind.EXIT_ROOM));
+        set(target, EXIT_WOOL, x - 1, y + EXIT_BUTTON_Y, z + 1);
+        button(target, x, y + EXIT_BUTTON_Y, z + 1, BlockFace.EAST, Trigger.of(Kind.EXIT_ROOM));
         shortSign(target, x, y + BOARD_Y, z + 1, BlockFace.EAST,
                 "§c退出到初始大厅", "§7并恢复人类身份");
 
-        // The far wall: where else a player can be. Three switches, and over each one the name of
-        // the room it goes to rather than the word "next" - the point of a step is to be known
-        // before it is walked into, and "下一间" on its own tells a player nothing about whether
-        // they want it.
+        // The far wall: where else a player can be. Boards, not switches, and over each one the
+        // name of the room it goes to rather than the word "next" - the point of a step is to be
+        // known before it is walked into, and "下一间" on its own tells a player nothing about
+        // whether they want it.
         int farX = x + side - 1;
         if (index == 0) {
-            sign(target, farX, y + BOARD_Y, z + 1, BlockFace.WEST,
-                    "§f入口大厅", "§7对面整面墙是目录");
+            // The entry room's own three, like every other room's, except that "back to the entry
+            // room" would mean standing still - so it is written as what it does there, which is
+            // put the player back on the mark they arrived on.
+            navSwitch(target, theme, farX, y, z + 1,
+                    Trigger.of(Kind.RETURN_START, race),
+                    "§f回到大厅中央", "§7站回入口正中");
         } else {
             navSwitch(target, theme, farX, y, z + 1,
                     Trigger.of(Kind.RETURN_START, race),
-                    "§f回入口大厅", "§7所有房间的目录在那");
+                    "§f回入口大厅", "§7那一族所有房间的目录");
         }
         if (index > 0) {
             navSwitch(target, theme, farX, y, z + 4,
@@ -1140,69 +1154,44 @@ public final class Hall {
     }
 
     /**
-     * One of a room's three ways out: a switch, a lamp in the wall behind it, and over it a board
-     * naming where it goes.
+     * One of a room's three ways out: a board naming where it goes, with a lamp in the wall behind
+     * it, and the board itself is what is clicked.
+     *
+     * <p>There used to be a switch under the board here. Two objects for one action, and the
+     * player had to work out which of the pair they were meant to touch.
      */
     private void navSwitch(World target, Theme theme, int x, int y, int z, Trigger trigger,
             String... lines) {
-        set(target, theme.light(), x + 1, y + SWITCH_Y, z);
-        button(target, x, y + SWITCH_Y, z, BlockFace.WEST, trigger);
-        shortSign(target, x, y + BOARD_Y, z, BlockFace.WEST, lines);
+        set(target, theme.light(), x + 1, y + BOARD_Y, z);
+        shortSign(target, x, y + BOARD_Y, z, BlockFace.WEST, trigger, lines);
     }
 
     /**
-     * The entry room's wall of doors.
+     * The entry room's wall of doors is gone.
      *
-     * <p>The first room of a hall is the one every other room is reached from, and the only
-     * question it has to answer is "which of these am I looking for". So it lists the whole hall on
-     * one wall, in order: a switch to be taken there, and over it the room's own name and the one
-     * line that says what the room is about. A player who wants the eleventh step walks to the wall
-     * and presses it, rather than working out which way to walk and how far.
+     * <p>It listed every other room on one wall - a switch each, with the room's name and one line
+     * about it - and it was the first thing a player met. What the user said about it is the whole
+     * case against it: too many switches, too much text, and a jump to every room before knowing
+     * whether any of them was worth going to. The entry room now offers the two ways into the race
+     * and the three ways out, and everything else is reached by walking the hall, where each room's
+     * boards name the one on either side of it.
      *
-     * <p>Each switch is mounted on a lamp, so the whole wall is readable without a torch, and the
-     * list wraps every ten entries rather than running off the end of the room.
+     * <p>What went with it is the one-line summary it used to print under each room's name. That
+     * summary was derived from the room's own teaching rather than written twice - which was the
+     * right instinct, and the wrong cost: it made every room's teaching text carry a second job.
+     * The teaching now goes on the room's own boards and to the room's guide, and nowhere else.
      */
-    private void directory(World target, String race, int y, int x, int z, int side, Theme theme,
-            List<Section> sections) {
-        // The far wall, which is the one the player is looking at when they walk in, and the same
-        // wall every other room hangs its switches on - so the entry room is not a special case to
-        // learn, it is the same wall with more on it.
-        int wallZ = z + side;
-        int perRow = Math.max(1, (side - 5) / DIRECTORY_PITCH + 1);
-        for (int index = 1; index < sections.size(); index++) {
-            int slot = index - 1;
-            int bx = x + 1 + (slot % perRow) * DIRECTORY_PITCH;
-            int by = y + DIRECTORY_Y + (slot / perRow) * DIRECTORY_ROW;
-            set(target, theme.light(), bx, by, wallZ);
-            button(target, bx, by, wallZ - 1, BlockFace.NORTH,
-                    Trigger.with(Kind.GO_ROOM, race, race + ":" + index));
-            signBoard(target, bx, by + 1, wallZ, BlockFace.NORTH, 2,
-                    wrapAll("§f" + sections.get(index).title(), "§7" + blurb(sections.get(index))));
-        }
-    }
-
-    /**
-     * One line saying what a room is about, for the entry room's wall of doors.
-     *
-     * <p>Taken from the room's own teaching rather than written a second time, so the wall cannot
-     * end up describing a room that has since been rewritten. The teaching's first line is its
-     * goal, labelled - which is exactly the sentence wanted, minus the label.
-     */
-    private static String blurb(Section section) {
-        for (String line : section.lines()) {
-            if (BREAK.equals(line) || line.isBlank()) {
-                continue;
-            }
-            String text = line.replace("§e目标 §f", "").replace("§d技能 §f", "");
-            return text.length() > 30 ? text.substring(0, 30) + "…" : text;
-        }
-        return "";
-    }
 
     /** A wall sign whose text is wrapped first, so nothing runs off the edge of the board. */
     private void shortSign(World target, int x, int y, int z, BlockFace facing, String... lines) {
+        shortSign(target, x, y, z, facing, null, lines);
+    }
+
+    /** The same, on a board a player can click. */
+    private void shortSign(World target, int x, int y, int z, BlockFace facing, Trigger trigger,
+            String... lines) {
         List<String> wrapped = wrapAll(lines);
-        sign(target, x, y, z, facing,
+        sign(target, x, y, z, facing, trigger,
                 wrapped.subList(0, Math.min(LINES_PER_BOARD, wrapped.size())).toArray(new String[0]));
     }
 
@@ -1265,7 +1254,6 @@ public final class Hall {
         points.put("nether.lava", new Location(nether, cx + 0.5, y + 1, cz + 0.5));
         netherLava = points.get("nether.lava");
         largeChest(nether, x0 + 2, y + 1, z0 + DEPTH - 2, leather());
-        switchWall = new int[] {x0, y, z0, DEPTH};
         switchpoint(nether, y, x0 + 2, z0 + 3, Trigger.of(Kind.DIP),
                 "§c跳进岩浆", "§7点了就下池子");
         sectionHead(nether, y, x0 + SLOT, z0, "§f② 陪练 伤害测试",
@@ -1304,7 +1292,6 @@ public final class Hall {
         switchpoint(nether, y, x0 + 3, z0 + 3, Trigger.of(Kind.RESET_HUMAN, "demon_nether"),
                 "§a恢复人类", "§7留在这里，只改种族");
         laySwitchWall(nether, y, x0, z0, 6 * SLOT, DEPTH, THEMES.get("demon"));
-        switchWall = null;
         points.put("sec.demon_nether.0", new Location(nether, x0, y, z0));
         points.put("sec.demon_nether.1", new Location(nether, x0 + SLOT, y, z0));
         points.put("sec.demon_nether.2", new Location(nether, x0 + 5 * SLOT, y, z0));
@@ -1335,7 +1322,6 @@ public final class Hall {
         int x0 = centreX + 40;
         int z0 = centreZ - DEPTH / 2;
         room(nether, x0, y, z0, 3 * SLOT, DEPTH, 10, THEMES.get("ghoul"));
-        switchWall = new int[] {x0, y, z0, DEPTH};
         sectionHead(nether, y, x0, z0, "§2① 转化 下界僵尸猪人",
                 brief("在下界被僵尸猪人杀死，验证食尸鬼转化",
                         "插件只认这一条路：死在下界 + 凶手是僵尸猪人。主世界的普通僵尸杀你不算，"
@@ -1352,7 +1338,6 @@ public final class Hall {
         switchpoint(nether, y, x0 + 3, z0 + 3, Trigger.of(Kind.RESET_HUMAN, "ghoul_nether"),
                 "§a恢复人类", "§7留在这里，只改种族");
         laySwitchWall(nether, y, x0, z0, 3 * SLOT, DEPTH, THEMES.get("ghoul"));
-        switchWall = null;
         points.put("sec.ghoul_nether.0", new Location(nether, x0, y, z0));
         points.put("spawn.ghoul_nether",
                 new Location(nether, x0 + 1.5, y + 1, z0 + DEPTH / 2.0 + 0.5));
@@ -1395,23 +1380,36 @@ public final class Hall {
      * which is what makes it impossible for it to land on top of anything.
      */
     private Section entrySection(String race) {
-        // Four cells and a tall ceiling: this room's job is a wall with the whole hall written on
-        // it, and a standard room's one wall is twenty-one columns - five entries - which is not a
-        // directory, it is a hint.
-        return section("§f入口 · 这一族有哪些房间", 1, 4, 18, (w, y, x, z, width) -> {
-            // No switches of its own: the far wall is the directory, and a directory is a wall of
-            // switches. Anything else up there would be a second row of buttons in the same place.
+        // A standard room, and that is the change: it used to be the largest in the hall - four
+        // cells, forty-four across, eighteen high - because its far wall was a directory of every
+        // other room. Size was a consequence of the wall, and the wall is gone.
+        return section("§f入口 · " + title(race), 1, 1, CHAMBER_HEAD, (w, y, x, z, width) -> {
             chest(w, x + 2, y + 1, z + 1, BlockFace.SOUTH, centred(
                     new ItemStack(Material.BREAD, 8)));
-        }, "这是" + title(race) + "的测试大厅，先看清它有哪些房间",
-                "一族的能力拆成一间一间的房，一间只讲一件事。房间之间不通——对面（尽头）那面墙上"
-                        + "一格一格列着这一族所有房间：按哪一格就去哪一间，格子上写着那一间讲什么。"
-                        + "每间房的右手墙上都有「回入口大厅」「上一间」「下一间」，"
-                        + "「上一间 / 下一间」的牌子上直接写着那一间是什么",
-                "按目录里的一格，你就站在那一间房的正中间，聊天栏会说出它的名字",
-                "走进来面朝那面墙，从上到下看一遍，这就是这一族的全部环节",
-                "想从哪一间开始就按哪一格；看完了按「回入口大厅」回来再挑下一间",
-                "每间房进门左手边都有一格红色羊毛——那是退出，按下去回大厅并恢复人类");
+            // Two ways into the race, and the three ways out every room has. No directory: the
+            // rest of the hall is walked, room by room, each board naming the one after it.
+            switchpoint(w, y, x + 1, z + 3,
+                    Trigger.with(Kind.GO_ROOM, race, race + ":2"),
+                    "§c去 转化祭坛", "§7第①间：变成这一族");
+            switchpoint(w, y, x + 5, z + 3,
+                    Trigger.with(Kind.GO_ROOM, race, race + ":1"),
+                    "§c被本族杀死", "§7第②间：杀死也转化");
+            switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.RETURN_START, race),
+                    "§f回大厅中央", "§7站回入口正中");
+            switchpoint(w, y, x + 13, z + 3, Trigger.of(Kind.EXIT_ROOM),
+                    "§c退出测试", "§7回大厅并恢复人类");
+            switchpoint(w, y, x + 17, z + 3, Trigger.of(Kind.LEAVE_HALL),
+                    "§a离开大厅", "§7去下面的世界");
+        }, "这里是" + title(race) + "的测试大厅",
+                "一族的能力拆成一间一间的房，一间只讲一件事。进门这间只放两条路："
+                        + "走祭坛变成这一族，或者被这一族杀死变成这一族。其余房间顺着每间房里的"
+                        + "「下一间」一间一间走，每一间的牌子上都写着那一间讲什么",
+                "点「去 转化祭坛」或「被本族杀死」，你就站在那一间房的正中间，"
+                        + "聊天栏会说出它的名字",
+                "进门先看这两块牌，挑一条路走",
+                "其余房间靠每间房里的「上一间 / 下一间」串着走，按顺序走完就是这一族的全部环节",
+                "每间房进门左手边都有一格红色羊毛，上面是退出：按下去回初始大厅并恢复人类",
+                "牌子上写着「离开大厅」的那一块，是去下面的玩法世界");
     }
 
     private Section sparSection(String race) {
@@ -1517,8 +1515,13 @@ public final class Hall {
             // place to fall down and a terrible place to find a switch in - so the switch inside it
             // gets a lamp of its own, in the wall it is mounted on.
             set(w, Material.SEA_LANTERN, cx + 2, floorY, cz);
-            button(w, cx + 1, floorY, cz, BlockFace.WEST, Trigger.of(Kind.BACK_DOWN, race));
-            signOn(w, cx + 2, floorY + 1, cz, BlockFace.WEST, "§a回到地面", "§7点一下回大厅");
+            // The board that gets you out of the well is hung where boards belong - two over the
+            // floor, not one - and carries its own action, so the switch that used to sit at the
+            // player's feet with the board above it is gone. The lamp above it is what holds it up
+            // and what lights it.
+            set(w, Material.SEA_LANTERN, cx + 2, floorY + 2, cz);
+            shortSign(w, cx + 1, floorY + 2, cz, BlockFace.WEST, Trigger.of(Kind.BACK_DOWN, race),
+                    "§a回到地面", "§7右键这块牌回大厅");
         }, "用一次真实坠落，验这一族的摔落减免",
                 ability,
                 expect,
@@ -1599,48 +1602,79 @@ public final class Hall {
      * certain is labelled as what it is: a teaching setting for this room, undone the moment the
      * player leaves it.
      */
+    /**
+     * Who a kill really turns the victim into, for the room about being killed into a race.
+     *
+     * <p>Four races turn the person they finish, and they are the four in {@link #KILL_CONVERTS}.
+     * The demon turns people too, by a different rule - it needs its victim to be holding netherrack
+     * when it lands the blow - and its room keeps the board that hands the netherrack over, so it
+     * counts. The other three cannot spread by a kill at all: priest, witch hunter and angel are on
+     * the human side of the plugin's own line, and nothing they do makes anybody one of them. What
+     * can turn one of those three is a vampire or a ghoul finishing them, so that is who their room
+     * summons - and it is the same rule, read the other way round: the room shows the kill that
+     * would actually change the visitor.
+     */
+    private static List<String> killersFor(String race) {
+        return switch (race) {
+            case "priest", "witchhunter", "angel" -> List.of("vampire", "ghoul");
+            default -> List.of(race);
+        };
+    }
+
     private Section turnedBySection(String race) {
-        return section("§c转化 被别的种族杀死", 2, 1, TALL_HEAD, (w, y, x, z, width) -> {
+        // Who this room summons, and the rule behind it: only a race whose kill really does the
+        // turning. It used to offer five at once - a vampire, a ghoul, a werewolf, an enderborn and
+        // a demon, four of them with conditions of their own - which is five experiments behind one
+        // wall of switches. It is the room about the other way in, so it shows that one way.
+        List<String> killers = killersFor(race);
+        return section("§c被杀 转化", 2, 1, CHAMBER_HEAD, (w, y, x, z, width) -> {
             switchpoint(w, y, x + 1, z + 3, Trigger.of(Kind.RESET_HUMAN, race),
-                    "§a先变回人类", "§7被杀死这条只对人类阵营算数");
-            switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPREAD),
-                    "§c必中开关", "§7教学用：把概率临时改成 100%");
-            switchpoint(w, y, x + 7, z + 3, Trigger.of(Kind.NIGHT),
-                    "§9改成夜晚", "§7狼人只在夜里才转化");
-            switchpoint(w, y, x + 10, z + 3,
-                    Trigger.with(Kind.NPC_KILL_ME, race, "vampire:IRON_SWORD"),
-                    "§c被吸血鬼杀死", "§7默认 35% 变成吸血鬼");
-            switchpoint(w, y, x + 13, z + 3,
-                    Trigger.with(Kind.NPC_KILL_ME, race, "ghoul:"),
-                    "§2被食尸鬼杀死", "§7默认 35%，他空手——这一族用不了武器");
-            switchpoint(w, y, x + 16, z + 3,
-                    Trigger.with(Kind.NPC_KILL_ME, race, "werewolf:"),
-                    "§6被狼人杀死", "§7默认 35%，只在夜里出手");
-            switchpoint(w, y, x + 19, z + 3,
-                    Trigger.with(Kind.NPC_KILL_ME, race, "enderborn:IRON_SWORD"),
-                    "§5被末影族杀死", "§7概率 10%，代码里写死的");
-            switchpoint(w, y, x + 22, z + 3,
-                    Trigger.with(Kind.ARM_ME, race, "NETHERRACK"),
-                    "§4手上拿一块地狱岩", "§7恶魔那一条要求你先拿着它");
-            switchpoint(w, y, x + 25, z + 3,
-                    Trigger.with(Kind.NPC_KILL_ME, race, "demon:IRON_SWORD"),
-                    "§4被恶魔打一下", "§7拿着地狱岩被打就是 100% 转化");
-            powerButton(w, y, x + 28, z, race);
-        }, "验证「被别的种族杀死，就会变成那一族」",
-                "四种族的击杀转化是概率：吸血鬼、食尸鬼、狼人各 35%（Supernatural.SpreadChance 默认 0.35），"
-                        + "末影族 10%（代码里写死的 0.10）；恶魔不是概率，是 100%——"
-                        + "条件是「打你的人必须是恶魔 + 死的时候你手上拿着地狱岩」。"
-                        + "狼人那条还多一个条件：只在他杀你的那一刻是夜晚才算。"
-                        + "被杀死这一条只对「人类阵营」算数：人类、牧师、猎巫人、天使；"
-                        + "已经是吸血鬼这一类的，别人杀你也不会再变一次，所以这一间先从「变回人类」开始",
-                "你会死一次，然后在原地变成杀死你的那一族的种族；聊天栏有提示，"
-                        + "头顶和 tab 里的标签也跟着改。变成别的种族之后，本厅的房间还是那些房间——"
-                        + "想变回来就回本族的还原房，或者去别的族的还原房",
+                    "§a先变回人类", "§7被杀死只对人类算");
+            switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.SPREAD),
+                    "§c必中开关", "§7本房概率改 100%");
+            int column = x + 9;
+            for (String killer : killers) {
+                // What he holds, and what the roll is worth. A ghoul and a werewolf have no weapon
+                // to hold - the plugin will not let those two carry one - and the numbers are the
+                // plugin's own: the four kill-conversions at 35% except the enderborn's 10%, and
+                // the demon's netherrack rule at 100%.
+                String hand = switch (killer) {
+                    case "ghoul", "werewolf" -> "";
+                    default -> "IRON_SWORD";
+                };
+                String roll = switch (killer) {
+                    case "enderborn" -> "10%";
+                    case "demon" -> "100%";
+                    default -> "35%";
+                };
+                switchpoint(w, y, column, z + 3,
+                        Trigger.with(Kind.NPC_KILL_ME, race, killer + ":" + hand),
+                        "§c被" + title(killer) + "杀死", "§7默认 " + roll + " 变成" + title(killer));
+                column += SWITCH_PITCH;
+            }
+            if (killers.contains("werewolf")) {
+                switchpoint(w, y, column, z + 3, Trigger.of(Kind.NIGHT),
+                        "§9改成夜晚", "§7狼人只在夜里转化");
+                column += SWITCH_PITCH;
+            }
+            if (killers.contains("demon")) {
+                switchpoint(w, y, column, z + 3, Trigger.with(Kind.ARM_ME, race, "NETHERRACK"),
+                        "§4手上拿地狱岩", "§7拿着它被打就 100%");
+            }
+        }, "验证「被杀死，就会变成杀死你的那一族」",
+                "被杀死这一条只对「人类阵营」算数（人类、牧师、猎巫人、天使），"
+                        + "所以已经从人类变过的人，别人杀你也不会再变一次——这一间因此从「先变回人类」开始。"
+                        + "四个族的击杀转化是概率：吸血鬼、食尸鬼、狼人各 35%"
+                        + "（Supernatural.SpreadChance 默认 0.35），末影族 10%（代码里写死的）。"
+                        + "恶魔不走概率，走条件：打你的人得是恶魔，而你死的那一刻手上要拿着地狱岩，这样是 100%。"
+                        + "狼人还多一个条件：只在他杀你的那一刻是夜晚才算。",
+                "你会死一次，然后变成那个种族的身份；聊天栏有提示，头顶和 tab 里的标签也跟着改。"
+                        + "本厅的房间还是那些房间，想变回来就回还原房",
                 "先点「先变回人类」——被杀死这条只对人类阵营算数",
-                "不想等概率就再点「必中开关」，把这个房间的概率临时改成 100%（离开这间自动恢复）",
-                "点「被吸血鬼杀死」：他会从远处走过来，真的把你打死",
-                "看他杀完那一刻你的种族；不是吸血鬼就再点一次，概率的东西要多试",
-                "想试别的族就点对应的按钮；狼人那条要先点「改成夜晚」");
+                "不想等概率就再点「必中开关」，把本房的概率临时改成 100%（离开这间自动恢复）",
+                "点「被本族杀死」：他从远处走过来，真的把你打死",
+                "看他杀完那一刻你的种族；还不对就再点一次，概率的东西要多试",
+                "这一间只放这一族——想试别的族，去那一族的大厅");
     }
 
     // -- the sections ------------------------------------------------------
@@ -3147,7 +3181,7 @@ public final class Hall {
 
     /** The same, for a run of signs that owns more or less wall than the default. */
     private void wallSign(World target, int y, int x, int z, int maxBoards, String... lines) {
-        signBoard(target, x, y + SWITCH_Y, z - 1, BlockFace.SOUTH, maxBoards, wrapAll(lines));
+        signBoard(target, x, y + BOARD_Y, z - 1, BlockFace.SOUTH, maxBoards, wrapAll(lines));
     }
 
     /**
@@ -3161,43 +3195,74 @@ public final class Hall {
      */
     private void signBoard(World target, int supportX, int supportY, int supportZ, BlockFace side,
             int maxBoards, List<String> lines) {
+        signBoard(target, supportX, supportY, supportZ, side, maxBoards, null, lines);
+    }
+
+    /**
+     * The same, with every board it writes carrying the same trigger.
+     *
+     * <p>An action whose name needs more than one board is one action, so all of its boards have
+     * to do the same thing - otherwise a player reads the second half of a sentence and finds
+     * that half of it is dead. Clicking any of them is clicking the action.
+     */
+    private void signBoard(World target, int supportX, int supportY, int supportZ, BlockFace side,
+            int maxBoards, Trigger trigger, List<String> lines) {
         List<String> board = new ArrayList<>();
         int placed = 0;
         for (String line : lines) {
             if (BREAK.equals(line)) {
                 if (!board.isEmpty()) {
-                    writeBoard(target, supportX, supportY, supportZ, side, maxBoards,
-                            placed++, board);
+                    writeBoard(target, supportX, supportY, supportZ, side, maxBoards, placed++, board,
+                            trigger);
                     board.clear();
                 }
                 continue;
             }
             if (board.size() == LINES_PER_BOARD) {
-                writeBoard(target, supportX, supportY, supportZ, side, maxBoards, placed++, board);
+                writeBoard(target, supportX, supportY, supportZ, side, maxBoards, placed++, board,
+                        trigger);
                 board.clear();
             }
             board.add(line);
         }
         if (!board.isEmpty() && placed < maxBoards) {
-            writeBoard(target, supportX, supportY, supportZ, side, maxBoards, placed, board);
+            writeBoard(target, supportX, supportY, supportZ, side, maxBoards, placed, board, trigger);
         }
     }
 
     private void writeBoard(World target, int supportX, int supportY, int supportZ, BlockFace side,
-            int maxBoards, int board, List<String> lines) {
+            int maxBoards, int board, List<String> lines, Trigger trigger) {
         if (board >= maxBoards) {
             boardsDropped++;
             droppedBoards.add(target.getName() + " " + (supportX + board) + "," + supportY + ","
                     + supportZ + " allowed=" + maxBoards + " text=" + lines.get(0));
             return;
         }
-        signOn(target, supportX + board, supportY, supportZ, side,
+        signOn(target, supportX + board, supportY, supportZ, side, trigger,
                 lines.toArray(new String[0]));
     }
 
     /** Boards a section had nowhere left to write. Zero means every word fitted. */
     public int boardsDropped() {
         return boardsDropped;
+    }
+
+    /**
+     * The clickable things that are not boards, which is meant to be only the exits.
+     *
+     * <p>Every action in the hall is a board a player right-clicks; the exits keep their buttons
+     * because the red wool under them is the landmark. So this is the list that says whether that
+     * is still true - and it is a list of locations rather than a number, because "one per room" is
+     * only a good answer if you can see which rooms are in it.
+     */
+    public List<Location> buttonFixtures() {
+        List<Location> out = new ArrayList<>();
+        for (Map.Entry<Location, Fixture> entry : fixtures.entrySet()) {
+            if (entry.getValue().type() != Material.OAK_WALL_SIGN && entry.getValue().trigger() != null) {
+                out.add(entry.getKey());
+            }
+        }
+        return out;
     }
 
     /**
@@ -3358,6 +3423,58 @@ public final class Hall {
         return out;
     }
 
+    /**
+     * Boards hanging outside the band a player can actually read.
+     *
+     * <p>Two to four blocks over the floor of their room is the band: two is across the chest, three
+     * is where the eyes are, and four is read by looking up a little. Anything above that is read by
+     * tipping the head back, and anything below is not read at all - so this is the rule that says
+     * a board is a board rather than scenery, and it is checked here rather than remembered.
+     *
+     * <p>This hall has got it wrong twice, in opposite directions both times: first a second row
+     * nine blocks up that nobody could reach, then a teaching wall at one block, which is the top
+     * of the player's own feet and below the line of sight of anybody standing in front of it.
+     */
+    public List<String> signsOffIdeal() {
+        List<String> out = new ArrayList<>();
+        for (Map.Entry<Location, Fixture> entry : fixtures.entrySet()) {
+            if (entry.getValue().type() != Material.OAK_WALL_SIGN) {
+                continue;
+            }
+            Location at = entry.getKey();
+            Integer floor = floorUnder(at);
+            if (floor == null) {
+                continue;
+            }
+            int height = at.getBlockY() - floor;
+            if (height < BOARD_MIN || height > BOARD_MAX) {
+                out.add("sign " + place(at.getBlock()) + " height=" + height
+                        + " band=" + BOARD_MIN + ".." + BOARD_MAX + " kind="
+                        + (entry.getValue().trigger() == null
+                                ? "plain" : entry.getValue().trigger().kind()));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Boards hanging at the player's own feet.
+     *
+     * <p>Reported apart from {@link #signsOffIdeal()} because it is the mistake that was made, and
+     * because "one block over the floor" sounds harmless right up until somebody stands in front of
+     * it. A board there is below the line of sight of a standing player: they have to walk backwards
+     * and look down to read it.
+     */
+    public List<String> signsAtKnee() {
+        List<String> out = new ArrayList<>();
+        for (String line : signsOffIdeal()) {
+            if (line.contains(" height=" + (BOARD_MIN - 1) + " ")) {
+                out.add(line);
+            }
+        }
+        return out;
+    }
+
     /** The floor of the room a block stands in, or {@code null} when it is not in a room. */
     private Integer floorUnder(Location at) {
         for (Map.Entry<String, Box> zone : zones.entrySet()) {
@@ -3474,10 +3591,34 @@ public final class Hall {
 
     private void signOn(World target, int supportX, int supportY, int supportZ, BlockFace side,
             String... lines) {
-        sign(target, supportX + side.getModX(), supportY, supportZ + side.getModZ(), side, lines);
+        signOn(target, supportX, supportY, supportZ, side, (Trigger) null, lines);
+    }
+
+    private void signOn(World target, int supportX, int supportY, int supportZ, BlockFace side,
+            Trigger trigger, String... lines) {
+        sign(target, supportX + side.getModX(), supportY, supportZ + side.getModZ(), side, trigger,
+                lines);
     }
 
     private void sign(World target, int x, int y, int z, BlockFace facing, String... lines) {
+        sign(target, x, y, z, facing, (Trigger) null, lines);
+    }
+
+    /**
+     * The same, on a board that is itself the action.
+     *
+     * <p>A board is where the words are and a switch is not, so a room that keeps them apart asks
+     * the player to work out which switch belongs to which sentence - and a wall of switches with
+     * a wall of boards over them is a guessing game with a right answer nobody can see. Making the
+     * board the switch means the name and the action are one object.
+     *
+     * <p>Nothing about the clicking changes: {@code HallGuard.onInteract} looks the block up in
+     * {@link #triggerAt} and does not care what it is made of, so a board triggers exactly the way
+     * a button did. The one button left in the building is the exit, and it is a button because
+     * the red wool under it is the landmark.
+     */
+    private void sign(World target, int x, int y, int z, BlockFace facing, Trigger trigger,
+            String... lines) {
         Block block = target.getBlockAt(x, y, z);
         Fixture already = fixtures.get(blockKey(block.getLocation()));
         if (already != null && already.lines() != null
@@ -3496,7 +3637,7 @@ public final class Hall {
         List<String> text = tidy(List.of(lines));
         place(block, Material.OAK_WALL_SIGN, facing, text);
         fixtures.put(blockKey(block.getLocation()),
-                new Fixture(Material.OAK_WALL_SIGN, facing, text, null));
+                new Fixture(Material.OAK_WALL_SIGN, facing, text, trigger));
     }
 
     /**
@@ -3576,19 +3717,18 @@ public final class Hall {
 
     /** A switch with the sign that explains it standing over it. */
     private void switchpoint(World target, int y, int x, int z, Trigger trigger, String... lines) {
-        if (switchWall != null) {
-            // In a room: collected, and hung on the wall once the step has finished declaring
-            // itself. Where in the room the step asked for it is not used - a switch is a switch
-            // wherever it was written, and the wall reads left to right in the order it asked.
-            switchPlans.add(new PlannedSwitch(trigger, wrapAll(lines)));
-            return;
-        }
-        // No room open - the two nether cells build corridors rather than rooms, and a corridor
-        // with no wall of its own keeps the post.
-        set(target, STELE, x, y, z - 1);
-        set(target, STELE, x, y + 1, z - 1);
-        button(target, x, y, z, BlockFace.SOUTH, trigger);
-        signBoard(target, x, y + 1, z - 1, BlockFace.SOUTH, SWITCH_BOARDS, wrapAll(lines));
+        // Collected, never placed here. A step declares what it offers while its contents are
+        // being built, and the whole lot is hung on the far wall in one go afterwards - which is
+        // what lets the wall be laid out by how many there are, instead of by coordinates every
+        // step would have to keep in step with its neighbours. Where in the room the step asked
+        // for it is therefore not used: a board is a board wherever it was written, and the wall
+        // reads left to right in the order it asked.
+        //
+        // There used to be a second path here for the two nether cells, which built corridors and
+        // so were said to have no wall to hang on. They have had one since they started calling
+        // laySwitchWall, so the path was unreachable - and it built a stone post with a button on
+        // it, which is the one shape this hall is trying to get rid of.
+        switchPlans.add(new PlannedSwitch(trigger, wrapAll(lines)));
     }
 
     /**
@@ -3614,9 +3754,11 @@ public final class Hall {
             PlannedSwitch planned = switchPlans.get(index);
             int bx = x + 1 + (index % perRow) * SWITCH_PITCH;
             int by = y + SWITCH_ROW_Y + (index / perRow) * SWITCH_ROW_GAP;
+            // The lamp is the board's own support block first and its light second, so the board
+            // is held up and lit by the wall it hangs on rather than by whatever else is nearby.
             set(target, theme.light(), bx, by, wallZ);
-            button(target, bx, by, wallZ - 1, BlockFace.NORTH, planned.trigger());
-            signBoard(target, bx, by + 1, wallZ, BlockFace.NORTH, SWITCH_BOARDS, planned.lines());
+            signBoard(target, bx, by, wallZ, BlockFace.NORTH, SWITCH_BOARDS, planned.trigger(),
+                    planned.lines());
         }
         switchPlans.clear();
     }
@@ -3844,9 +3986,8 @@ public final class Hall {
                 px + PAD_HALF - 1, padY, pz + PAD_HALF - 1);
         set(world, STELE, px + PAD_HALF, padY + 1, pz + PAD_HALF);
         set(world, STELE, px + PAD_HALF, padY + 2, pz + PAD_HALF);
-        button(world, px + PAD_HALF - 1, padY + 1, pz + PAD_HALF, BlockFace.WEST,
-                Trigger.of(Kind.ENTER_LOBBY));
         signOn(world, px + PAD_HALF, padY + 2, pz + PAD_HALF, BlockFace.WEST,
+                Trigger.of(Kind.ENTER_LOBBY),
                 "§a回到测试大厅", "§7点下方按钮");
         set(world, Material.SEA_LANTERN, px + PAD_HALF, padY + 3, pz + PAD_HALF);
         boxes.add(new Box(world.getName(), px - PAD_HALF, padY, pz - PAD_HALF,
