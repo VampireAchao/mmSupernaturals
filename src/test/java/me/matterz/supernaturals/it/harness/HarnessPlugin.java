@@ -334,6 +334,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return "ok " + Nms.skin(player(rest.trim()));
             case "grace":
                 return "ok " + guard.graceReport(player(rest.trim()));
+            case "anchor":
+                return "ok " + guard.anchorReport(player(rest.trim()));
             case "guides":
                 return guard.guideReport(rest.trim());
             case "talk":
@@ -403,6 +405,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return buttons(rest);
             case "section":
                 return section(rest);
+            case "fixtures":
+                return fixtures(rest);
             case "point":
                 return point(rest);
             case "mobs":
@@ -1552,6 +1556,28 @@ public final class HarnessPlugin extends JavaPlugin {
         }
         return "ok " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ()
                 + " " + at.getWorld().getName();
+    }
+
+    /**
+     * Everything the hall put in one room that a player can touch, with the text on it.
+     *
+     * <p>The companion of {@code sign}, which reads one board whose coordinates are already known;
+     * this one answers "what does room five actually say" without walking to room five - including
+     * the boards the entry room uses to open the two ways into a race, which is where a hall can
+     * promise a shrine that was never built.
+     */
+    private String fixtures(String rest) {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: fixtures <race> <index>";
+        }
+        List<String> found = hall.fixturesIn(args[0], intOf(args[1]));
+        return found.isEmpty()
+                ? "err nothing placed in " + args[0] + " " + args[1]
+                : "ok " + found.size() + ":\n  " + String.join("\n  ", found);
     }
 
     private String section(String rest) {        if (hall == null) {

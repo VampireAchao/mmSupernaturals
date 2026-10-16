@@ -856,7 +856,7 @@ public final class Hall {
         int baseHead = cell[2];
 
         List<Section> sections = new ArrayList<>();
-        sections.add(entrySection(race));
+        sections.add(entrySection(race, sections));
         sections.addAll(sectionsFor(race, baseHead));
         List<Placement> plan = layOut(sections);
 
@@ -1414,13 +1414,36 @@ public final class Hall {
      * he loses health when he is hit, and the button puts him back to full.
      */
     /**
+     * A room of a hall as the entry room's board would name it: that room's own title, without the
+     * number the title carries for its own wall.
+     *
+     * <p>The entry room's two boards say what the two ways into a race are, and they used to say
+     * "go to the conversion shrine" in all eight halls - and only one of the eight has a shrine.
+     * A ghoul's way in is a corridor in the nether, a demon's is a pool of lava, a witch hunter's
+     * is an enrolment, a werewolf's is a bite at night, an enderborn's is a pearl and some clay.
+     * Naming the room the board opens cannot go stale when a room is rewritten, which is exactly
+     * what the old wording had already done.
+     */
+    private static String opened(List<Section> sections, int index) {
+        if (index < 0 || index >= sections.size()) {
+            return "§f第 " + index + " 间";
+        }
+        return sections.get(index).title().replaceFirst("(§.)\\s*[①②③④⑤⑥⑦⑧⑨]\\s*", "$1");
+    }
+
+    /**
      * The room every hall opens with: what this hall is, and the way out of it.
      *
      * <p>This used to be furniture bolted onto the corridor after the fact, at the near end, which
      * is why it once wrote over the first step's signs. It is a room like every other room now,
      * which is what makes it impossible for it to land on top of anything.
+     *
+     * <p>It is handed the list of the hall's steps because its two ways in name them: the boards
+     * carry the titles of the rooms they open, and those rooms do not exist yet when this is
+     * built. The list is read when the board is written rather than when this is called, by which
+     * time it is complete.
      */
-    private Section entrySection(String race) {
+    private Section entrySection(String race, List<Section> sections) {
         // A standard room, and that is the change: it used to be the largest in the hall - four
         // cells, forty-four across, eighteen high - because its far wall was a directory of every
         // other room. Size was a consequence of the wall, and the wall is gone.
@@ -1429,18 +1452,22 @@ public final class Hall {
                     new ItemStack(Material.BREAD, 8)));
             // Two ways into the race, and the three ways out every room has. No directory: the
             // rest of the hall is walked, room by room, each board naming the one after it.
-            // Two ways in, and the numbers are not what they look like. Room one is the shrine and
+            // Two ways in, and the numbers are not what they look like. Room one is the way in and
             // room two is the kill - not the other way round, which is how this was first written
             // and how it was wrong for every one of the eight halls. The kill room is spliced into
             // the step list at position one, and the entry room is put in front of that list
             // afterwards, so what is one over there is two in here. The check in raceHall says so
             // out loud rather than leaving it to a player to report.
+            //
+            // Neither board describes its room; each names it, in that room's own words. Seven of
+            // the eight races have no shrine at all, and a board that offered one to all of them
+            // sent people looking for something that was never built.
             switchpoint(w, y, x + 1, z + 3,
                     Trigger.with(Kind.GO_ROOM, race, race + ":1"),
-                    "§c去 转化祭坛", "§7第①间：变成这一族");
+                    opened(sections, 1), "§7第①间 · 变成这一族");
             switchpoint(w, y, x + 5, z + 3,
                     Trigger.with(Kind.GO_ROOM, race, race + ":2"),
-                    "§c被本族杀死", "§7第②间：杀死也转化");
+                    opened(sections, 2), "§7第②间 · 被杀也转化");
             switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.RETURN_START, race),
                     "§f回大厅中央", "§7站回入口正中");
             switchpoint(w, y, x + 13, z + 3, Trigger.of(Kind.EXIT_ROOM),
@@ -1448,12 +1475,12 @@ public final class Hall {
             switchpoint(w, y, x + 17, z + 3, Trigger.of(Kind.LEAVE_HALL),
                     "§a离开大厅", "§7去下面的世界");
         }, "这里是" + title(race) + "的测试大厅",
-                "一族的能力拆成一间一间的房，一间只讲一件事。进门这间只放两条路："
-                        + "走祭坛变成这一族，或者被这一族杀死变成这一族。其余房间顺着每间房里的"
-                        + "「下一间」一间一间走，每一间的牌子上都写着那一间讲什么",
-                "点「去 转化祭坛」或「被本族杀死」，你就站在那一间房的正中间，"
-                        + "聊天栏会说出它的名字",
-                "进门先看这两块牌，挑一条路走",
+                "一族的能力拆成一间一间的房，一间只讲一件事。进门这间只放两条路，"
+                        + "两块牌上写着它们各自去哪一间：一条是这一族自己的入门方式，"
+                        + "一条是被这一族杀死。其余房间顺着每间房里的「下一间」一间一间走，"
+                        + "每块牌上写着那一间讲什么",
+                "点入口那两块牌中的一块，你就站在那一间房的正中间，聊天栏会说出它的名字",
+                "进门先看这两块牌：一块是这一族的入门方式，一块是「被杀也转化」",
                 "其余房间靠每间房里的「上一间 / 下一间」串着走，按顺序走完就是这一族的全部环节",
                 "每间房进门左手边都有一格红色羊毛，上面是退出：按下去回初始大厅并恢复人类",
                 "牌子上写着「离开大厅」的那一块，是去下面的玩法世界");
@@ -2445,9 +2472,14 @@ public final class Hall {
                 sections.add(section("§7② 入会 铁门与告示牌", 1, (w, y, x, z, width) -> {
                     door(w, x + 6, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 1, z + DEPTH / 2);
-                    set(w, STELE, x + 7, y + 2, z + DEPTH / 2);
-                    signOn(w, x + 7, y + 1, z + DEPTH / 2, BlockFace.EAST, "WitchHunter");
                     set(w, Material.SEA_LANTERN, x + 7, y + 2, z + DEPTH / 2);
+                    // At the second block, which is where a board belongs - this one was left at
+                    // the player's feet when every other board in the building was raised, and it
+                    // is the one board here that has to be read: the lesson of the room is that
+                    // the door reads the sign, so the sign has to be legible from standing. The
+                    // door's own check looks through a five-by-five cube around it, so a board one
+                    // block higher is read exactly the same.
+                    signOn(w, x + 7, y + 2, z + DEPTH / 2, BlockFace.EAST, "WitchHunter");
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.INVITE_HUNTER),
                             "§a直接发一张邀请", "§7跳过杀怪，图快的用这个");
                 }, "验证铁门入会：门旁告示牌必须写着 WitchHunter",
@@ -4056,6 +4088,35 @@ public final class Hall {
                 }
             }
         }
+    }
+
+    /**
+     * Everything the hall placed in one room that a player can touch, and the text on it.
+     *
+     * <p>A board is what a player is told to do, and this is the only way to read one without
+     * walking to the room. It earns its place because a board can be wrong in a way nothing else
+     * notices: it can name a room that does not exist, offer a shrine the race does not have, or
+     * promise a number the plugin does not use - and every one of those three has happened here.
+     */
+    public List<String> fixturesIn(String race, int index) {
+        Box zone = zones.get("room." + race + "." + index);
+        Location landing = roomSpawn(race, index);
+        if (zone == null || landing == null) {
+            return List.of();
+        }
+        String world = landing.getWorld().getName();
+        List<String> found = new ArrayList<>();
+        for (Map.Entry<Location, Fixture> entry : fixtures.entrySet()) {
+            Location at = entry.getKey();
+            if (!world.equals(at.getWorld().getName()) || !zone.holds(at)) {
+                continue;
+            }
+            List<String> lines = entry.getValue().lines();
+            found.add(at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ()
+                    + " " + entry.getValue().type().name()
+                    + " " + (lines == null ? "(no text)" : String.join(" / ", lines)));
+        }
+        return found;
     }
 
     private void set(World target, Material material, int x, int y, int z) {

@@ -403,6 +403,7 @@ final class HallGuard implements Listener {
         }
         if (where != null) {
             player.teleport(where);
+            anchorTo(player, where);
         }
         resetVitals(player);
         protectedUntil.put(name, ticks + GRACE_TICKS);
@@ -1181,7 +1182,61 @@ final class HallGuard implements Listener {
             return;
         }
         player.teleport(where);
+        anchorTo(player, where);
         note(player, what);
+    }
+
+    /**
+     * Moves a player's respawn point to the room they are standing in.
+     *
+     * <p>Dying in the fifth room and opening their eyes at the hall's door made every death read as
+     * being sent back to the start: the anchor was set once, when the player walked into the hall,
+     * and nothing they did afterwards moved it. It moves with them now, room by room - and it is
+     * the room's own landing rather than the spot they were standing on, because a room may well
+     * kill somebody somewhere nobody can stand: a pool, a shaft, the top of a fall. The landing is
+     * the one place in a room that is always safe.
+     *
+     * <p>Silent about anywhere that is not a room, on purpose. The lobby, the return pad and the
+     * world outside the hall each have an anchor of their own, set when the player was sent there,
+     * and a teleport within one of those must not move it.
+     */
+    private void anchorTo(Player player, Location where) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null || where == null) {
+            return;
+        }
+        String room = hall.roomAt(where);
+        if (room == null) {
+            return;
+        }
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return;
+        }
+        int index;
+        try {
+            index = Integer.parseInt(room.substring(dot + 1));
+        } catch (NumberFormatException notARoom) {
+            return;
+        }
+        Location landing = hall.roomSpawn(room.substring(0, dot), index);
+        if (landing != null) {
+            player.setRespawnLocation(landing, true);
+        }
+    }
+
+    /** Where a player is, and where they would come back if they died there, for the probe. */
+    String anchorReport(Player player) {
+        Location anchor = player.getRespawnLocation();
+        Hall hall = plugin.hallOrNull();
+        String room = hall == null
+                ? "(no hall on this server)"
+                : String.valueOf(hall.roomAt(player.getLocation()));
+        return player.getName() + " room=" + room + " respawns at "
+                + (anchor == null
+                        ? "the world's own spawn - no anchor has been set"
+                        : anchor.getWorld().getName() + " " + anchor.getBlockX() + ","
+                                + anchor.getBlockY() + "," + anchor.getBlockZ());
     }
 
     /**
