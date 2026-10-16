@@ -2008,9 +2008,24 @@ final class HallGuard implements Listener {
         }
         faceThe(player, npc);
         player.swingMainHand();
+        String was = SuperNManager.get(npc).getType();
         land(player, npc, damage);
+        String now = SuperNManager.get(npc).getType();
+        // Read before and after, because a spell can answer the blow by changing the target instead
+        // of hurting him - and then the aim of the section is the change, not the health bar. Left
+        // at "he still has 20 health" this reads as a weapon that does not work, which is what the
+        // demon's conversion looked like from the outside: the spell ate every hit and nothing on
+        // the target moved. Whoever swung is told which of the two happened.
+        boolean turned = !now.equals(was);
+        if (turned) {
+            labelRace(npc, now);
+            preyRace.put(npc.getName(), now);
+        }
         note(player, "§7你拿" + (item == null ? "手里的东西" : item.name()) + "打在 "
                 + npc.getName() + " 身上"
+                + (turned ? "，§a他的种族变成了 " + RACE_LABEL.getOrDefault(now, now)
+                        + "§7（这一下被法术吃掉了，没造成伤害）"
+                        : "")
                 + (npc.isDead() ? "§c（他倒了，稍后会在原地复活）"
                         : "§7（他还剩 " + trim(npc.getHealth()) + " 点血）"));
     }
@@ -2577,6 +2592,43 @@ final class HallGuard implements Listener {
             note(owner, "§a" + name + " 转化成功了：他现在是 "
                     + RACE_LABEL.getOrDefault(now, now)
                     + "§a（连着杀是为了等这一下；想再试一次，点「放出一个人类」会重新放一个）");
+        }
+    }
+
+    /**
+     * Keeps every stand-in's race label level with what the plugin says he is.
+     *
+     * <p>The label over a stand-in's head is the hall's own - a scoreboard prefix - and the plugin
+     * that changes what he is knows nothing about it. A spell that turns somebody therefore leaves
+     * him wearing the name of what he used to be, and every section that turns people says the
+     * opposite in as many words ("his label over his head changes too"). A tester who has just spent
+     * two thousand power on a conversion and still sees a vampire's name hanging over the target has
+     * no way to tell the spell worked - which is exactly what the demon's netherrack looked like
+     * when this was found: no damage on the bar, no change on the label, nothing at all.
+     *
+     * <p>The kill-driven conversions have their own moment, {@link #turnedOver}; this is the one for
+     * a stand-in who is turned while he stands there, alive, and it is a sweep rather than a hook on
+     * purpose: the spell is the plugin's, and nothing here is told when one lands.
+     */
+    private void relabelStandIns() {
+        for (String name : new ArrayList<>(preyRace.keySet())) {
+            Player npc = Bukkit.getPlayerExact(name);
+            if (npc == null) {
+                continue;
+            }
+            String now = SuperNManager.get(npc).getType();
+            String was = preyRace.get(name);
+            if (now == null || now.equals(was)) {
+                continue;
+            }
+            labelRace(npc, now);
+            preyRace.put(name, now);
+            String who = preyOwner.get(name);
+            Player owner = who == null ? null : Bukkit.getPlayerExact(who);
+            if (owner != null) {
+                note(owner, "§a" + name + " 的种族变成了 "
+                        + RACE_LABEL.getOrDefault(now, now) + "§a（头顶的标签已经跟着改）");
+            }
         }
     }
 
@@ -3384,6 +3436,7 @@ final class HallGuard implements Listener {
             return;
         }
         refreshGuides(hall);
+        relabelStandIns();
         reclaimEmptyRooms(hall);
     }
 
