@@ -407,8 +407,16 @@ public class PriestManager extends HumanManager {
 		}
 	}
 
-	/** A place as {@code world (x, y, z)}, for the messages that have to name one. */
-	public static String describe(Location at) {
+	/**
+	 * A place as {@code world (x, y, z)}, for the messages that have to name one.
+	 *
+	 * <p>It answers for a point that is not set as well, so that a sentence comes back rather than
+	 * a crash. The banish this names asks before it spends anything and refuses to cast when the
+	 * point is missing, so that answer is the one nobody should see - but {@code priestBanishLocation}
+	 * is written from a world name in the configuration, and a name no world answers to is a
+	 * banish point that is not one.
+	 */
+	private static String describe(Location at) {
 		if (at == null || at.getWorld() == null) {
 			return "an unset banish point";
 		}

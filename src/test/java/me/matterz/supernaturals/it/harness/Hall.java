@@ -1652,7 +1652,7 @@ public final class Hall {
      */
     private Section convertSection(String race) {
         String chance = switch (race) {
-            case "enderborn" -> "10%（代码里写死的 0.10，没有配置项）";
+            case "enderborn" -> "10%（EnderBorn.Convert.Chance 默认 0.10）";
             default -> "35%（Supernatural.SpreadChance 默认 0.35）";
         };
         String extra = switch (race) {
@@ -1767,7 +1767,8 @@ public final class Hall {
                         + "所以已经从人类变过的人，别人杀你也不会再变一次——这一间因此从「先变回人类」开始。"
                         + "四个族的击杀转化是概率：吸血鬼、食尸鬼、狼人各 35%"
                         + "（Supernatural.SpreadChance 默认 0.35），末影族 10%"
-                        + "（代码里写死的一个数，不读那条配置）。「必中开关」把这两个数"
+                        + "（EnderBorn.Convert.Chance 默认 0.10，是它自己的那个数）。"
+                        + "「必中开关」把这两个数"
                         + "一起改成 100%，末影族也不例外。"
                         + "恶魔不走概率，走条件：打你的人得是恶魔，而你死的那一刻手上要拿着地狱岩，这样是 100%。"
                         + "狼人还多一个条件：只在他杀你的那一刻是夜晚才算。",

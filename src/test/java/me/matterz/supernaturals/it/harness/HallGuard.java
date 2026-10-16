@@ -3,7 +3,6 @@ package me.matterz.supernaturals.it.harness;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
-import me.matterz.supernaturals.manager.EnderBornManager;
 import me.matterz.supernaturals.manager.HunterManager;
 import me.matterz.supernaturals.manager.SuperNManager;
 
@@ -252,10 +251,10 @@ final class HallGuard implements Listener {
     /**
      * The enderborn's own conversion chance, held open at the same time and put back with it.
      *
-     * <p>It is a second number because it is a second rule: three races roll the configured
-     * chance, and the enderborn rolls a number of its own that no setting feeds. A switch that
-     * wrote only the first of them promised the enderborn room a conversion that was certain and
-     * then rolled a tenth, and said "35%" while it did it.
+     * <p>It is a second number because it is a second rule: three races roll the chance they
+     * share, and the enderborn rolls a number of its own ({@code EnderBorn.Convert.Chance}). A
+     * switch that wrote only the first of them promised the enderborn room a conversion that was
+     * certain and then rolled a tenth, and said "35%" while it did it.
      */
     private Double enderWas;
 
@@ -1071,18 +1070,18 @@ final class HallGuard implements Listener {
      * <p>The roll stays the plugin's - this writes the numbers the rolls are compared against, which
      * the plugin reads at the moment of the kill, so the kill, the message and the new race all
      * still come out of the plugin's own path. There are two of those numbers and both are written:
-     * the configured one that three races share, and the enderborn's own, which no setting feeds -
-     * leaving the second one out made the switch a lie in the one hall that needed it most. It is a
-     * toggle as well as a switch because a player who has just watched the certain version should be
-     * able to watch the real one without leaving the room, and it is put back automatically on the
-     * way out either way.
+     * the chance that three races share, and the enderborn's own, which the plugin reads from its
+     * own setting the same way - leaving the second one out made the switch a lie in the one hall
+     * that needed it most. It is a toggle as well as a switch because a player who has just watched
+     * the certain version should be able to watch the real one without leaving the room, and it is
+     * put back automatically on the way out either way.
      */
     private void toggleSpread(Player player) {
         if (spreadWas == null) {
             spreadWas = SNConfigHandler.spreadChance;
-            enderWas = EnderBornManager.convertChance();
+            enderWas = SNConfigHandler.enderSpreadChance;
             SNConfigHandler.spreadChance = 1.0;
-            EnderBornManager.setConvertChance(1.0);
+            SNConfigHandler.enderSpreadChance = 1.0;
             note(player, "§c这一间的转化已改成必定成功（原值 " + held()
                     + "，离开这间房会自动恢复）");
             return;
@@ -1117,7 +1116,7 @@ final class HallGuard implements Listener {
             spreadWas = null;
         }
         if (enderWas != null) {
-            EnderBornManager.setConvertChance(enderWas);
+            SNConfigHandler.enderSpreadChance = enderWas;
             enderWas = null;
         }
     }

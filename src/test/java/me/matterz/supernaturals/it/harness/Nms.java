@@ -352,6 +352,9 @@ final class Nms {
     /** How many of a fake client's messages are kept, so a chatty step cannot fill memory. */
     private static final int SAID_KEPT = 40;
 
+    /** How much of a printed packet is kept: enough for a sentence, not for a whole inventory. */
+    private static final int SAID_LONGEST = 1000;
+
     /**
      * The last few things the server said to each fake client, by name.
      *
@@ -360,6 +363,13 @@ final class Nms {
      * could see, since there is nobody to see it. The packet is in the handler on its way out
      * regardless, so its text is kept rather than dropped: a few dozen strings per stand-in, and
      * "the spell announces where it sent him" stops being a claim.
+     *
+     * <p>Kept for as long as the server runs and never cleared, and only the last {@link
+     * #SAID_KEPT} of them per name: a scenario that asserts on a sentence has to read the tail it
+     * just caused, not the whole list, because the name it is reading may have been used by an
+     * earlier step as well. Nothing clears it on disconnect for the same reason it is not a
+     * scenario's business: what a name was told is history, and the count that comes back from
+     * {@link #said} says how much of it there is.
      */
     private static final Map<String, Deque<String>> SAID = new ConcurrentHashMap<>();
 
@@ -388,14 +398,16 @@ final class Nms {
      * <p>Recognised by name rather than by type, like everything else in this file: the packet
      * classes live in the server jar, which this file cannot see. A record prints its own parts, so
      * the sentence the server was sending is in the printed form, which is all a scenario needs to
-     * search for a phrase in.
+     * search for a phrase in. A packet longer than {@link #SAID_LONGEST} is cut off at that point -
+     * the printed form carries the component's own formatting around the text, so the cap is a
+     * guard on a pathological message rather than a limit a sentence meets.
      */
     private static String chatOf(Object packet) {
         if (!packet.getClass().getSimpleName().contains("SystemChat")) {
             return null;
         }
         String printed = String.valueOf(packet);
-        return printed.length() > 400 ? printed.substring(0, 400) : printed;
+        return printed.length() > SAID_LONGEST ? printed.substring(0, SAID_LONGEST) : printed;
     }
 
     /** What the server has said to one fake client, oldest first. */

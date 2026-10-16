@@ -19,38 +19,17 @@ import org.bukkit.inventory.ItemStack;
 public class EnderBornManager extends ClassManager {
 
 	/**
-	 * How often one of an enderborn's blows carries its attack bonus, and how often a killing
-	 * blow turns the victim into one of them.
+	 * How often one of an enderborn's blows carries its attack bonus.
 	 *
-	 * <p>Both used to be written as {@code Math.random() == 0.35} and {@code == 0.10}: a double
-	 * compared for <em>exact</em> equality against one particular value out of the roughly 2^53
-	 * that {@code Math.random()} can return. Equality is not impossible - around one roll in nine
-	 * quadrillion - but it is not a chance anybody will ever see, so neither the attack bonus nor
-	 * the conversion has ever happened. Asking whether the roll came in <em>under</em> the number
-	 * is what makes it the chance it was meant to be.
+	 * <p>It used to be written as {@code Math.random() == 0.35}: a double compared for
+	 * <em>exact</em> equality against one particular value out of the roughly 2^53 that
+	 * {@code Math.random()} can return. Equality is not impossible - around one roll in nine
+	 * quadrillion - but it is not a chance anybody will ever see, so the attack bonus never
+	 * happened. Asking whether the roll came in <em>under</em> the number is what makes it the
+	 * chance it was meant to be. The conversion roll was written the same way and is fixed the
+	 * same way; its number is the server's to set, under {@code EnderBorn.Convert.Chance}.
 	 */
 	private static final double ATTACK_BONUS_CHANCE = 0.35;
-	private static final double CONVERT_CHANCE = 0.10;
-
-	/**
-	 * The number the conversion roll is actually compared against.
-	 *
-	 * <p>This is the one turning in the plugin with no setting behind it: the other three races
-	 * roll the configured chance, and an enderborn rolls a tenth of its own. That made it the one
-	 * turning nobody could watch happen on purpose - the test hall holds a roll open at a hundred
-	 * percent so a room about being turned can be run once instead of gambled at, and a room that
-	 * promised that here rolled its own tenth anyway, while saying the chance was the shared one.
-	 * The default is the plugin's own; whoever holds it open puts it back.
-	 */
-	private static double convertChance = CONVERT_CHANCE;
-
-	public static double convertChance() {
-		return convertChance;
-	}
-
-	public static void setConvertChance(double chance) {
-		convertChance = chance;
-	}
 
 	/** Deaths it takes for an enderborn to be reborn as a human. */
 	private static final int DEATHS_UNTIL_HUMAN = 5;
@@ -199,7 +178,12 @@ public class EnderBornManager extends ClassManager {
 					+ " stole some of your power!");
 			SuperNManager.alterPower(damager, SNConfigHandler.enderKillPower, "Stole power from "
 					+ victim.getName());
-			if (Math.random() < convertChance) {
+			// Its own number rather than the one three other races share: an enderborn turns a
+			// victim on one kill in ten, not on the configured spread chance. It is a setting of
+			// its own now (EnderBorn.Convert.Chance) - it used to be a tenth written in this
+			// class, which made it the one turning a room could not hold open, and the one
+			// turning a server could not tune.
+			if (Math.random() < SNConfigHandler.enderSpreadChance) {
 				SuperNManager.convert(victim, "enderborn");
 			}
 		}
