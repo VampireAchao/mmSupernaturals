@@ -54,6 +54,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.vehicle.VehicleDamageEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.permissions.PermissionAttachment;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Scoreboard;
@@ -225,6 +226,12 @@ final class HallGuard implements Listener {
      */
     private final Map<String, String> preyRace = new HashMap<>();
     private final Map<String, String> preyOwner = new HashMap<>();
+
+    /**
+     * The permission attachments the hall has put on people, e.g. the one that takes an operator's
+     * infinite power away so a power cost can be watched. Kept so the same switch can hand it back.
+     */
+    private final Map<String, PermissionAttachment> powerLimits = new HashMap<>();
 
     /** The seats taken during the current spawn, so two stand-ins never share one place. */
     private final List<Location> taken = new ArrayList<>();
@@ -757,6 +764,7 @@ final class HallGuard implements Listener {
                 SuperNManager.alterPower(SuperNManager.get(player), 1000, "Test hall");
                 note(player, "§b能量 +1000");
             }
+            case INFINITE_POWER -> toggleInfinitePower(player);
             case DAY -> setClock(player, block.getWorld(), 6000L, "§e这个大厅改成白天了");
             case NIGHT -> setClock(player, block.getWorld(), 18000L, "§9这个大厅改成夜晚了");
             case PREPARE_GHOUL -> prepareGhoul(player, hall);
@@ -1197,6 +1205,33 @@ final class HallGuard implements Listener {
         note(player, event.isCancelled()
                 ? "§7切换被拦下了，检查手里是不是拿着弓"
                 : "§7已空挥一次（手持弓才会切换箭种）");
+    }
+
+    /**
+     * Turns the tester's infinite power off, or back on.
+     *
+     * <p>The permission that refuses every power loss is declared {@code default: op}, so it is
+     * held by every operator - which on a test server is the one person who runs the hall. For
+     * them, a section whose whole point is that the number falls shows a number that never moves,
+     * and a section that charges for a spell shows a charge that was never taken. Nothing in the
+     * hall said so, and the question was asked about exactly this: a demon whose power did not
+     * fall once it was out of the lava.
+     *
+     * <p>An attachment of {@code false} is what turns it off: it is scoped to this plugin, it
+     * outranks the operator's default, and taking it away restores whatever they had. It goes in
+     * the book so the next press can hand it back.
+     */
+    private void toggleInfinitePower(Player player) {
+        String node = SuperNManager.infPowerPermissions;
+        PermissionAttachment held = powerLimits.remove(player.getName());
+        if (held != null) {
+            player.removeAttachment(held);
+        } else {
+            powerLimits.put(player.getName(), player.addAttachment(plugin, node, false));
+        }
+        note(player, player.hasPermission(node)
+                ? "§e无限能量：开着 §7（你是 OP，插件默认不让 OP 掉能量；关掉它才看得出掉能与法术花费）"
+                : "§a无限能量：关掉了 §7（现在掉能和法术花费都是真的；再点一下可以开回来）");
     }
 
     /** Reads the hunter's bounty list back, and gets one added if there is room. */
@@ -2632,6 +2667,22 @@ final class HallGuard implements Listener {
         }
     }
 
+    /**
+     * Drops the book-keeping for people who have left.
+     *
+     * <p>An attachment belongs to the player object it was made on, so a player who logs out leaves
+     * theirs behind - and somebody who comes back is a new object with none. Keeping the dead entry
+     * would make the next press of the power switch try to take away an attachment that is not
+     * there, which reads as "the switch does nothing".
+     */
+    private void forgetDeparted() {
+        for (Iterator<String> gone = powerLimits.keySet().iterator(); gone.hasNext();) {
+            if (Bukkit.getPlayerExact(gone.next()) == null) {
+                gone.remove();
+            }
+        }
+    }
+
     /** Takes a shulker's bullet or a lingering effect with the entity that owned it. */
     private void removeSpectres(Entity entity) {
         for (Entity nearby : entity.getNearbyEntities(3, 3, 3)) {
@@ -3437,6 +3488,7 @@ final class HallGuard implements Listener {
         }
         refreshGuides(hall);
         relabelStandIns();
+        forgetDeparted();
         reclaimEmptyRooms(hall);
     }
 

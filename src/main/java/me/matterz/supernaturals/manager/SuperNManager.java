@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.logging.Level;
 
 import me.matterz.supernaturals.SuperNPlayer;
@@ -52,6 +53,17 @@ public class SuperNManager {
 	public static List<SuperNPlayer> supernaturals = new ArrayList<SuperNPlayer>();
 	public transient int taskCounter = 0;
 	public static int timer;
+
+	/**
+	 * Who has already been told that their power cannot go down.
+	 *
+	 * <p>The permission that grants it is declared {@code default: op}, so it is held by every
+	 * operator - and an operator who never sees a power cost, never sees the demon's drain and
+	 * never sees "Not enough power" has no way of telling a working rule from a broken one. That
+	 * question has been asked, so it is answered once per session rather than left to be worked out
+	 * from the configuration.
+	 */
+	private static final Set<UUID> toldAboutInfinitePower = new HashSet<>();
 
 	public SuperNManager(SupernaturalsPlugin plugin) {
 		SuperNManager.plugin = plugin;
@@ -219,20 +231,59 @@ public class SuperNManager {
 	// Power Altering //
 	// -------------------------------------------- //
 
-	public static void alterPower(SuperNPlayer snplayer, double delta) {
-		if (SupernaturalsPlugin.hasPermissions(SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName()), infPowerPermissions)) {
-			if (delta < 0) {
-				return;
+	/**
+	 * A permission node, written so the server does not turn it into a link.
+	 *
+	 * <p>Chat turns a bare {@code word.word} into a clickable address, and a permission node is
+	 * made of nothing else - so "supernatural.admin.infinitepower" arrives as an invitation to open
+	 * a web page, and cutting it in half is not enough because "supernatural.admin" is a match on
+	 * its own. Every part is its own piece of text here instead; what is shown is unchanged.
+	 */
+	private static String unstuck(String node) {
+		StringBuilder out = new StringBuilder();
+		for (String part : node.split("\\.")) {
+			if (out.length() > 0) {
+				out.append(ChatColor.WHITE).append('.');
 			}
+			out.append(ChatColor.RED).append(part);
+		}
+		return out.toString();
+	}
+
+	/**
+	 * Whether this player's power is not allowed to go down, which is all
+	 * {@link #infPowerPermissions} does.
+	 *
+	 * <p>Said out loud, once a session. The permission is declared {@code default: op}, so it is
+	 * held by every operator - and its whole effect is to refuse every loss in silence. An operator
+	 * therefore never sees a power cost, never sees the demon's drain and never sees "Not enough
+	 * power", which leaves a rule that is working exactly as written looking like a rule that does
+	 * not work at all: that is the shape of the question asked about a demon's power not falling
+	 * after it stepped out of the lava. The refusal now explains itself.
+	 */
+	private static boolean powerIsFree(SuperNPlayer snplayer) {
+		Player player = SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName());
+		if (player == null || !SupernaturalsPlugin.hasPermissions(player, infPowerPermissions)) {
+			return false;
+		}
+		if (toldAboutInfinitePower.add(player.getUniqueId())) {
+			sendMessage(snplayer, "Your power never goes down: you hold "
+					+ unstuck(infPowerPermissions)
+					+ ChatColor.RED + ", which is given to operators by default.");
+		}
+		return true;
+	}
+
+	public static void alterPower(SuperNPlayer snplayer, double delta) {
+		if (delta < 0 && powerIsFree(snplayer)) {
+			return;
 		}
 		snplayer.setPower(snplayer.getPower() + delta);
 	}
 
 	public static void alterPower(SuperNPlayer snplayer, double delta, String reason) {
-		if (SupernaturalsPlugin.hasPermissions(SupernaturalsPlugin.instance.getServer().getPlayer(snplayer.getName()), infPowerPermissions)) {
-			if (delta < 0) {
-				return;
-			}
+		if (delta < 0 && powerIsFree(snplayer)) {
+			return;
 		}
 		alterPower(snplayer, delta);
 		SuperNManager.sendMessage(snplayer, "Power: " + ChatColor.WHITE

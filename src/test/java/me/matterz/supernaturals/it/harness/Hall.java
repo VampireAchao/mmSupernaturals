@@ -80,6 +80,15 @@ public final class Hall {
         /** Hands the player power, so a section can be reached without grinding for it. */
         POWER,
 
+        /**
+         * Turns the operator's infinite power off and on again.
+         *
+         * <p>Every operator holds the permission that refuses every power loss, so a section about
+         * losing power cannot be run by the person most likely to be running it. This is the switch
+         * that puts the cost back.
+         */
+        INFINITE_POWER,
+
         /** Moves one hall's own world to midday. */
         DAY,
 
@@ -1317,7 +1326,7 @@ public final class Hall {
                 "§c跳进岩浆", "§7点了就下池子");
         sectionHead(nether, y, x0 + SLOT, z0, "§f② 陪练 伤害测试",
                 brief("在下界也能正常打伤害、拿能量",
-                        "恶魔在下界不掉能量（每 5 秒的 −4 只在离开下界、又没站在火里时才扣），"
+                        "恶魔在下界不掉能量（每 5 秒的 -20 只在离开下界、又没站在火里时才扣），"
                                 + "还免疫火焰、燃烧、爆炸和摔落伤害。这里的陪练是用来确认"
                                 + "你在下界的伤害数值和主世界一致",
                         "陪练站在你面前，真实掉血；打不动就再右键一次那块牌把他刷新",
@@ -2351,11 +2360,15 @@ public final class Hall {
                             "§b查看能量", "§7记下这个数");
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.POWER_READ),
                             "§b再查一次", "§7隔一分钟再点");
-                    powerButton(w, y, x + 9, z, "demon");
+                    switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.INFINITE_POWER),
+                            "§e无限能量 开/关", "§7OP 默认开着，测掉能前先关");
+                    powerButton(w, y, x + 12, z, "demon");
                 }, "验证恶魔离开下界与火源之后会一直掉能量",
                         "不在下界、脚下方块也不是火或岩浆时，每 5 秒 -20 能量"
                                 + "（Demon.Power.Loss = 4，每秒结算）。这是恶魔最大的枷锁："
-                                + "不在火旁边就一直在流失",
+                                + "不在火旁边就一直在流失。OP 默认持有无限能量权限，"
+                                + "插件会拒绝一切扣能量——所以你是 OP 的话，先点「无限能量 开/关」"
+                                + "把它关掉，否则这里什么都看不出来",
                         "站在这里能量一路下降；跳进上一节的岩浆里则会涨——那是对照",
                         "点一次「查看能量」，把数字记住",
                         "原地等一分钟，再点一次，看掉了多少",
