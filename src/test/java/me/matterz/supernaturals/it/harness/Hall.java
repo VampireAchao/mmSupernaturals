@@ -2048,8 +2048,12 @@ public final class Hall {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BONE, 6),
                             new ItemStack(Material.IRON_SWORD, 1)));
+                    // "super", not "random": a bond needs somebody the plugin counts as
+                    // supernatural to attach to, and "random" drew from all eight - a run that
+                    // rolled a priest, a witch hunter or an angel left the room with nothing
+                    // bonded and nothing to see, which the board had already promised otherwise.
                     switchpoint(w, y, x + 6, z + 3,
-                            Trigger.with(Kind.SPAWN_NPCS, "ghoul", "random,random"),
+                            Trigger.with(Kind.SPAWN_NPCS, "ghoul", "super,super"),
                             "§c放出两个同伴", "§7随机超自然种族");
                     switchpoint(w, y, x + 10, z + 3,
                             Trigger.with(Kind.USE_ON_NPC, "ghoul", "BONE"),

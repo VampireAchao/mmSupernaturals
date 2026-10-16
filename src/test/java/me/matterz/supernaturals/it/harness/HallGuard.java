@@ -1648,15 +1648,35 @@ final class HallGuard implements Listener {
                 break;
             }
             // "vampire" is one; "vampire:NETHERRACK" is one holding netherrack, which is what a
-            // spell that needs both sides to be holding something asks for; "random" is one of
-            // the supernatural races, for a section whose point is that any of them will do.
+            // spell that needs both sides to be holding something asks for. "random" is one of the
+            // eight races, for a section whose point is that any of them will do; "super" is one
+            // of the races the plugin itself calls supernatural, for a section whose rule turns
+            // the rest away - the ghoul's bond will not attach to a priest, a witch hunter or an
+            // angel, and a section that rolled one of those would do nothing at all while saying
+            // nothing about why.
             String[] spec = one.trim().split(":", 2);
-            String race = unroll(spec[0].trim());
+            String asked = spec[0].trim();
             Material hand = spec.length > 1 ? Material.matchMaterial(spec[1].trim()) : null;
-            if (race.isEmpty()) {
-                continue;
+            Player npc = null;
+            // A named race is asked for once and taken as it comes. "super" is rolled again when
+            // the plugin would not have it - a third of the rolls get thrown away, which is not a
+            // reason for a section to come up with nobody.
+            int tries = asked.equalsIgnoreCase("super") ? 12 : 1;
+            for (int attempt = 0; attempt < tries && npc == null; attempt++) {
+                String race = unroll(asked);
+                if (race.isEmpty()) {
+                    break;
+                }
+                Player stand = putPrey(player, seat, race, hand);
+                if (stand == null) {
+                    continue;
+                }
+                if (asked.equalsIgnoreCase("super") && !SuperNManager.get(stand).isSuper()) {
+                    clearPrey(stand.getName());
+                    continue;
+                }
+                npc = stand;
             }
-            Player npc = putPrey(player, seat, race, hand);
             if (npc == null) {
                 continue;
             }
@@ -1668,9 +1688,17 @@ final class HallGuard implements Listener {
                         + "（头上和 tab 里有种族名）");
     }
 
-    /** "random" means one of the supernatural races; anything else is itself. */
+    /**
+     * "random" is one of the eight races and "super" one of the ones the plugin calls
+     * supernatural; anything else is itself.
+     *
+     * <p>The two names roll the same dice and differ only in who accepts the result. Which races
+     * count as supernatural is asked of the plugin ({@link SuperNPlayer#isSuper()}) rather than
+     * written down here, because the line has moved before: the four that report as people are
+     * the ones whose race the plugin will not bond, cure or spread through.
+     */
     private static String unroll(String race) {
-        if (race.equalsIgnoreCase("random")) {
+        if (race.equalsIgnoreCase("random") || race.equalsIgnoreCase("super")) {
             return SUPERNATURAL.get(ThreadLocalRandom.current().nextInt(SUPERNATURAL.size()));
         }
         return race;
@@ -1785,6 +1813,10 @@ final class HallGuard implements Listener {
      * who also pays power for the privilege - and none of that is visible until somebody other
      * than the player is being hit. The blow is the server's, so the ordinary handler runs and
      * the split happens exactly as it would between two people.
+     *
+     * <p>What the attacker swings is chosen by his own race rather than by the section, because
+     * the plugin refuses a blow struck with a weapon the race may not hold - and a section that
+     * handed out a sword regardless looked like a room that did nothing.
      */
     private void npcHitsNpc(Player player, String spec) {
         List<Player> here = preyOnline(player);
@@ -1799,16 +1831,59 @@ final class HallGuard implements Listener {
             return;
         }
         double damage = spec == null || spec.isBlank() ? 6.0 : Double.parseDouble(spec.trim());
+        String race = SuperNManager.get(attacker).getType();
         attacker.teleport(spotFor(target));
-        attacker.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
+        // Handed over only if his race may hold it. A ghoul, a witch hunter and a werewolf at
+        // night all ban the sword, and the plugin answers a banned weapon by zeroing the blow -
+        // so the section used to report "20.0 -> 20.0" and read as broken rather than as the rule
+        // it was showing. An empty hand is legal for every race and still takes that race's attack
+        // bonus, so falling back to it loses nothing but the sword.
+        Material hand = legalWeapon(race, Material.IRON_SWORD, player);
+        attacker.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
         Nms.pushEquipment(attacker);
         faceThe(attacker, target);
         attacker.swingMainHand();
         double before = target.getHealth();
         land(attacker, target, damage);
-        note(player, "§7" + attacker.getName() + "砍了 " + target.getName() + " 一下："
+        note(player, "§7" + describe(attacker, race, hand) + " 砍了 " + target.getName() + " 一下："
                 + trim(before) + " → " + trim(target.getHealth())
                 + " §7（看你自己掉了多少血、能量少了多少）");
+    }
+
+    /**
+     * Brings two stand-ins up as the races named and has the second swing at the first, so
+     * "does the blow land" can be asked and answered with the numbers rather than by eye.
+     *
+     * <p>Worth having because the answer is not just a number: a race that may not hold the
+     * weapon it was handed deals nothing at all, and that cannot be told apart from a target that
+     * was never really hit unless whoever reports it also says who swung and with what. One race
+     * name does both - which is what the ghoul's own room wants.
+     */
+    String npcHitReport(String rest) {
+        String[] parts = rest == null ? new String[0] : rest.trim().split("\\s+");
+        Player tester = parts.length > 0 && !parts[0].isBlank()
+                ? Bukkit.getPlayerExact(parts[0])
+                : null;
+        if (tester == null) {
+            return "err no such player: " + (parts.length > 0 ? parts[0] : "");
+        }
+        String first = parts.length > 1 && !parts[1].isBlank() ? parts[1] : "vampire";
+        String second = parts.length > 2 && !parts[2].isBlank() ? parts[2] : first;
+        spawnNpcs(tester, first + "," + second);
+        List<Player> here = preyOnline(tester);
+        if (here.size() < 2) {
+            return "err only " + here.size() + " stand-in(s) came up for " + first + "," + second;
+        }
+        Player target = here.get(0);
+        Player attacker = here.get(1);
+        double before = target.getHealth();
+        npcHitsNpc(tester, "6");
+        double after = target.getHealth();
+        return "ok attacker=" + SuperNManager.get(attacker).getType()
+                + " hand=" + attacker.getInventory().getItemInMainHand().getType()
+                + " victim=" + SuperNManager.get(target).getType()
+                + " " + trim(before) + "->" + trim(after)
+                + " dealt=" + trim(before - after);
     }
 
     /** The living stand-ins this player's section brought up, in the world they are standing in. */
@@ -1947,8 +2022,8 @@ final class HallGuard implements Listener {
 
     /** What one stand-in is, for the message that says who turned up. */
     private String describe(Player npc, String race, Material hand) {
-        String shown = RACE_LABEL.getOrDefault(race, race);
-        return shown + "§7(" + npc.getName() + (hand == null ? "" : " 拿 " + hand.name()) + ")";
+        String shown = race == null ? "?" : RACE_LABEL.getOrDefault(race, race);
+        return shown + "§7(" + npc.getName() + (hand == null ? " 空手" : " 拿 " + hand.name()) + ")";
     }
 
     /**
