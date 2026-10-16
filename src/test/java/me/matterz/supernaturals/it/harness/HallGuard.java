@@ -1256,8 +1256,8 @@ final class HallGuard implements Listener {
             powerLimits.put(player.getName(), player.addAttachment(plugin, node, false));
         }
         note(player, player.hasPermission(node)
-                ? "§e无限能量：开着 §7（你是 OP，插件默认不让 OP 掉能量；关掉它才看得出掉能与法术花费）"
-                : "§a无限能量：关掉了 §7（现在掉能和法术花费都是真的；再点一下可以开回来）");
+                ? "§e无限能量：开着 §7（你又扣不掉能量了：掉能、法术花费、珍珠护身都不花钱；再点一下关掉）"
+                : "§a无限能量：关掉了 §7（掉能和法术花费都是真的；再点一下开回来）");
     }
 
     /** Reads the hunter's bounty list back, and gets one added if there is room. */
@@ -2716,6 +2716,42 @@ final class HallGuard implements Listener {
         }
     }
 
+    /**
+     * Who the hall has already taken the operator's infinite power away from.
+     *
+     * <p>Said once. Somebody who wants it back presses the switch; being told again on every step
+     * would be the hall arguing with the person using it.
+     */
+    private final Set<String> lentTheirPower = new HashSet<>();
+
+    /**
+     * Gives the operator the power costs the sections are about, once, and says why.
+     *
+     * <p>The permission that refuses every loss is held by operators by default, and an operator is
+     * whoever walks the hall. For them nothing that costs power costs anything: the demon's drain
+     * never runs, no spell is ever short, and a pearl held under a blow protects for free - each of
+     * which is a section, and each of which therefore read as a rule that does not work rather than
+     * as a rule nobody was paying for. Nothing in the plugin is changed: this is a permission
+     * attachment owned by the hall, it outranks the operator's default, and the drain room's switch
+     * hands it straight back.
+     */
+    private void lendBackTheCosts() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (lentTheirPower.contains(player.getName())
+                    || !player.hasPermission(SuperNManager.infPowerPermissions)) {
+                continue;
+            }
+            lentTheirPower.add(player.getName());
+            if (!powerLimits.containsKey(player.getName())) {
+                powerLimits.put(player.getName(),
+                        player.addAttachment(plugin, SuperNManager.infPowerPermissions, false));
+            }
+            note(player, "§7你在测试大厅里：已临时把无限能量权限关掉 ——"
+                    + "掉能、法术花费、珍珠护身这些「要花能量」的环节才看得见。"
+                    + "想开回来就点「无限能量 开/关」那块牌");
+        }
+    }
+
     /** Takes a shulker's bullet or a lingering effect with the entity that owned it. */
     private void removeSpectres(Entity entity) {
         for (Entity nearby : entity.getNearbyEntities(3, 3, 3)) {
@@ -3521,6 +3557,7 @@ final class HallGuard implements Listener {
         }
         refreshGuides(hall);
         relabelStandIns();
+        lendBackTheCosts();
         forgetDeparted();
         reclaimEmptyRooms(hall);
     }
