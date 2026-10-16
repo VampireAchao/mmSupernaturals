@@ -3,6 +3,7 @@ package me.matterz.supernaturals.it.harness;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
+import me.matterz.supernaturals.manager.EnderBornManager;
 import me.matterz.supernaturals.manager.SuperNManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -356,6 +357,13 @@ public final class HarnessPlugin extends JavaPlugin {
                 return give(rest);
             case "perm":
                 return perm(rest);
+            case "spread":
+                // What a room that holds the turning open has written, and what it has to put
+                // back. Two numbers, because there are two rules: three races roll the configured
+                // chance and the enderborn rolls one of its own. A room that restored only the
+                // first would leave every enderborn kill turning its victim, for ever, silently.
+                return "ok spread=" + SNConfigHandler.spreadChance
+                        + " enderborn=" + EnderBornManager.convertChance();
             case "tp":
                 return teleport(rest);
             case "interact":

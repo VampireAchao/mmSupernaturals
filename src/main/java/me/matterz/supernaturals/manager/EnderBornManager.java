@@ -32,6 +32,26 @@ public class EnderBornManager extends ClassManager {
 	private static final double ATTACK_BONUS_CHANCE = 0.35;
 	private static final double CONVERT_CHANCE = 0.10;
 
+	/**
+	 * The number the conversion roll is actually compared against.
+	 *
+	 * <p>This is the one turning in the plugin with no setting behind it: the other three races
+	 * roll the configured chance, and an enderborn rolls a tenth of its own. That made it the one
+	 * turning nobody could watch happen on purpose - the test hall holds a roll open at a hundred
+	 * percent so a room about being turned can be run once instead of gambled at, and a room that
+	 * promised that here rolled its own tenth anyway, while saying the chance was the shared one.
+	 * The default is the plugin's own; whoever holds it open puts it back.
+	 */
+	private static double convertChance = CONVERT_CHANCE;
+
+	public static double convertChance() {
+		return convertChance;
+	}
+
+	public static void setConvertChance(double chance) {
+		convertChance = chance;
+	}
+
 	/** Deaths it takes for an enderborn to be reborn as a human. */
 	private static final int DEATHS_UNTIL_HUMAN = 5;
 
@@ -179,7 +199,7 @@ public class EnderBornManager extends ClassManager {
 					+ " stole some of your power!");
 			SuperNManager.alterPower(damager, SNConfigHandler.enderKillPower, "Stole power from "
 					+ victim.getName());
-			if (Math.random() < CONVERT_CHANCE) {
+			if (Math.random() < convertChance) {
 				SuperNManager.convert(victim, "enderborn");
 			}
 		}

@@ -3,6 +3,7 @@ package me.matterz.supernaturals.it.harness;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
+import me.matterz.supernaturals.manager.EnderBornManager;
 import me.matterz.supernaturals.manager.HunterManager;
 import me.matterz.supernaturals.manager.SuperNManager;
 
@@ -247,6 +248,16 @@ final class HallGuard implements Listener {
      * plugin was configured with, and no room is responsible for putting anything back.
      */
     private Double spreadWas;
+
+    /**
+     * The enderborn's own conversion chance, held open at the same time and put back with it.
+     *
+     * <p>It is a second number because it is a second rule: three races roll the configured
+     * chance, and the enderborn rolls a number of its own that no setting feeds. A switch that
+     * wrote only the first of them promised the enderborn room a conversion that was certain and
+     * then rolled a tenth, and said "35%" while it did it.
+     */
+    private Double enderWas;
 
     /** The walk the stand-in is currently on, so a second section cannot start another. */
     private BukkitTask walkTask;
@@ -1057,24 +1068,34 @@ final class HallGuard implements Listener {
     /**
      * Makes the chance of being turned certain, for the room whose whole subject is being turned.
      *
-     * <p>The roll stays the plugin's - this writes the number the roll is compared against, which
+     * <p>The roll stays the plugin's - this writes the numbers the rolls are compared against, which
      * the plugin reads at the moment of the kill, so the kill, the message and the new race all
-     * still come out of the plugin's own path. It is a toggle as well as a switch because a player
-     * who has just watched the certain version should be able to watch the real one without
-     * leaving the room, and it is put back automatically on the way out either way.
+     * still come out of the plugin's own path. There are two of those numbers and both are written:
+     * the configured one that three races share, and the enderborn's own, which no setting feeds -
+     * leaving the second one out made the switch a lie in the one hall that needed it most. It is a
+     * toggle as well as a switch because a player who has just watched the certain version should be
+     * able to watch the real one without leaving the room, and it is put back automatically on the
+     * way out either way.
      */
     private void toggleSpread(Player player) {
         if (spreadWas == null) {
             spreadWas = SNConfigHandler.spreadChance;
+            enderWas = EnderBornManager.convertChance();
             SNConfigHandler.spreadChance = 1.0;
-            note(player, "§c这一间的转化已改成必定成功（原值 " + percent(spreadWas)
+            EnderBornManager.setConvertChance(1.0);
+            note(player, "§c这一间的转化已改成必定成功（原值 " + held()
                     + "，离开这间房会自动恢复）");
             return;
         }
-        SNConfigHandler.spreadChance = spreadWas;
-        double restored = spreadWas;
-        spreadWas = null;
-        note(player, "§a这一间的转化已恢复成原来的概率（" + percent(restored) + "）");
+        String was = held();
+        restoreSpread();
+        note(player, "§a这一间的转化已恢复成原来的概率（" + was + "）");
+    }
+
+    /** The two chances a room is holding open, as the percentages they are configured as. */
+    private String held() {
+        return "吸血鬼/食尸鬼/狼人 " + percent(spreadWas)
+                + "、末影族 " + percent(enderWas);
     }
 
     /** A probability as the percentage it is configured as: 0.35 reads "35%", not "0.4". */
@@ -1083,16 +1104,21 @@ final class HallGuard implements Listener {
     }
 
     /**
-     * Puts the plugin's conversion chance back to what it was configured as.
+     * Puts the plugin's conversion chances back to what they were.
      *
-     * <p>Called everywhere a player leaves the room that borrowed it. A teaching setting that
+     * <p>Called everywhere a player leaves the room that borrowed them. A teaching setting that
      * outlived the room would be a lie the next room tells, and the rooms after this one are about
-     * the real chance.
+     * the real chance. Both numbers go back together: a room that restored one of them would leave
+     * the enderborn's roll at a hundred percent for everybody who came after.
      */
     private void restoreSpread() {
         if (spreadWas != null) {
             SNConfigHandler.spreadChance = spreadWas;
             spreadWas = null;
+        }
+        if (enderWas != null) {
+            EnderBornManager.setConvertChance(enderWas);
+            enderWas = null;
         }
     }
 
