@@ -135,6 +135,7 @@ public final class HarnessPlugin extends JavaPlugin {
         // own defaults - so the location is pointed at the hall instead, a moment after both
         // plugins have finished loading.
         getServer().getScheduler().runTaskLater(this, this::pointTheChurchAtTheHall, 40L);
+        getServer().getScheduler().runTaskLater(this, this::pointTheBanishPointAtTheHall, 40L);
         // The guardian-angel spell is matched against a material <em>name</em> from the plugin's
         // own configuration, and the default - "WOOL" - is not a material any more, so the spell
         // can never fire as shipped. The hall points it at one that exists, the same way the
@@ -172,6 +173,30 @@ public final class HarnessPlugin extends JavaPlugin {
     /** The hall, or null on a server that was not asked for one. */
     Hall hallOrNull() {
         return hall;
+    }
+
+    /**
+     * Points the priests' banish point at the hall.
+     *
+     * <p>The point is one place in the plugin's configuration - an admin stands where it should be
+     * and runs {@code /sn setbanish} - and as shipped it is the middle of the overworld at y=80,
+     * which over this hall is open sky. A banish there is a teleport into midair followed by a
+     * fall: it proves the teleport happened and then kills the person for it, and the coordinate
+     * the spell now announces is one nobody can walk to and look at. Pointed at the lobby spawn
+     * instead, so that "you were banished to world (0, -18, 4)" names somewhere real.
+     */
+    private void pointTheBanishPointAtTheHall() {
+        if (hall == null) {
+            return;
+        }
+        Location at = hall.lobbySpawn();
+        SNConfigHandler.priestBanishWorld = at.getWorld().getName();
+        SNConfigHandler.priestBanishLocationX = at.getBlockX();
+        SNConfigHandler.priestBanishLocationY = at.getBlockY();
+        SNConfigHandler.priestBanishLocationZ = at.getBlockZ();
+        SNConfigHandler.priestBanishLocation = at.clone();
+        getLogger().info("priest banish point is at " + at.getWorld().getName() + " "
+                + at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ());
     }
 
     /**
@@ -352,6 +377,10 @@ public final class HarnessPlugin extends JavaPlugin {
                 return guard.leftoverReport();
             case "summonspots":
                 return guard.summonReport(rest);
+            case "spell":
+                return guard.spellReport(rest);
+            case "said":
+                return said(rest);
             case "strays":
                 return guard.strayReport(rest);
             case "talk":
@@ -1483,6 +1512,25 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok cancelled=" + event.isCancelled() + " victim=" + victim.getName()
                 + " race=" + SuperNManager.get(victim).getType()
                 + " held=" + attacker.getInventory().getItemInMainHand().getType();
+    }
+
+    /**
+     * What the server has said to a fake client lately, for asserting on a message.
+     *
+     * <p>A player with no client receives nothing anybody can see, and most of what a plugin has to
+     * tell a player is exactly that: a sentence in chat. The harness keeps those packets on their
+     * way out (see {@link Nms#said}), so this reads the last few back. It is the only way to check a
+     * message at all - the banish spell now announces the coordinate it sent somebody to, and no
+     * other part of the server knows that sentence was ever written.
+     */
+    private String said(String rest) {
+        String name = rest.trim();
+        List<String> lines = Nms.said(name);
+        if (lines.isEmpty()) {
+            return "ok (nothing has been said to " + name + ")";
+        }
+        List<String> recent = lines.subList(Math.max(0, lines.size() - 8), lines.size());
+        return "ok " + lines.size() + ": " + String.join(" || ", recent);
     }
 
     /** What is holding a stand-in invulnerable, for working out which field has to be cleared. */

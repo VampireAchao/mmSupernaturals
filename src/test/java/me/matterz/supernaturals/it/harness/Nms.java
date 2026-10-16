@@ -1,5 +1,6 @@
 package me.matterz.supernaturals.it.harness;
 
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
@@ -16,9 +17,14 @@ import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayDeque;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.Deque;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -90,7 +96,7 @@ final class Nms {
                     minecraftServer, serverLevel, profile, clientInformation);
 
             Class<?> connectionClass = load("net.minecraft.network.Connection");
-            Object connection = newInMemoryConnection(connectionClass);
+            Object connection = newInMemoryConnection(connectionClass, name);
 
             Class<?> cookieClass = load("net.minecraft.server.network.CommonListenerCookie");
             Object cookie = cookieClass
@@ -307,7 +313,7 @@ final class Nms {
      * moment the chunk map starts tracking them. There is nobody to send anything to,
      * so the outbound stage is replaced with a sink.
      */
-    private static Object newInMemoryConnection(Class<?> connectionClass)
+    private static Object newInMemoryConnection(Class<?> connectionClass, String name)
             throws ReflectiveOperationException {
         Class<?> packetFlowClass = load("net.minecraft.network.protocol.PacketFlow");
         Object serverbound = enumConstant(packetFlowClass, "SERVERBOUND");
@@ -324,16 +330,78 @@ final class Nms {
         Object connection = connectionClass.getConstructor(packetFlowClass).newInstance(serverbound);
         connectionClass.getField("channel").set(connection, channel);
         connectionClass.getField("address").set(connection, new InetSocketAddress("127.0.0.1", 0));
+        WATCHED.put(channel, name);
         return connection;
     }
 
-    /** Swallows everything the server tries to send a client that is not there. */
+    /**
+     * Swallows everything the server tries to send a client that is not there.
+     *
+     * <p>It reads the chat out of them on the way past first - see {@link #said}. Everything else
+     * is released and forgotten exactly as before.
+     */
     private static final class DiscardOutbound extends ChannelOutboundHandlerAdapter {
         @Override
         public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) {
+            remember(context.channel(), message);
             ReferenceCountUtil.release(message);
             promise.setSuccess();
         }
+    }
+
+    /** How many of a fake client's messages are kept, so a chatty step cannot fill memory. */
+    private static final int SAID_KEPT = 40;
+
+    /**
+     * The last few things the server said to each fake client, by name.
+     *
+     * <p>{@code player.sendMessage} ends in exactly one packet, and every message a plugin sends a
+     * player goes through it - which made chat the one part of a plugin's behaviour no scenario
+     * could see, since there is nobody to see it. The packet is in the handler on its way out
+     * regardless, so its text is kept rather than dropped: a few dozen strings per stand-in, and
+     * "the spell announces where it sent him" stops being a claim.
+     */
+    private static final Map<String, Deque<String>> SAID = new ConcurrentHashMap<>();
+
+    /** Which fake client a channel belongs to. */
+    private static final Map<Channel, String> WATCHED = new ConcurrentHashMap<>();
+
+    private static void remember(Channel channel, Object packet) {
+        String who = WATCHED.get(channel);
+        if (who == null) {
+            return;
+        }
+        String text = chatOf(packet);
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        Deque<String> said = SAID.computeIfAbsent(who, name -> new ArrayDeque<>());
+        said.addLast(text);
+        while (said.size() > SAID_KEPT) {
+            said.removeFirst();
+        }
+    }
+
+    /**
+     * The text of a system-chat packet, or {@code null} for anything else.
+     *
+     * <p>Recognised by name rather than by type, like everything else in this file: the packet
+     * classes live in the server jar, which this file cannot see. A record prints its own parts, so
+     * the sentence the server was sending is in the printed form, which is all a scenario needs to
+     * search for a phrase in.
+     */
+    private static String chatOf(Object packet) {
+        if (!packet.getClass().getSimpleName().contains("SystemChat")) {
+            return null;
+        }
+        String printed = String.valueOf(packet);
+        return printed.length() > 400 ? printed.substring(0, 400) : printed;
+    }
+
+    /** What the server has said to one fake client, oldest first. */
+    static List<String> said(String name) {
+        Deque<String> said = SAID.get(name);
+        return said == null ? List.of() : List.copyOf(said);
     }
 
     /** The same derivation an offline-mode server uses, so ops.json can pre-authorise. */

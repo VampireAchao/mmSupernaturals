@@ -3044,11 +3044,21 @@ final class HallGuard implements Listener {
     }
 
     /**
-     * Casts one of a priest's spells at the stand-in.
+     * Sets a priest's spell up: the item into the player's hand, a stand-in to use it on, and the
+     * walk in.
      *
-     * <p>Every priest spell fires when the priest <b>attacks a target</b> with the item in hand.
-     * Most act on a supernatural target; healing and Guardian Angel require a human. The spell's
-     * own messages go to the caster, which is the player standing here.
+     * <p><b>The spell itself is the player's to cast, and this deliberately does not cast it.</b>
+     * Every priest spell fires when the priest <b>attacks a target</b> with the item in hand, and
+     * for a while this board did that attack on the player's behalf the moment the stand-in
+     * arrived: the board said "hold the feather and hit him", the player pressed the board, and the
+     * one thing being tested - that a swing with this item in hand does this - was the one thing
+     * the player never did. That is the one part of it you cannot work out by reading, either: a
+     * feather is a piece of litter in an inventory, and only a blow struck with it says otherwise.
+     * So this hands over the item, brings the stand-in in, and stops.
+     *
+     * <p>Eight of the item rather than one. A spell consumes what it was cast with, so a single
+     * feather made this a board a player could use exactly once and then had to press again for -
+     * which is a worse version of the same mistake, since the point is to try it and see.
      */
     private void testSpell(Player player, String itemName) {
         Material item = itemName == null ? null : Material.matchMaterial(itemName);
@@ -3073,22 +3083,29 @@ final class HallGuard implements Listener {
             spar.getInventory().setItemInMainHand(new ItemStack(item));
             Nms.pushEquipment(spar);
         }
-        player.getInventory().setItemInMainHand(new ItemStack(item));
+        player.getInventory().setItemInMainHand(new ItemStack(item, SPELL_STACK));
         note(player, "§f陪练（现在是 " + SuperNManager.get(spar).getType() + "）从 "
                 + Math.round(spar.getLocation().distance(player.getLocation()))
-                + " 格外走过来，走近了就打他一下施法");
-        walkIn(spar, player, () -> castAt(player, spar, item));
+                + " 格外走过来；等他站定，拿手里的 " + item.name() + " 打他一下施法");
+        walkIn(spar, player, () -> note(player, "§7陪练站好了——拿手里的 " + item.name()
+                + " 打他一下（牌子只发道具，不替你出手）"));
     }
 
-    /** One attack from the priest at the stand-in, which is how every spell fires. */
+    /** How many of a spell's item a board hands out, so a spell can be tried more than once. */
+    private static final int SPELL_STACK = 8;
+
     /**
-     * Lands the spell on the stand-in through the server's own damage path.
+     * The priest's swing, made on the player's behalf, for the probe.
      *
-     * <p>A priest's spells are triggered by attacking somebody with the item, and the handler that
-     * decides what happens reads a damage event. Raising that event by hand makes the handler run
-     * while nothing is actually hit - the target's health never moves, nothing is knocked back,
-     * and a spell that turned out to be broken would still look as though it worked. This deals
-     * real damage, so the same handler runs off the same kind of event a real blow produces.
+     * <p>Nothing in the hall calls this any more. A board hands over the item and brings a target
+     * in, and the swing is the player's; this is the same swing made by the harness, so that a
+     * scenario can assert what a spell does without a keyboard.
+     *
+     * <p>It goes through the server's own attack rather than raising a damage event by hand. A
+     * priest's spells hang off a damage event, so a hand-raised one runs the handler while nothing
+     * is hit - health never moves, nothing is knocked back, and a spell that was broken outright
+     * still looks as though it worked. Real damage means the same handler, off the same kind of
+     * event a player's own blow produces.
      */
     private void castAt(Player player, Player spar, Material item) {
         faceThe(player, spar);
@@ -3097,6 +3114,40 @@ final class HallGuard implements Listener {
         note(player, "§7" + item.name() + " 打在 " + spar.getName() + " 身上（"
                 + SuperNManager.get(spar).getType() + "，血 " + trim(spar.getHealth())
                 + "）：看聊天栏和对方种族变成了什么");
+    }
+
+    /**
+     * Casts one of the priest's spells at the stand-in the way the player's own blow would, for
+     * the probe.
+     *
+     * <p>The counterpart of {@code mmp whack}, which needs both sides named: this one finds the
+     * stand-in, puts the item into the caster's hand, and reports where the two of them ended up.
+     * The last part is what a banish is worth asserting - the whole of its effect is a change of
+     * place, and nothing else about it is observable from the caster's side.
+     */
+    String spellReport(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = args.length > 0 ? Bukkit.getPlayerExact(args[0]) : null;
+        Material item = args.length > 1 ? Material.matchMaterial(args[1]) : null;
+        if (player == null) {
+            return "err no such player: " + (args.length > 0 ? args[0] : "(none)");
+        }
+        if (item == null) {
+            return "err usage: spell <player> <material>";
+        }
+        Player spar = Bukkit.getPlayerExact(SPAR);
+        if (spar == null) {
+            return "err no stand-in up - use the board that brings one in first";
+        }
+        player.getInventory().setItemInMainHand(new ItemStack(item, SPELL_STACK));
+        Location before = spar.getLocation().clone();
+        castAt(player, spar, item);
+        Location after = spar.getLocation();
+        return "ok " + player.getName() + " cast " + item.name() + " at " + spar.getName()
+                + " race=" + SuperNManager.get(spar).getType()
+                + " from=" + before.getBlockX() + "," + before.getBlockY() + "," + before.getBlockZ()
+                + " to=" + after.getBlockX() + "," + after.getBlockY() + "," + after.getBlockZ()
+                + " world=" + (after.getWorld() == null ? "?" : after.getWorld().getName());
     }
 
     // -- keeping the tests honest ------------------------------------------
