@@ -365,6 +365,29 @@ final class Nms {
         }
     }
 
+    /**
+     * Lands one blow on something that is not alive - a boat, in practice.
+     *
+     * <p>There is no Bukkit call for this. The boats this server builds are {@code Vehicle} and
+     * nothing else: the interface that carries {@code damage(double)} is {@code Damageable}, and a
+     * boat is not one, so a punch cannot be asked for through the API at all. What a punch does
+     * underneath is hand the boat to the server's own damage entry point, and that is what this
+     * does - the same route an arrow or a collision takes, so the events fire exactly as they do
+     * when a player swings at one.
+     */
+    static void hit(org.bukkit.entity.Entity entity, double amount) {
+        try {
+            Object handle = call(entity, "getHandle");
+            Object source = call(call(handle, "damageSources"), "generic");
+            handle.getClass()
+                    .getMethod("hurt", load("net.minecraft.world.damagesource.DamageSource"),
+                            float.class)
+                    .invoke(handle, source, (float) amount);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("could not hit " + entity, e);
+        }
+    }
+
     private static Object call(Object target, String method) throws ReflectiveOperationException {
         Method found = target.getClass().getMethod(method);
         found.setAccessible(true);

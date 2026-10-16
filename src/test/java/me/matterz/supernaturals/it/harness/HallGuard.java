@@ -51,6 +51,7 @@ import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.vehicle.VehicleDamageEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
@@ -2897,6 +2898,50 @@ final class HallGuard implements Listener {
         }
     }
 
+    /**
+     * A boat the hall put down does not break.
+     *
+     * <p>The boat in the ghoul's pool is the whole of one step: "a ghoul standing in water
+     * dissolves, a ghoul sitting in a boat does not" is an exemption that cannot be tried without
+     * one, and a board that tells a player to get into a boat is a board that gets the boat hit -
+     * by the same sword they were just told to swing, sooner or later, and by accident. A boat
+     * comes apart after a few dozen hits and drops itself as an item, so the room ends up with its
+     * one prop lying on the floor and a step nobody can run.
+     *
+     * <p>Nothing about the step is about breaking boats, so they are simply not breakable. Every
+     * blow aimed at one is refused, and that is deliberately the whole of the block rather than an
+     * attack check: the same call is the collision damage a boat takes for being rowed into a
+     * wall, which is the other way a tester loses this boat without meaning to.
+     *
+     * <p><b>This listens for {@code VehicleDamageEvent}, and it has to.</b> The first attempt
+     * listened for {@code EntityDamageEvent}, which reads like the obvious event and is never
+     * fired for a vehicle at all: the hierarchy is {@code VehicleDamageEvent extends VehicleEvent},
+     * so a boat's damage is not a kind of entity damage as far as the event system is concerned,
+     * and the handler was dead code that looked right. What caught it was {@code mmp boats} hitting
+     * a second, untagged boat alongside the hall's: the control came apart and the hall's boat came
+     * apart with it.
+     */
+    @EventHandler
+    public void onBoatHit(VehicleDamageEvent event) {
+        if (event.getVehicle().getScoreboardTags().contains(Hall.MOORED)) {
+            event.setCancelled(true);
+            boatBlowsRefused++;
+        }
+    }
+
+    /**
+     * How many blows at a hall boat have been refused so far.
+     *
+     * <p>Counted so that "a hall boat does not break" can be told apart from "nothing was ever
+     * aimed at it": a smash that reports the boat still there and no blow refused has proved
+     * nothing at all.
+     */
+    int boatBlowsRefused() {
+        return boatBlowsRefused;
+    }
+
+    private int boatBlowsRefused;
+
     /** An enderman in a truce section does not get to take the section with it. */
     @EventHandler
     public void onChange(EntityChangeBlockEvent event) {
@@ -2963,6 +3008,9 @@ final class HallGuard implements Listener {
         refreshGuides(hall);
         if (hall.repair()) {
             plugin.getLogger().info("put the hall's switches back: " + before);
+        }
+        if (hall.restoreBoats()) {
+            plugin.getLogger().info("put a hall boat back on its mark");
         }
         for (Map.Entry<UUID, Location> entry : new HashMap<>(hallMobs).entrySet()) {
             Entity entity = hallEntities.get(entry.getKey());

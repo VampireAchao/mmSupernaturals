@@ -702,6 +702,24 @@ public final class Hall {
     private final Map<String, Location> points = new LinkedHashMap<>();
 
     /**
+     * The tag every boat the hall put down wears.
+     *
+     * <p>On the boat rather than in a note kept here, because the two things asked of it - "may
+     * not be broken" and "put it back" - are asked while it is out in the world, and because a
+     * tag travels with the boat through a chunk save, a server restart and the hall being rebuilt
+     * around it. It is also the only thing that tells a boat the hall put down apart from one a
+     * player rowed in to keep.
+     */
+    static final String MOORED = "mm_hall_boat";
+
+    /** A boat the hall put down, and the mark it was put down on. */
+    private record Moored(String world, double x, double y, double z, EntityType type) {
+    }
+
+    /** The boats the hall put down. One, at the moment - the ghoul's pool. */
+    private final List<Moored> moored = new ArrayList<>();
+
+    /**
      * Each room's guide: where he stands, and what he says, keyed {@code race.index}.
      *
      * <p>A room's long teaching lives here rather than on its wall - see {@link Section} - and the
@@ -2053,9 +2071,15 @@ public final class Hall {
                     //
                     // Spawned by type, not by class: Boat is an abstract base on this server and
                     // asking for one by class throws while the plugin is still enabling.
-                    Entity boat = w.spawnEntity(new Location(w, x + 10.5, y + 2, z + 9.5),
-                            EntityType.OAK_BOAT);
+                    //
+                    // Tagged, and remembered, because this boat is the whole of the step it
+                    // belongs to and a boat is not a block: nothing in repair() would put it back.
+                    Location mark = new Location(w, x + 10.5, y + 2, z + 9.5);
+                    Entity boat = w.spawnEntity(mark, EntityType.OAK_BOAT);
                     boat.setPersistent(true);
+                    boat.addScoreboardTag(MOORED);
+                    moored.add(new Moored(w.getName(), mark.getX(), mark.getY(), mark.getZ(),
+                            EntityType.OAK_BOAT));
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.DIP_WATER, "ghoul"),
                             "§9跳进水里", "§7站着别动，等它掉血");
                     switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.RESTORE_HEALTH),
@@ -2069,7 +2093,8 @@ public final class Hall {
                         "站在水里血条每秒掉 4 点，几秒钟就见底；上岸立刻停；坐进船里一点不掉",
                         "先点「先回满血再看」，半血进去根本来不及看",
                         "点「跳进水里」，数到 3 就自己上岸，看血条少了多少",
-                        "捡起池子里那条船坐上（对着水面右键），再泡 10 秒，确认血条一点不动",
+                        "右键池子里那条船坐上去（对着船点，不是对着水面——对着水面是又放一条），"
+                                + "再泡 10 秒，确认血条一点不动",
                         "下船再泡一次，几秒就会被「溶解」死"));
                 sections.add(section("§2⑨ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
@@ -3071,6 +3096,68 @@ public final class Hall {
             repaired = true;
         }
         return repaired;
+    }
+
+    /**
+     * Puts a hall's boats back on their marks.
+     *
+     * <p>A boat is furniture of a room that cannot be run without it - the one in the ghoul's pool
+     * is there so that "a boat is how you stay dry" can be sat in rather than read - and a boat is
+     * not a block, so none of the repair above touches it. It cannot be broken any more: the guard
+     * refuses every blow aimed at it. It can still be <em>lost</em>, though, and rowing it out of
+     * the pool is the obvious way - the board tells the player to get in it, and getting in it is
+     * also how a boat is moved. A room whose one prop is three rooms away is a dead room.
+     *
+     * <p>Only ever looked for in a chunk that is already loaded. An unloaded chunk still holds its
+     * entities, so a search there would answer "gone" and put a second boat in the pool every two
+     * seconds - and by the time anybody looked, the pool would be full of them.
+     */
+    public boolean restoreBoats() {
+        boolean put = false;
+        for (Moored spot : moored) {
+            World target = Bukkit.getWorld(spot.world());
+            if (target == null
+                    || !target.isChunkLoaded(((int) Math.floor(spot.x())) >> 4,
+                            ((int) Math.floor(spot.z())) >> 4)) {
+                continue;
+            }
+            Location home = new Location(target, spot.x(), spot.y(), spot.z());
+            List<Entity> here = new ArrayList<>();
+            for (Entity entity : target.getNearbyEntities(home, 16, 16, 16)) {
+                if (entity.getType() == spot.type() && entity.getScoreboardTags().contains(MOORED)) {
+                    here.add(entity);
+                }
+            }
+            if (here.isEmpty()) {
+                Entity fresh = target.spawnEntity(home, spot.type());
+                fresh.setPersistent(true);
+                fresh.addScoreboardTag(MOORED);
+                put = true;
+                continue;
+            }
+            for (Entity boat : here) {
+                // Never while somebody is in it: a boat is moved by the person sitting in it, and
+                // yanking it out from under them is how a step becomes a puzzle. They get out, and
+                // the next sweep brings it home.
+                if (boat.getPassengers().isEmpty() && boat.getLocation().distanceSquared(home) > 16) {
+                    boat.teleport(home);
+                    put = true;
+                }
+            }
+        }
+        return put;
+    }
+
+    /** Where the boats the hall put down belong, for a probe that wants to hit one. */
+    public List<Location> boatSpots() {
+        List<Location> spots = new ArrayList<>();
+        for (Moored spot : moored) {
+            World target = Bukkit.getWorld(spot.world());
+            if (target != null) {
+                spots.add(new Location(target, spot.x(), spot.y(), spot.z()));
+            }
+        }
+        return spots;
     }
 
     private static boolean asBuilt(Block block, Fixture fixture) {        if (block.getType() != fixture.type()) {

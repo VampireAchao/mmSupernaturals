@@ -19,6 +19,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
@@ -358,6 +359,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return signLine(rest);
             case "signage":
                 return signage();
+            case "boats":
+                return boats(rest);
             case "light":
                 return light();
             case "heights":
@@ -858,6 +861,83 @@ public final class HarnessPlugin extends JavaPlugin {
             out.append("\n  owes a scene board: ").append(String.join(", ", hall.scenesMissing()));
         }
         return out.toString();
+    }
+
+    /**
+     * Hits every boat the hall put down, and a second boat that is not the hall's, the same number
+     * of times - so that "a hall boat does not break" is a measurement rather than a claim.
+     *
+     * <p>The second boat is the point of the check, not the count. Both boats are the same type,
+     * in the same world, damaged the same way; the only thing that differs is the tag, so a run
+     * that leaves one standing and takes the other apart has found the tag and nothing else. If
+     * both survived, the blows are not reaching boats at all and the check has proved nothing -
+     * which is why the blows the guard refused are counted as well.
+     */
+    private String boats(String rest) {
+        int blows = rest == null || rest.isBlank() ? 60 : Integer.parseInt(rest.trim());
+        List<String> report = new ArrayList<>();
+        for (Location home : hall.boatSpots()) {
+            World world = home.getWorld();
+            // Loaded first, on purpose. A chunk that is not loaded still holds its boat, and a
+            // search inside one answers "nothing here" - which would read as "the boat was
+            // destroyed" when the truth is "nobody had been to that room yet".
+            world.getChunkAt(home);
+            Entity moored = null;
+            double where = -1;
+            List<String> seen = new ArrayList<>();
+            for (Entity entity : world.getNearbyEntities(home, 24, 24, 24)) {
+                if (entity.getType() != EntityType.OAK_BOAT) {
+                    continue;
+                }
+                double away = entity.getLocation().distance(home);
+                seen.add(Math.round(entity.getLocation().getX()) + ","
+                        + Math.round(entity.getLocation().getY()) + ","
+                        + Math.round(entity.getLocation().getZ())
+                        + " tags=" + entity.getScoreboardTags()
+                        + " d=" + Math.round(away) + (entity.isValid() ? "" : " INVALID"));
+                if (entity.getScoreboardTags().contains(Hall.MOORED)
+                        && (moored == null || away < where)) {
+                    moored = entity;
+                    where = away;
+                }
+            }
+            // Put down well clear of the pool, so a boat that does come apart does not leave its
+            // drop in the water where the next tester swims through it.
+            Location aside = home.clone().add(0, 0, 6);
+            Entity control = world.spawnEntity(aside, EntityType.OAK_BOAT);
+            control.setPersistent(true);
+            int refusedBefore = guard.boatBlowsRefused();
+            for (int blow = 0; blow < blows; blow++) {
+                if (moored != null && moored.isValid()) {
+                    Nms.hit(moored, 1.0);
+                }
+                if (control.isValid()) {
+                    Nms.hit(control, 1.0);
+                }
+            }
+            boolean controlSurvived = control.isValid();
+            if (controlSurvived) {
+                control.remove();
+            } else {
+                for (Entity stray : world.getNearbyEntities(aside, 3, 3, 3)) {
+                    if (stray instanceof Item item
+                            && item.getItemStack().getType() == Material.OAK_BOAT) {
+                        stray.remove();
+                    }
+                }
+            }
+            report.add(world.getName() + " " + home.getBlockX() + "," + home.getBlockY() + ","
+                    + home.getBlockZ()
+                    + " blows=" + blows
+                    + " moored=" + (moored != null && moored.isValid()
+                            ? "there@" + Math.round(where) : "gone")
+                    + (moored != null && moored.isValid() ? ""
+                            : " boatsSeen=[" + String.join(" ; ", seen) + "]")
+                    + " refused=" + (guard.boatBlowsRefused() - refusedBefore)
+                    + " control=" + (controlSurvived ? "there" : "broke"));
+        }
+        return report.isEmpty() ? "err no boat is on the books"
+                : "ok " + String.join(" | ", report);
     }
 
     private Block blockAt(String rest) {
