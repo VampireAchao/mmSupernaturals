@@ -61,6 +61,7 @@ import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -69,6 +70,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -144,6 +146,27 @@ final class HallGuard implements Listener {
 
     /** The one chicken a chicken section keeps, which lives until it is killed. */
     private final Set<UUID> chickens = new HashSet<>();
+
+    /**
+     * The room each thing the hall let out was let out in, so a room nobody is standing in can be
+     * swept the moment it empties.
+     *
+     * <p>Recorded as the room it was summoned in, not as wherever the entity happens to be
+     * standing now. A monster wanders, and one that has drifted into the next room would be
+     * reclaimed by whoever is in <em>that</em> room - which is neither the room whose visitor
+     * asked for it nor the room whose step is over. A null means it was let out somewhere that is
+     * not a room at all, and such a thing is left to the switches.
+     */
+    private final Map<UUID, String> propRooms = new HashMap<>();
+
+    /**
+     * The same, for the hall's stand-in players: the test prey and the sparring partner.
+     *
+     * <p>A stand-in is a player as far as the server is concerned, so he is a resident of whatever
+     * room he is standing in - and a room with a stand-in in it would never read as empty. He is
+     * therefore kept out of the count of who is in a room, and swept by his own entry here.
+     */
+    private final Map<String, String> standInRooms = new HashMap<>();
 
     /** The floating numbers, so a sweep does not mistake them for something that escaped. */
     private final Set<UUID> marks = new HashSet<>();
@@ -1543,6 +1566,7 @@ final class HallGuard implements Listener {
                 chicken.remove();
             }
             chickens.remove(id);
+            propRooms.remove(id);
         }
         Location at = freeSpot(player);
         Chicken chicken = player.getWorld().spawn(at, Chicken.class, spawned -> {
@@ -1553,6 +1577,8 @@ final class HallGuard implements Listener {
             spawned.setCustomNameVisible(true);
         });
         chickens.add(chicken.getUniqueId());
+        Hall hall = plugin.hallOrNull();
+        propRooms.put(chicken.getUniqueId(), hall == null ? null : hall.roomAt(player.getLocation()));
         note(player, "§2鸡来了，它不会动");
     }
 
@@ -1685,6 +1711,7 @@ final class HallGuard implements Listener {
             entity.addScoreboardTag(HALL_MOB);
             hallMobs.put(entity.getUniqueId(), home.clone());
             hallEntities.put(entity.getUniqueId(), entity);
+            propRooms.put(entity.getUniqueId(), hall.roomAt(home));
         }
     }
 
@@ -1718,6 +1745,10 @@ final class HallGuard implements Listener {
                 entity.remove();
             }
         }
+        // The rooms are empty of all of it by now, so the ledger for "which room was this let out
+        // in" goes with them. The stand-ins keep their own, because prey are deliberately not
+        // cleared here.
+        propRooms.clear();
         // Prey are deliberately *not* cleared here. Taking the hall's monsters back happens on
         // every death, and a section's prey are players: clearing them from here meant killing one
         // of the three a witch hunter section puts out took the other two with it.
@@ -1827,6 +1858,10 @@ final class HallGuard implements Listener {
         }
         prey.put(name, ghost);
         preyOwner.put(name, player.getName());
+        // Which room he was put out in, so that walking out of it takes him with it. Taken from the
+        // player rather than from the seat: he is placed next to a board that may be read from a
+        // corner, and the corner is the one spot in a room that is still the room.
+        standInRooms.put(name, roomOf(player));
         // Guarded, and the reason is what an unguarded call did: a rule of the plugin's own threw
         // in the middle of this method, and the exception carried straight out through the section
         // and the click handler - so the seating, the teleport and the label below never ran, and
@@ -2129,24 +2164,64 @@ final class HallGuard implements Listener {
      * which is exactly where a player reading a board stands. A chicken in a block cannot be walked
      * to or hit, and killing it is the whole of what that step is for.
      *
+     * <p><b>The player's own block is never a candidate, and that is the fix rather than a
+     * detail.</b> It used to be the last resort, and a chicken put down where somebody is standing
+     * is a chicken inside him: the server resolves that by pushing it out into the nearest block
+     * willing to take it, which in a room whose boards are all on walls is the wall. The board in
+     * the vampire hall read "let one out, it will not move, kill it for food" and the chicken
+     * suffocated a second after it appeared - reported, reproduced, and this is what it was.
+     *
      * <p>Behind the player first, because the board they are reading is on the wall in front of
-     * them. Then their sides, then in front, and each one has to be somewhere they could get to.
+     * them. Then their sides, then in front; two blocks out before one, so a body is not dropped
+     * against somebody's shoulder. If none of those is floor, the whole ring around the player is
+     * walked, so that a room whose only free floor is beside him still gets him out of the player's
+     * own block rather than into it.
      */
     private Location freeSpot(Player player) {
         String room = roomOf(player);
         Location centre = player.getLocation();
         Vector back = flat(centre.getDirection()).multiply(-1);
         Vector side = new Vector(-back.getZ(), 0, back.getX());
-        for (Vector direction : List.of(back, side, side.clone().multiply(-1),
-                back.clone().multiply(-1))) {
-            for (double away : new double[] {1.5, 2.5, 3.5}) {
-                Location at = fitIn(room, centre.clone().add(direction.clone().multiply(away)));
-                if (canStand(at)) {
+        List<Vector> ways = List.of(back, side, side.clone().multiply(-1),
+                back.clone().multiply(-1));
+        for (double away : new double[] {2.5, 1.5, 3.5, 4.5}) {
+            for (Vector way : ways) {
+                Location at = middleOfBlock(centre.clone().add(way.clone().multiply(away)));
+                if (!sameBlock(at, centre) && insideRoom(room, at) && canStand(at)) {
                     return at;
                 }
             }
         }
+        for (int radius = 1; radius <= 4; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
+                        // The ring itself, not the square it encloses: nearer blocks were tried
+                        // on the way out, and re-testing them here would only reorder the search.
+                        continue;
+                    }
+                    Location at = middleOfBlock(centre.clone().add(dx, 0, dz));
+                    if (insideRoom(room, at) && canStand(at)) {
+                        return at;
+                    }
+                }
+            }
+        }
         return centre;
+    }
+
+    /** A place snapped to the middle of its block, which is where a body actually stands. */
+    private static Location middleOfBlock(Location at) {
+        Location middle = at.clone();
+        middle.setX(at.getBlockX() + 0.5);
+        middle.setZ(at.getBlockZ() + 0.5);
+        return middle;
+    }
+
+    /** Whether two places are the same block of the same world. */
+    private static boolean sameBlock(Location a, Location b) {
+        return a.getWorld() != null && a.getWorld().equals(b.getWorld())
+                && a.getBlockX() == b.getBlockX() && a.getBlockZ() == b.getBlockZ();
     }
 
     /**
@@ -2229,6 +2304,7 @@ final class HallGuard implements Listener {
         revives.remove(name);
         preyRace.remove(name);
         preyOwner.remove(name);
+        standInRooms.remove(name);
         if (prey.remove(name) != null) {
             unstamp(name);
             plugin.dropGhost(name);
@@ -2490,6 +2566,9 @@ final class HallGuard implements Listener {
         Nms.pushEquipment(spar);
         Location start = approachFrom(player);
         spar.teleport(facing(start, player.getLocation()));
+        // Down on the books as this room's, the same as any other stand-in: a room he was left
+        // standing in after its visitor walked out is a room still holding a person.
+        standInRooms.put(SPAR, roomOf(player));
         return spar;
     }
 
@@ -3094,6 +3173,153 @@ final class HallGuard implements Listener {
     }
 
     /**
+     * The fast half of the hall's housekeeping: the guides come and go with their rooms, and
+     * whatever a room let out is taken back when the room empties.
+     *
+     * <p>Half a second where the furniture sweep is two. A room that empties is a step that is
+     * over, and the person who walked out of it is the person who would otherwise be looking at
+     * what it left behind - a ring of forty monsters standing in a room nobody is in, a chicken
+     * on the floor of a room somebody finished with an hour ago.
+     */
+    void sweep() {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return;
+        }
+        refreshGuides(hall);
+        reclaimEmptyRooms(hall);
+    }
+
+    /**
+     * Takes back everything that was let out in a room nobody is standing in any more.
+     *
+     * <p>The guides already came and went with their rooms, and the furniture is put back twice a
+     * second - but what a section <em>let out</em> was only ever taken back when a switch was
+     * pressed. Walking out of the room instead of pressing one left it all standing: the monsters
+     * are persistent, the sweep re-anchors them to their marks, and a room that is empty of people
+     * is a room whose step is over. That is the rule now, and it is applied to monsters, to the
+     * chicken, and to the stand-in players alike.
+     *
+     * <p>The hall's own furniture is not a resident and does not count. A guide is a player
+     * standing in the room he explains, and a stand-in is a player in the room whose step put him
+     * there; counting either would mean no room ever read as empty, so both are excluded from the
+     * count and swept by their own entries in the books.
+     */
+    private void reclaimEmptyRooms(Hall hall) {
+        Set<String> occupied = occupiedRooms(hall);
+        for (Map.Entry<UUID, String> entry : new ArrayList<>(propRooms.entrySet())) {
+            String room = entry.getValue();
+            if (room == null || occupied.contains(room)) {
+                continue;
+            }
+            take(entry.getKey());
+        }
+        for (Map.Entry<String, String> entry : new ArrayList<>(standInRooms.entrySet())) {
+            String room = entry.getValue();
+            if (room == null || occupied.contains(room)) {
+                continue;
+            }
+            takeStandIn(entry.getKey());
+        }
+        // The sparring partner is one per world, not one per room, so his room emptying is not the
+        // only way he is spent: a player who leaves the world altogether leaves him behind, and a
+        // player who comes back is served by a fresh one built where he is rather than by a
+        // stand-in teleported across a dimension, which is the move that leaves a player with no
+        // client invulnerable and useless as a target.
+        Player spar = Bukkit.getPlayerExact(SPAR);
+        if (spar != null && !visitorsIn(spar.getWorld())) {
+            standInRooms.remove(SPAR);
+            unstamp(SPAR);
+            plugin.dropGhost(SPAR);
+        }
+    }
+
+    /** The rooms somebody running a test is actually standing in. */
+    private Set<String> occupiedRooms(Hall hall) {
+        Set<String> occupied = new HashSet<>();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (furniture(player.getName())) {
+                continue;
+            }
+            String room = hall.roomAt(player.getLocation());
+            if (room != null) {
+                occupied.add(room);
+            }
+        }
+        return occupied;
+    }
+
+    /** Whether a name belongs to the hall rather than to somebody running a test. */
+    private boolean furniture(String name) {
+        return SPAR.equals(name) || guides.containsKey(name)
+                || prey.containsKey(name) || standInRooms.containsKey(name);
+    }
+
+    /** Whether anybody at all is running a test in a world. */
+    private boolean visitorsIn(World world) {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getWorld().equals(world) && !furniture(player.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Takes one thing the hall let out back out of the world, and off the books. */
+    private void take(UUID id) {
+        propRooms.remove(id);
+        hallMobs.remove(id);
+        chickens.remove(id);
+        Entity entity = hallEntities.remove(id);
+        if (entity == null) {
+            entity = Bukkit.getEntity(id);
+        }
+        if (entity != null) {
+            removeSpectres(entity);
+            entity.remove();
+        }
+    }
+
+    /** Takes one of the hall's stand-in players back out, whether he is prey or the partner. */
+    private void takeStandIn(String name) {
+        standInRooms.remove(name);
+        if (prey.containsKey(name)) {
+            clearPrey(name);
+            return;
+        }
+        if (SPAR.equals(name)) {
+            unstamp(name);
+            plugin.dropGhost(name);
+        }
+    }
+
+    /**
+     * What the hall is still holding in rooms nobody is in, for the probe.
+     *
+     * <p>An empty hall and a hall whose leavings were swept are the same picture from outside, and
+     * "the room is clean" is exactly the claim that needed to be checkable rather than asserted:
+     * a room's own step is over when nothing of it is left standing.
+     */
+    String leftoverReport() {
+        Hall hall = plugin.hallOrNull();
+        Map<String, Integer> byRoom = new TreeMap<>();
+        for (String room : propRooms.values()) {
+            byRoom.merge(String.valueOf(room), 1, Integer::sum);
+        }
+        List<String> occupied = new ArrayList<>();
+        if (hall != null) {
+            occupied.addAll(occupiedRooms(hall));
+        }
+        Collections.sort(occupied);
+        List<String> standing = new ArrayList<>();
+        standInRooms.forEach((name, room) -> standing.add(name + "@" + room));
+        Collections.sort(standing);
+        return "ok props=" + propRooms.size() + " byRoom=" + byRoom
+                + " standins=" + standing + " occupied=" + occupied
+                + " boarded=" + hallMobs.size() + " chickens=" + chickens.size();
+    }
+
+    /**
      * The backstop, twice a second: the hall's own furniture goes back, and everything a section
      * let out goes back to its own section.
      */
@@ -3103,7 +3329,6 @@ final class HallGuard implements Listener {
             return;
         }
         List<String> before = hall.wrongFixtures();
-        refreshGuides(hall);
         if (hall.repair()) {
             plugin.getLogger().info("put the hall's switches back: " + before);
         }

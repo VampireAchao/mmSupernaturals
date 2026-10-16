@@ -125,6 +125,11 @@ public final class HarnessPlugin extends JavaPlugin {
         // section let out goes home. Anything that changes a block inside the hall also repairs
         // on the spot; this is the backstop.
         getServer().getScheduler().runTaskTimer(this, guard::tick, 40L, 40L);
+        // And the fast sweep, at the rate a room empties: the guides come and go with their rooms,
+        // and whatever a room let out is taken back the moment nobody is standing in it. Two
+        // seconds is fine for putting furniture back and too slow for "I have walked out of that
+        // room and its monsters are still in it".
+        getServer().getScheduler().runTaskTimer(this, guard::sweep, 20L, 10L);
         // The priest's altar only answers within ten blocks of the church in the plugin's
         // configuration, and writing that file ourselves would stop the plugin generating its
         // own defaults - so the location is pointed at the hall instead, a moment after both
@@ -227,7 +232,11 @@ public final class HarnessPlugin extends JavaPlugin {
         if (actor == null || worn == null) {
             return "err " + args[0] + " could not be brought up";
         }
-        return Nms.skin(worn);
+        // Prefixed like every other reply: the control client turns anything that does not start
+        // with "ok " into a refusal, so a probe that answers with the bare report reads as the
+        // server having refused to bring the stand-in up at all - which is what the skin scenario
+        // was told, while holding the skin it had just asked for, in the message.
+        return "ok " + Nms.skin(worn);
     }
 
     /** Takes a stand-in back out, which {@code quit} cannot do - it only knows harness actors. */
@@ -339,6 +348,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return "ok " + guard.anchorReport(player(rest.trim()));
             case "guides":
                 return guard.guideReport(rest.trim());
+            case "leftovers":
+                return guard.leftoverReport();
             case "talk":
                 return guard.talkReport(rest.trim());
             case "npchit":
