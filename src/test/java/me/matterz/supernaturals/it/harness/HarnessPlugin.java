@@ -31,6 +31,7 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityShootBowEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
@@ -433,6 +434,14 @@ public final class HarnessPlugin extends JavaPlugin {
                 return step(rest);
             case "leftclick":
                 return leftClick(rest);
+            case "shoot":
+                return shoot(rest);
+            case "arrows":
+                return arrows();
+            case "motion":
+                return motion(rest);
+            case "grapple":
+                return grapple(rest);
             case "strike":
                 return strike(rest);
             case "whack":
@@ -1467,6 +1476,116 @@ public final class HarnessPlugin extends JavaPlugin {
         Bukkit.getPluginManager().callEvent(event);
         return "ok cancelled=" + event.isCancelled()
                 + " held=" + player.getInventory().getItemInMainHand().getType();
+    }
+
+    /**
+     * Looses a hunter's arrow, the way drawing a bow and letting go would.
+     *
+     * <p>{@code HunterManager.shootArrow} is handed the bow event and reads none of it - the thing
+     * it acts on is the shooter - so an arrow can be loosed here with no bow, no draw and no
+     * client, and still be on the real path. The arrow is the server's own, so everything
+     * downstream of it is what happens to somebody who really shot: the hit, the grapple, and the
+     * pull. What it hits is decided by where the player is looking, which is the same thing that
+     * decides it for anybody else.
+     */
+    private String shoot(String rest) {
+        Player player = player(rest.trim().split("\\s+")[0]);
+        boolean cancelled = SupernaturalsPlugin.instance.getHunterManager()
+                .shootArrow(player, (EntityShootBowEvent) null);
+        return "ok " + player.getName() + " cancelled=" + cancelled
+                + " held=" + player.getInventory().getItemInMainHand().getType()
+                + " power=" + (int) SuperNManager.get(player).getPower()
+                + " tracked=" + SupernaturalsPlugin.instance.getHunterManager().getArrowMap().size()
+                + " grappling="
+                + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                + " at=" + player.getLocation().getBlockX() + ","
+                + player.getLocation().getBlockY() + "," + player.getLocation().getBlockZ();
+    }
+
+    /**
+     * Every arrow the hunter manager is still tracking, for the probe.
+     *
+     * <p>The map is keyed by the arrow object itself, so an arrow that was fired and whose hit
+     * never reached the manager looks exactly like an arrow that was never fired at all: nothing at
+     * all happens, and no message says so. This is what tells those two apart - what the manager is
+     * holding, where each of them is, and whether it is still a live arrow.
+     */
+    private String arrows() {
+        var tracked = SupernaturalsPlugin.instance.getHunterManager().getArrowMap();
+        if (tracked.isEmpty()) {
+            return "ok 0 tracked";
+        }
+        List<String> found = new ArrayList<>();
+        for (var entry : tracked.entrySet()) {
+            var arrow = entry.getKey();
+            var at = arrow.getLocation();
+            found.add(entry.getValue() + "@" + at.getBlockX() + "," + at.getBlockY() + ","
+                    + at.getBlockZ() + " world="
+                    + (at.getWorld() == null ? "?" : at.getWorld().getName())
+                    + " valid=" + arrow.isValid() + " inBlock=" + arrow.isInBlock());
+        }
+        return "ok " + tracked.size() + " " + String.join(" | ", found);
+    }
+
+    /**
+     * What a player is moving at, for the probe, and whether the hall thinks he is being pulled.
+     *
+     * <p>A velocity is the whole of what a grapple does - it is set every tick and the server moves
+     * the player by it - and it is also the one part of the answer a player with no client cannot
+     * show: a {@code ServerPlayer} with nobody behind it is not driven through the ordinary living
+     * tick, so the speed is set and nothing moves and the two are indistinguishable from the
+     * outside. Reading the speed tells them apart, and tells "the pull never started" apart from
+     * "the pull started and the server ignored it".
+     */
+    private String motion(String rest) {
+        Player player = player(rest.trim().split("\\s+")[0]);
+        var speed = player.getVelocity();
+        return "ok " + player.getName()
+                + " velocity=" + round(speed.getX()) + "," + round(speed.getY()) + ","
+                + round(speed.getZ())
+                + " onGround=" + player.isOnGround()
+                + " grappling=" + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                + " at=" + player.getLocation().getBlockX() + ","
+                + player.getLocation().getBlockY() + "," + player.getLocation().getBlockZ();
+    }
+
+    /** A number to two places, for a probe reply that has to stay readable. */
+    private static String round(double value) {
+        return String.valueOf(Math.round(value * 100.0) / 100.0);
+    }
+
+    /**
+     * Starts a pull toward a point straight above a player, for the probe.
+     *
+     * <p>The ability is a velocity set once a tick, so the only thing checkable from outside is
+     * whether the pull runs - and "it never ran" is a different fault from "it ran and stopped
+     * immediately", which is what a hit that landed too close to the shooter produces. Asking for
+     * a pull toward a point whose distance is known tells those two apart without an arrow, a bow
+     * or a wall.
+     */
+    private String grapple(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = player(args[0]);
+        double up = args.length > 1 ? Double.parseDouble(args[1]) : 5.0;
+        Location target = player.getLocation().clone().add(0, up, 0);
+        SupernaturalsPlugin.instance.getHunterManager().startGrappling(player, target);
+        // Read back from inside the same tick loop, a few ticks apart. A pull longer than the time
+        // it takes to get a reply out of the control channel cannot be sampled from outside it: the
+        // answer would always arrive after it had already stopped, which is a fact about the
+        // channel and not about the pull.
+        for (long delay : new long[] {1L, 3L, 6L}) {
+            final long after = delay;
+            Bukkit.getScheduler().runTaskLater(SupernaturalsPlugin.instance, () -> getLogger().info(
+                    "[pull] +" + after + "t velocity=" + round(player.getVelocity().getX()) + ","
+                            + round(player.getVelocity().getY()) + ","
+                            + round(player.getVelocity().getZ())
+                            + " grappling="
+                            + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                            + " y=" + round(player.getLocation().getY())), delay);
+        }
+        return "ok " + player.getName() + " pulling toward " + target.getBlockX() + ","
+                + target.getBlockY() + "," + target.getBlockZ()
+                + " away=" + round(player.getLocation().distance(target));
     }
 
     /**
