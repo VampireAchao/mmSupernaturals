@@ -1971,8 +1971,15 @@ public final class Hall {
                         "先点一次「能量 +1000」",
                         "拿猪排左键空气，看有没有僵尸出现",
                         "骨头和铁剑收进背包，后面几节要用"));
-                sections.add(section("§5④ 休战 僵尸系怪物", 4, true, (w, y, x, z, width) -> {
-                    box(w, Material.MOSS_BLOCK, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
+                sections.add(section("§5④ 休战 僵尸系怪物", 4, true, 4, (w, y, x, z, width) -> {
+                    // Forty-one monsters in rings around the middle of the room - exactly the step
+                    // the vampire hall has, on exactly the same list, and it takes four cells for
+                    // exactly the same reason: the outermost ring is sixteen blocks out, and a
+                    // twenty-one wide room has eight to give. What that looked like was a room whose
+                    // monsters were stacked in its walls, and, for the ones the clamp pushed past
+                    // the wall entirely, monsters standing in the rooms next door before anybody
+                    // had called them.
+                    box(w, Material.MOSS_BLOCK, x + 2, y, z + 2, x + width - 3, y, z + width - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "ghoul"),
                             "§c召唤僵尸系怪物", "§7看它们打不打你");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "ghoul"),

@@ -350,6 +350,10 @@ public final class HarnessPlugin extends JavaPlugin {
                 return guard.guideReport(rest.trim());
             case "leftovers":
                 return guard.leftoverReport();
+            case "summonspots":
+                return guard.summonReport(rest);
+            case "strays":
+                return guard.strayReport(rest);
             case "talk":
                 return guard.talkReport(rest.trim());
             case "npchit":

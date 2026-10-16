@@ -15,12 +15,12 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Biome;
 import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Chicken;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Flying;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.PigZombie;
 import org.bukkit.entity.Player;
@@ -60,8 +60,11 @@ import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -1158,7 +1161,11 @@ final class HallGuard implements Listener {
             return;
         }
         clearHallMobs(player, null);
-        Location at = player.getLocation().add(2.5, 0, 0.5);
+        // Through the same four questions every other summon answers. This one used to drop its
+        // monster two and a half blocks along x from the player without asking anything - which is
+        // inside the wall whenever he is reading the board that called for it, and reading the
+        // board is the only way this board is ever used.
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         try {
             Entity spawned = player.getWorld().spawnEntity(at, type);
             spawned.setPersistent(true);
@@ -1484,10 +1491,16 @@ final class HallGuard implements Listener {
     private void spawnAngryWolves(Player player) {
         Hall hall = plugin.hallOrNull();
         List<Wolf> wolves = new ArrayList<>();
-        for (int index = 0; index < 3; index++) {
-            double angle = index * 2.1;
-            Location at = fitIn(roomOf(player), player.getLocation().clone()
-                    .add(Math.cos(angle) * 4, 0, Math.sin(angle) * 4));
+        List<Location> taken = new ArrayList<>();
+        // Three places, apart from the player and from each other. The candidates come back nearest
+        // first and every one handed out is struck off, which is what stops the second wolf landing
+        // inside the first - the old version drew three fixed angles at a fixed radius and did not
+        // check any of them against the ones already placed.
+        for (Location at : summonCandidates(player, taken, SUMMON_FAR)) {
+            if (wolves.size() >= 3) {
+                break;
+            }
+            taken.add(at);
             try {
                 Wolf wolf = player.getWorld().spawn(at, Wolf.class, spawned -> {
                     spawned.setAngry(true);
@@ -1519,7 +1532,7 @@ final class HallGuard implements Listener {
      */
     private void prepareGhoul(Player player, Hall hall) {
         clearHallMobs(player, null);
-        Location at = freeSpot(player);
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         PigZombie pigman = player.getWorld().spawn(at, PigZombie.class, spawned -> {
             spawned.setCustomName("大厅僵尸猪人");
             spawned.setCustomNameVisible(true);
@@ -1544,7 +1557,7 @@ final class HallGuard implements Listener {
             note(player, "§c现在是白天，先点「夜晚」再来放狼");
             return;
         }
-        Location at = freeSpot(player);
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         Wolf wolf = player.getWorld().spawn(at, Wolf.class, spawned -> {
             spawned.setAngry(true);
             spawned.setPersistent(true);
@@ -1568,7 +1581,7 @@ final class HallGuard implements Listener {
             chickens.remove(id);
             propRooms.remove(id);
         }
-        Location at = freeSpot(player);
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         Chicken chicken = player.getWorld().spawn(at, Chicken.class, spawned -> {
             spawned.setAware(false);
             spawned.setPersistent(true);
@@ -1604,7 +1617,14 @@ final class HallGuard implements Listener {
         // puts most of it in a wall - which is how a room about "watch whether they come at you"
         // ended up showing a handful of monsters and a lot of nothing.
         Location centre = middleOf(pen, player.getLocation());
+        // Everywhere a walk from the player reaches, inside this room. The ring is the shape the
+        // step wants; this is what decides whether a point on it is somewhere a monster can stand
+        // and still come at him from. A ring drawn through a pillar, or through the wall of a room
+        // too narrow to hold it, lands monsters in both - and the board's own words are that they
+        // come at you.
+        List<Location> reach = walkable(player, pen);
         List<String> refused = new ArrayList<>();
+        int stranded = 0;
         int placed = 0;
         double furthest = 0;
         for (EntityType type : wanted) {
@@ -1633,8 +1653,14 @@ final class HallGuard implements Listener {
             int ring = placed / PER_RING;
             double angle = (placed % PER_RING) * (2 * Math.PI / PER_RING) + ring * 0.35;
             double out = 6 + ring * 3.5;
-            Location at = fitIn(roomOf(player), clampIn(pen,
+            Location at = nearestReachable(reach, clampIn(pen,
                     centre.clone().add(Math.cos(angle) * out, 0, Math.sin(angle) * out)));
+            if (at == null) {
+                // A place on this ring that a monster could stand on, and nothing close enough to
+                // it to call the point home. Left out and counted, rather than dropped in a wall.
+                stranded++;
+                continue;
+            }
             try {
                 Entity spawned = centre.getWorld().spawnEntity(at, type);
                 spawned.setPersistent(true);
@@ -1649,7 +1675,33 @@ final class HallGuard implements Listener {
         // room" is the thing this note exists to be able to claim, and a count on its own cannot
         // claim it - forty monsters clamped to the hall's own edge is also a count of forty.
         note(player, "§c召唤了 " + placed + " 只怪物，最远的离房间中心 " + Math.round(furthest) + " 格"
+                + (stranded == 0 ? "" : "；" + stranded + " 个环位走不到你，已跳过")
                 + (refused.isEmpty() ? "" : "；室内放不下的：" + String.join("、", refused)));
+    }
+
+    /** How far a point on a shape may be moved to land on floor a walk can reach. */
+    private static final double RING_SLACK = 6.0;
+
+    /**
+     * The reachable block nearest a wanted place, or {@code null} when the nearest is too far away.
+     *
+     * <p>Six blocks of slack, because a ring is a shape drawn on the floor of a room and a monster
+     * is a thing that has to stand on it: where the shape and the floor disagree - a pillar, a lip,
+     * the corner of a room built a cell too small - it is the ring that is worth moving. Past six
+     * the shape is gone, and the caller is better off knowing that than having a monster in the
+     * wrong place.
+     */
+    private static Location nearestReachable(List<Location> reach, Location wanted) {
+        Location best = null;
+        double shortest = RING_SLACK;
+        for (Location at : reach) {
+            double away = at.distance(wanted);
+            if (away < shortest) {
+                shortest = away;
+                best = at;
+            }
+        }
+        return best == null ? null : middleOfBlock(best);
     }
 
     /** A dragon, in the middle of the room with room to be a dragon in. */
@@ -2097,21 +2149,17 @@ final class HallGuard implements Listener {
      * it is just no longer preferred over a place he can actually get to.
      */
     private Location seatFor(Player player, int seat, List<Location> taken) {
-        Location centre = player.getLocation();
-        String room = roomOf(player);
-        Vector facing = flat(centre.getDirection());
-        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
-        List<Vector> directions = List.of(facing.clone().multiply(-1), left,
-                left.clone().multiply(-1), facing);
-        for (int attempt = 0; attempt < 12; attempt++) {
-            Vector direction = directions.get(Math.min(attempt / 3, directions.size() - 1));
-            double ahead = 3.0 + (attempt % 3) * 1.6;
-            Location at = centre.clone().add(direction.clone().multiply(ahead));
-            if (insideRoom(room, at) && canStand(at) && clearOf(at, taken)) {
-                return at;
-            }
+        // The same four questions every other summon answers, with the seat simply deciding which
+        // of the places that passed is asked for: they come back nearest first and the ones already
+        // handed out are passed in as taken, so the second stand-in is given the next place rather
+        // than the first one again. What was here walked a fixed arc of its own and asked about
+        // floor, room and overlap - but never whether the player could see the seat, nor whether a
+        // stand-in could walk from it to him, which is the whole of what a stand-in is for.
+        List<Location> spots = summonCandidates(player, taken, SUMMON_FAR);
+        if (spots.isEmpty()) {
+            return spotFor(player);
         }
-        return spotFor(player);
+        return spots.get(Math.min(seat, spots.size() - 1));
     }
 
     /** A horizontal unit vector, with a fallback when a player is looking straight up or down. */
@@ -2144,15 +2192,182 @@ final class HallGuard implements Listener {
         return zone == null || zone.holds(at);
     }
 
-    /** True when nothing has already been put down within a block of that spot. */
-    private static boolean clearOf(Location at, List<Location> taken) {
-        for (Location other : taken) {
-            if (other.getWorld().equals(at.getWorld())
-                    && other.distanceSquared(at) < 1.0) {
+    // -- where a board may put what it calls up ----------------------------
+
+    /**
+     * How close to the player a summon may land, and how far away.
+     *
+     * <p>Nearer than this and the thing is inside him, which the server resolves by pushing it into
+     * the nearest block that will take it - a wall, in a room whose boards are all on walls.
+     * Further than this and it is behind something, or across the room facing away: a step that
+     * says "watch this one" has to put it somewhere watching is possible from.
+     */
+    private static final double SUMMON_NEAR = 1.5;
+    private static final double SUMMON_FAR = 6.0;
+
+    /** How many blocks the walk search will look at before it gives up. */
+    private static final int WALK_BUDGET = 4096;
+
+    /**
+     * The places a board's summon is allowed to stand.
+     *
+     * <p>Four things have to be true of one, and every board that calls something up now asks for
+     * all four in one place. Before this each board decided for itself, and the ones that decided
+     * nothing said so out loud: the general "let one out" board put its monster at the player's
+     * position moved two and a half blocks along x, which is inside the wall whenever the player is
+     * reading a board - the only time that board is ever used - and the truce step drew a ring
+     * sixteen blocks out inside a room eight blocks wide, which stacked monsters in the wall and,
+     * for the ones the clamp pushed past it, in the rooms next door.
+     *
+     * <p>The four, cheapest first:
+     *
+     * <ul>
+     *   <li><b>Inside the room.</b> The player's own room, not the hall: rooms are separate builds
+     *       with no way between them, so something standing in the next one is something the person
+     *       who asked for it will never see. A player who is not in a room at all - the lobby, a
+     *       corridor - gets no restriction, because there is no room to get wrong.
+     *   <li><b>On floor, not in a block.</b> Feet on something solid and two blocks of air, which
+     *       is what {@link #canStand} has always meant.
+     *   <li><b>Walkable to the player.</b> A search over standing blocks outwards from the player,
+     *       bounded by the room. A monster that cannot path to him is a monster that stands in a
+     *       corner while the step promises it will come at him, and nothing about looking at the
+     *       spawn point says so - only asking whether a route exists does.
+     *   <li><b>In the player's line of sight.</b> Sampled along the line from his eyes, refusing an
+     *       occluding block. Being in the room is not the same thing: the truce room has pillars
+     *       in it, and a ring drawn through one puts monsters behind it.
+     * </ul>
+     */
+    private List<Location> summonCandidates(Player player, List<Location> taken, double far) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return List.of();
+        }
+        String room = roomOf(player);
+        Hall.Box inside = room == null ? null : hall.zone("room." + room);
+        List<Location> found = new ArrayList<>();
+        for (Location at : walkable(player, inside)) {
+            Location spot = middleOfBlock(at);
+            if (seatTaken(taken, spot)) {
+                continue;
+            }
+            double away = spot.distance(player.getLocation());
+            if (away < SUMMON_NEAR || away > far) {
+                continue;
+            }
+            if (!seeFrom(player, spot)) {
+                continue;
+            }
+            found.add(spot);
+        }
+        found.sort(Comparator.comparingDouble(at -> at.distance(player.getLocation())));
+        return found;
+    }
+
+    /**
+     * The nearest place a board's summon may stand, or the old search when nothing passed.
+     *
+     * <p>The fallback is not a loophole, it is the one case the four questions cannot answer:
+     * a player standing somewhere he cannot stand - in the pool, on a fence, mid-jump - has no
+     * walk to search and would otherwise be unable to use a board at all. That is rare, and the
+     * weaker search underneath still asks for floor inside the room.
+     */
+    private Location summonSpot(Player player, List<Location> taken, double far) {
+        List<Location> spots = summonCandidates(player, taken, far);
+        return spots.isEmpty() ? freeSpot(player) : spots.get(0);
+    }
+
+    /**
+     * Everywhere a creature could stand and walk, starting from the player.
+     *
+     * <p>A walk over blocks rather than a pathfind: the question is not "which way is shortest" but
+     * "is there a way at all", and a room is a flat box of a few hundred blocks - enumerating the
+     * whole of it is cheaper than answering that for any single place in it would be. A step up or
+     * down counts as well as a step across, since a room may have a raised floor or a lip, and
+     * refusing those would rule out places a player can plainly walk to.
+     *
+     * <p>Includes the player's own block, so that a caller wanting "somewhere that is not under
+     * him" filters on distance rather than on the search.
+     */
+    private List<Location> walkable(Player player, Hall.Box inside) {
+        List<Location> found = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        Location start = player.getLocation().getBlock().getLocation();
+        if (!canStand(start)) {
+            // Nowhere to start from, so there is no honest answer to "what can reach him" - and
+            // inventing one would hand out monsters behind walls with the search's blessing.
+            return found;
+        }
+        Deque<Location> open = new ArrayDeque<>();
+        seen.add(blockKey(start));
+        open.add(start);
+        while (!open.isEmpty() && found.size() < WALK_BUDGET) {
+            Location at = open.poll();
+            found.add(at);
+            for (int[] step : WALK_STEPS) {
+                Location next = at.clone().add(step[0], step[1], step[2]);
+                if (inside != null && !inside.holds(next)) {
+                    continue;
+                }
+                if (!canStand(next) || !seen.add(blockKey(next))) {
+                    continue;
+                }
+                open.add(next);
+            }
+        }
+        return found;
+    }
+
+    /** Across, and one block up or down: what a walk over a flat room with a lip in it looks like. */
+    private static final int[][] WALK_STEPS = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+        {1, 1, 0}, {-1, 1, 0}, {0, 1, 1}, {0, 1, -1},
+        {1, -1, 0}, {-1, -1, 0}, {0, -1, 1}, {0, -1, -1}};
+
+    /**
+     * Whether the player can see a place: no occluding block between his eyes and it.
+     *
+     * <p>Sampled every quarter block rather than ray-traced, because the question is about blocks
+     * and a quarter block is well inside the width of one: a line that slips through the seam
+     * between two blocks is not a line a player would call seeing something. Both ends are trimmed
+     * - the eyes are inside the player's own head, and the far end is inside whatever the summon is
+     * standing on.
+     */
+    private static boolean seeFrom(Player player, Location at) {
+        Location eye = player.getEyeLocation();
+        Location middle = at.clone().add(0, 0.9, 0);
+        if (eye.getWorld() == null || !eye.getWorld().equals(middle.getWorld())) {
+            return false;
+        }
+        Vector along = middle.toVector().subtract(eye.toVector());
+        double length = along.length();
+        if (length < 0.5) {
+            return true;
+        }
+        along.multiply(1.0 / length);
+        for (double walked = 0.6; walked < length - 0.4; walked += 0.25) {
+            Block between = eye.clone().add(along.clone().multiply(walked)).getBlock();
+            if (between.getBlockData().isOccluding()) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** Whether one of the places already handed out is this block. */
+    private static boolean seatTaken(List<Location> taken, Location at) {
+        for (Location one : taken) {
+            if (sameBlock(one, at)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A block as one number, for the walk search's books. */
+    private static long blockKey(Location at) {
+        return ((long) (at.getBlockX() & 0x3FFFFFF) << 38)
+                | ((long) (at.getBlockY() & 0xFFF) << 26)
+                | (at.getBlockZ() & 0x3FFFFFF);
     }
 
     /**
@@ -2222,29 +2437,6 @@ final class HallGuard implements Listener {
     private static boolean sameBlock(Location a, Location b) {
         return a.getWorld() != null && a.getWorld().equals(b.getWorld())
                 && a.getBlockX() == b.getBlockX() && a.getBlockZ() == b.getBlockZ();
-    }
-
-    /**
-     * That spot, or the nearest one to it a body fits in without leaving the room.
-     *
-     * <p>A ring of monsters drawn around the middle of a room lands some of them in a wall or on a
-     * pillar sooner or later; the ring is the shape the section wants, and one block either way is
-     * not worth moving the whole ring for.
-     */
-    private Location fitIn(String room, Location at) {
-        if (insideRoom(room, at) && canStand(at)) {
-            return at;
-        }
-        for (int step = 1; step <= 4; step++) {
-            for (BlockFace way : new BlockFace[] {BlockFace.EAST, BlockFace.WEST, BlockFace.NORTH,
-                    BlockFace.SOUTH}) {
-                Location candidate = at.clone().add(way.getModX() * step, 0, way.getModZ() * step);
-                if (insideRoom(room, candidate) && canStand(candidate)) {
-                    return candidate;
-                }
-            }
-        }
-        return at;
     }
 
     /**
@@ -2564,7 +2756,11 @@ final class HallGuard implements Listener {
         // what the person running the test can actually see. Without the second one the section
         // says "the stand-in holds a wooden sword" and shows an iron one.
         Nms.pushEquipment(spar);
-        Location start = approachFrom(player);
+        // The same search as everything else a board calls up: floor in this room, a walk from it to
+        // the player, and in his line of sight. The far end of it on purpose, because what follows
+        // is a walk in - every other caller takes the nearest place, and this one takes the last.
+        List<Location> starts = summonCandidates(player, List.of(), WALK_FROM);
+        Location start = starts.isEmpty() ? freeSpot(player) : starts.get(starts.size() - 1);
         spar.teleport(facing(start, player.getLocation()));
         // Down on the books as this room's, the same as any other stand-in: a room he was left
         // standing in after its visitor walked out is a room still holding a person.
@@ -2735,42 +2931,6 @@ final class HallGuard implements Listener {
         }
     }
 
-    /**
-     * A clear spot a few blocks off to walk in from.
-     *
-     * <p>The player's own facing first, then the four sides, and the longest run of standable
-     * floor wins - so he arrives along an open line instead of pushing out of a wall.
-     */
-    private Location approachFrom(Player player) {
-        Location at = player.getLocation();
-        List<Vector> ways = new ArrayList<>();
-        Vector looking = at.getDirection().setY(0);
-        if (looking.lengthSquared() > 0.01) {
-            ways.add(looking.normalize());
-        }
-        for (BlockFace way : new BlockFace[] {BlockFace.NORTH, BlockFace.SOUTH,
-                BlockFace.EAST, BlockFace.WEST}) {
-            ways.add(new Vector(way.getModX(), 0, way.getModZ()));
-        }
-        Location best = at.clone();
-        int bestClear = 0;
-        for (Vector way : ways) {
-            int clear = 0;
-            for (int distance = 1; distance <= WALK_FROM; distance++) {
-                Location spot = at.clone().add(way.clone().multiply(distance));
-                if (!canStand(spot)) {
-                    break;
-                }
-                clear = distance;
-            }
-            if (clear > bestClear) {
-                bestClear = clear;
-                best = at.clone().add(way.clone().multiply(clear));
-            }
-        }
-        return best;
-    }
-
     /** A spot with its yaw turned towards somebody, so he walks in looking where he is going. */
     private static Location facing(Location at, Location target) {
         Location turned = at.clone();
@@ -2818,38 +2978,24 @@ final class HallGuard implements Listener {
         return spar;
     }
 
+    /** How far from the player a stand-in being brought round to his side may stand. */
+    private static final double SPOT_FAR = 4.0;
+
     /**
-     * A place in front of the player that a person can actually stand in.
+     * A place beside the player that a stand-in can be sent to - and be hit from.
      *
-     * <p>Two blocks along the player's facing was all this used to do, which put the stand-in
-     * inside the wall whenever the player happened to be looking at one - and a stand-in inside a
-     * wall is one nobody can see or hit. Nearer spots are tried next, then the player's own feet,
-     * then the four sides.
-     */
-    /**
-     * The stand-in's place when there is no room left in front to try: close to the player, in a
-     * direction he can get to.
+     * <p>Held to the same four answers as a summon, because it is the same question: a stand-in
+     * moved in by a board that means "now hit him" has to be somewhere the player can see him and
+     * somewhere he could have walked from. What was here asked about floor, the room, and which way
+     * the player was facing, and the second of those had a hole in it - a player reading a board is
+     * standing against a wall, and "in front of him" is the far side of it.
      *
-     * <p>The old version of this reached for the player's own block, then for a step that was still
-     * ahead of him - so a player standing against the wall he just clicked got a stand-in inside the
-     * wall or past it. Directions and the room check are the same as {@link #seatFor}, only the
-     * distances are smaller because this is the attempt that has to work.
+     * <p>Four blocks rather than the six a summon gets: this is the version that has to be in reach
+     * of the player's arm, and every caller is about to hit something.
      */
     private Location spotFor(Player player) {
-        Location at = player.getLocation();
-        String room = roomOf(player);
-        Vector facing = flat(at.getDirection());
-        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
-        for (Vector direction : List.of(facing.clone().multiply(-1), left,
-                left.clone().multiply(-1), facing)) {
-            for (int distance = 3; distance >= 1; distance--) {
-                Location candidate = at.clone().add(direction.clone().multiply(distance));
-                if (insideRoom(room, candidate) && canStand(candidate)) {
-                    return candidate;
-                }
-            }
-        }
-        return at;
+        List<Location> spots = summonCandidates(player, List.of(), SPOT_FAR);
+        return spots.isEmpty() ? freeSpot(player) : spots.get(0);
     }
 
     /** Somewhere with two blocks of air and something solid underneath. */
@@ -3317,6 +3463,107 @@ final class HallGuard implements Listener {
         return "ok props=" + propRooms.size() + " byRoom=" + byRoom
                 + " standins=" + standing + " occupied=" + occupied
                 + " boarded=" + hallMobs.size() + " chickens=" + chickens.size();
+    }
+
+    /**
+     * What a board would be allowed to call up here, for the probe.
+     *
+     * <p>The four questions are the kind that can be answered wrongly without looking wrong: "there
+     * is floor over there" and "he can see the floor over there" stop being the same statement the
+     * moment a room has a pillar in it, and "he can walk to it" is a third statement again. This
+     * prints the counts rather than a verdict - how far a walk from the player reaches, how many
+     * places pass all four, and, of the blocks around him that are inside his room, how many are
+     * full of wall, how many he cannot see, and how many are simply too far.
+     */
+    String summonReport(String rest) {
+        Hall hall = plugin.hallOrNull();
+        String name = rest.trim().split("\\s+")[0];
+        Player player = Bukkit.getPlayerExact(name);
+        if (player == null) {
+            return "err no such player: " + name;
+        }
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        String room = roomOf(player);
+        Hall.Box inside = room == null ? null : hall.zone("room." + room);
+        List<Location> spots = summonCandidates(player, List.of(), SUMMON_FAR);
+        int nearby = 0;
+        int inWall = 0;
+        int hidden = 0;
+        int tooFar = 0;
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                Location at = middleOfBlock(player.getLocation().clone().add(dx, 0, dz));
+                if (inside != null && !inside.holds(at)) {
+                    continue;
+                }
+                nearby++;
+                if (!canStand(at)) {
+                    inWall++;
+                } else if (!seeFrom(player, at)) {
+                    hidden++;
+                } else if (at.distance(player.getLocation()) > SUMMON_FAR) {
+                    tooFar++;
+                }
+            }
+        }
+        return "ok " + player.getName() + " room=" + room
+                + " reachable=" + walkable(player, inside).size()
+                + " candidates=" + spots.size()
+                + " nearby=" + nearby + " inWall=" + inWall
+                + " hidden=" + hidden + " tooFar=" + tooFar
+                + (spots.isEmpty() ? ""
+                        : " nearest=" + trim(spots.get(0).distance(player.getLocation())));
+    }
+
+    /**
+     * Every living thing in a world and which room it is standing in, for the probe.
+     *
+     * <p>This is the half of "inside the room" that the books cannot answer. A summon's room is
+     * recorded where it was called up, which says where it was meant to be and nothing about where
+     * it went: a monster pushed through a wall by a clamp is filed under the room it was called in
+     * and standing in the one next door. Reading the world back is the only way to tell those two
+     * apart - and a monster whose feet or head are inside a block is the other thing a ring drawn
+     * in a room too small for it produces.
+     */
+    String strayReport(String rest) {
+        Hall hall = plugin.hallOrNull();
+        World world = Bukkit.getWorld(rest.trim());
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        if (world == null) {
+            return "err no such world: " + rest.trim();
+        }
+        Map<String, Integer> byRoom = new TreeMap<>();
+        List<String> stuck = new ArrayList<>();
+        int loose = 0;
+        for (LivingEntity entity : world.getLivingEntities()) {
+            if (entity instanceof Player || entity instanceof Flying) {
+                // Guidance stands in a room on purpose, and a ghast is not a thing that stands.
+                continue;
+            }
+            String room = hall.roomAt(entity.getLocation());
+            if (room == null) {
+                loose++;
+            } else {
+                byRoom.merge(room, 1, Integer::sum);
+            }
+            Location at = entity.getLocation();
+            if (!at.getBlock().getType().isAir()
+                    || !at.clone().add(0, 1, 0).getBlock().getType().isAir()) {
+                // Named, not just counted. "One of them is in a block" is a thing a fight between
+                // forty monsters produces on its own - a silverfish burrows, an explosion throws -
+                // and being able to tell that apart from "the ring was drawn through a wall" is the
+                // whole difference between a summon that works and one that merely looks quiet.
+                stuck.add(entity.getType().name() + "@" + at.getBlockX() + "," + at.getBlockY()
+                        + "," + at.getBlockZ());
+            }
+        }
+        return "ok " + world.getName() + " byRoom=" + byRoom
+                + " outsideRooms=" + loose + " inBlocks=" + stuck.size()
+                + (stuck.isEmpty() ? "" : " " + String.join(" ", stuck.subList(0, Math.min(6, stuck.size()))));
     }
 
     /**
