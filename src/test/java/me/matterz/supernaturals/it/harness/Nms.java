@@ -425,14 +425,13 @@ final class Nms {
      * into. A stand-in has no client, so nothing ever confirms anything and the state stays on it
      * for good. The fields are cleared by name and each is optional: the ones that do not exist
      * on a build are the ones whose problem that build does not have.
+     *
+     * <p>There are two gates that read that state, and both are opened below: one wants to know
+     * that the player has finished arriving, the other that its client has finished loading. A
+     * stand-in fails both forever, for the same reason.
      */
     static void arrive(Object serverPlayer) {
-        Object connection = null;
-        try {
-            connection = call(serverPlayer, "connection");
-        } catch (ReflectiveOperationException ignored) {
-            // No connection to clear; the fields below are still worth clearing.
-        }
+        Object connection = connectionOf(serverPlayer);
         // The name matters and every obvious guess is wrong: on this build the flag that makes a
         // player untouchable is the one that says it is still changing dimension, and it is called
         // isChangingDimension. A stand-in is put straight into the world it belongs in and never
@@ -448,6 +447,38 @@ final class Nms {
         if (connection != null) {
             plant(connection, "awaitingPositionFromClient", null);
             plant(connection, "awaitingTeleportTime", 0);
+            // The load window, which is the second half of the same gate and was the half nobody
+            // had looked at. `ServerPlayer#isInvulnerableTo` refuses a blow outright while
+            // `connection.hasClientLoaded()` is false, and that answers "not yet" while
+            // `clientLoadedTimeoutTimer` is still counting down (60 ticks, set when a player is
+            // placed) or `waitingForRespawn` is set. No client means nobody ever says "loaded", so
+            // a stand-in spends his first three seconds untouchable - and a room that asks one
+            // stand-in to hit another hits him in the tick he was spawned, which lands here
+            // instead of on him. This is read at the moment of the blow, not at spawn, so it has
+            // to be cleared here rather than once at birth.
+            plant(connection, "waitingForRespawn", false);
+            plant(connection, "clientLoadedTimeoutTimer", 0);
+        }
+    }
+
+    /**
+     * A server player's packet listener, which is where the rest of the "not yet arrived" state
+     * lives.
+     *
+     * <p>It needs its own method because the obvious way to ask is wrong. The field is called
+     * {@code connection}, no method is, and a lookup that only knows how to call methods comes
+     * back empty and - worse - silent. Everything on the listener was therefore cleared nowhere,
+     * for as long as that looked like a miss instead of an answer.
+     */
+    private static Object connectionOf(Object serverPlayer) {
+        Object connection = fieldOf(serverPlayer, "connection");
+        if (connection != null) {
+            return connection;
+        }
+        try {
+            return call(serverPlayer, "getConnection");
+        } catch (ReflectiveOperationException ignored) {
+            return null;
         }
     }
 
@@ -571,12 +602,7 @@ final class Nms {
             // Already a handle, or has none; scan what came in either way.
         }
         StringBuilder out = new StringBuilder();
-        Object connection = null;
-        try {
-            connection = call(player, "connection");
-        } catch (ReflectiveOperationException ignored) {
-            // No connection on this build.
-        }
+        Object connection = connectionOf(player);
         scan(player, out);
         Object abilities = fieldOf(player, "abilities");
         if (abilities != null) {
