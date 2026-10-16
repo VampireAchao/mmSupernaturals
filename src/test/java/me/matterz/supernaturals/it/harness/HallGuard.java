@@ -120,6 +120,9 @@ final class HallGuard implements Listener {
      */
     private static final Set<String> UNROOMABLE = Set.of();
 
+    /** How many monsters go on each ring of the truce room, before the next ring out is used. */
+    private static final int PER_RING = 10;
+
     /** How much a sword does before the plugin has its say. */
     private static final Map<Material, Double> BLADES = Map.of(
             Material.WOODEN_SWORD, 4.0,
@@ -1460,8 +1463,8 @@ final class HallGuard implements Listener {
         List<Wolf> wolves = new ArrayList<>();
         for (int index = 0; index < 3; index++) {
             double angle = index * 2.1;
-            Location at = player.getLocation().clone()
-                    .add(Math.cos(angle) * 4, 0, Math.sin(angle) * 4);
+            Location at = fitIn(roomOf(player), player.getLocation().clone()
+                    .add(Math.cos(angle) * 4, 0, Math.sin(angle) * 4));
             try {
                 Wolf wolf = player.getWorld().spawn(at, Wolf.class, spawned -> {
                     spawned.setAngry(true);
@@ -1493,7 +1496,7 @@ final class HallGuard implements Listener {
      */
     private void prepareGhoul(Player player, Hall hall) {
         clearHallMobs(player, null);
-        Location at = player.getLocation().add(1.5, 0, 1.5);
+        Location at = freeSpot(player);
         PigZombie pigman = player.getWorld().spawn(at, PigZombie.class, spawned -> {
             spawned.setCustomName("大厅僵尸猪人");
             spawned.setCustomNameVisible(true);
@@ -1518,7 +1521,7 @@ final class HallGuard implements Listener {
             note(player, "§c现在是白天，先点「夜晚」再来放狼");
             return;
         }
-        Location at = player.getLocation().add(1.5, 0, 1.5);
+        Location at = freeSpot(player);
         Wolf wolf = player.getWorld().spawn(at, Wolf.class, spawned -> {
             spawned.setAngry(true);
             spawned.setPersistent(true);
@@ -1541,7 +1544,7 @@ final class HallGuard implements Listener {
             }
             chickens.remove(id);
         }
-        Location at = player.getLocation().add(1.5, 0, 1.5);
+        Location at = freeSpot(player);
         Chicken chicken = player.getWorld().spawn(at, Chicken.class, spawned -> {
             spawned.setAware(false);
             spawned.setPersistent(true);
@@ -1569,10 +1572,15 @@ final class HallGuard implements Listener {
         }
         List<EntityType> wanted = new ArrayList<>(
                 "ghoul".equals(race) ? SNConfigHandler.ghoulTruce : SNConfigHandler.vampireTruce);
-        Hall hall = plugin.hallOrNull();
-        Location centre = player.getLocation();
+        Hall.Box pen = pen(player, race);
+        // Around the middle of the room, not around the player. A board is read from the far end of
+        // the room or from the doorway, and a ring drawn where the player happens to be standing
+        // puts most of it in a wall - which is how a room about "watch whether they come at you"
+        // ended up showing a handful of monsters and a lot of nothing.
+        Location centre = middleOf(pen, player.getLocation());
         List<String> refused = new ArrayList<>();
         int placed = 0;
+        double furthest = 0;
         for (EntityType type : wanted) {
             if (type == null) {
                 continue;
@@ -1582,38 +1590,50 @@ final class HallGuard implements Listener {
                 continue;
             }
             if (type == EntityType.ENDER_DRAGON) {
-                if (placeDragon(hall, race, centre)) {
+                if (placeDragon(pen, centre)) {
                     placed++;
                 } else {
                     refused.add(type.name());
                 }
                 continue;
             }
-            double ring = 3 + (placed / 6) * 2;
-            double angle = placed * 1.1;
-            Location at = clamp(hall, race,
-                    centre.clone().add(Math.cos(angle) * ring, 0, Math.sin(angle) * ring));
+            // Rings of ten, six blocks out and three and a half further out each turn: forty
+            // monsters come to four rings, the outermost sixteen blocks from the middle, which
+            // leaves a few blocks of floor between the outside of the ring and the wall. That
+            // margin is the point - a ring drawn wide enough to touch the wall is a ring whose
+            // outermost monsters are inside it, and the room was built at four cells for exactly
+            // this: in any other room the outer rings are past the walls, and monsters that should
+            // be standing in front of the player are standing in the next room.
+            int ring = placed / PER_RING;
+            double angle = (placed % PER_RING) * (2 * Math.PI / PER_RING) + ring * 0.35;
+            double out = 6 + ring * 3.5;
+            Location at = fitIn(roomOf(player), clampIn(pen,
+                    centre.clone().add(Math.cos(angle) * out, 0, Math.sin(angle) * out)));
             try {
                 Entity spawned = centre.getWorld().spawnEntity(at, type);
                 spawned.setPersistent(true);
-                keepIn(hall, spawned, centre);
+                keepIn(plugin.hallOrNull(), spawned, centre);
                 placed++;
+                furthest = Math.max(furthest, at.distance(centre));
             } catch (RuntimeException notPlaceable) {
                 refused.add(type.name());
             }
         }
-        note(player, "§c召唤了 " + placed + " 只怪物"
+        // How far out the furthest one went, said out loud. "Forty-one of them, all inside the
+        // room" is the thing this note exists to be able to claim, and a count on its own cannot
+        // claim it - forty monsters clamped to the hall's own edge is also a count of forty.
+        note(player, "§c召唤了 " + placed + " 只怪物，最远的离房间中心 " + Math.round(furthest) + " 格"
                 + (refused.isEmpty() ? "" : "；室内放不下的：" + String.join("、", refused)));
     }
 
-    /** A dragon, in the middle of the section with room to be a dragon in. */
-    private boolean placeDragon(Hall hall, String race, Location centre) {
-        Location at = clamp(hall, race, centre.clone()).add(0, 6, 0);
+    /** A dragon, in the middle of the room with room to be a dragon in. */
+    private boolean placeDragon(Hall.Box pen, Location centre) {
+        Location at = clampIn(pen, centre.clone()).add(0, 6, 0);
         try {
             EnderDragon dragon = centre.getWorld().spawn(at, EnderDragon.class);
             dragon.setPhase(EnderDragon.Phase.HOVER);
             dragon.setPersistent(true);
-            keepIn(hall, dragon, centre);
+            keepIn(plugin.hallOrNull(), dragon, centre);
             return true;
         } catch (RuntimeException | LinkageError notPlaceable) {
             plugin.getLogger().warning("could not summon the ender dragon: " + notPlaceable);
@@ -1621,9 +1641,35 @@ final class HallGuard implements Listener {
         }
     }
 
-    /** Keeps a spawn point inside its hall, however many neighbours are already standing there. */
-    private Location clamp(Hall hall, String race, Location at) {
-        Hall.Box zone = hall == null ? null : hall.zone("hall." + race);
+    /**
+     * The box a section's monsters have to stay inside: the room the player is testing in, or the
+     * race's whole hall when they are not standing in one.
+     *
+     * <p>It was the hall for everything, which is the other half of how forty monsters ended up in
+     * the neighbouring rooms. The rings a small room cannot hold were clamped to the hall's own
+     * edge - a boundary several rooms away from the room they were drawn in.
+     */
+    private Hall.Box pen(Player player, String race) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return null;
+        }
+        String room = roomOf(player);
+        Hall.Box inRoom = room == null ? null : hall.zone("room." + room);
+        return inRoom != null ? inRoom : hall.zone("hall." + race);
+    }
+
+    /** The middle of a box, at the height of the player standing in it. */
+    private static Location middleOf(Hall.Box zone, Location fallback) {
+        if (zone == null) {
+            return fallback;
+        }
+        return new Location(fallback.getWorld(),
+                (zone.x1() + zone.x2()) / 2.0, fallback.getY(), (zone.z1() + zone.z2()) / 2.0);
+    }
+
+    /** Keeps a point inside the box a section is working in, however many are already there. */
+    private static Location clampIn(Hall.Box zone, Location at) {
         if (zone == null) {
             return at;
         }
@@ -2072,6 +2118,58 @@ final class HallGuard implements Listener {
             }
         }
         return true;
+    }
+
+    /**
+     * Somewhere near the player that a small body fits in and that is inside their own room.
+     *
+     * <p>The hall spawns things beside the player - a chicken to kill, a pigman, a wolf - and every
+     * one of them was put at the player's own position moved a block and a half on both axes. That
+     * is fine in the middle of a room and it is inside the wall when the player is standing at one,
+     * which is exactly where a player reading a board stands. A chicken in a block cannot be walked
+     * to or hit, and killing it is the whole of what that step is for.
+     *
+     * <p>Behind the player first, because the board they are reading is on the wall in front of
+     * them. Then their sides, then in front, and each one has to be somewhere they could get to.
+     */
+    private Location freeSpot(Player player) {
+        String room = roomOf(player);
+        Location centre = player.getLocation();
+        Vector back = flat(centre.getDirection()).multiply(-1);
+        Vector side = new Vector(-back.getZ(), 0, back.getX());
+        for (Vector direction : List.of(back, side, side.clone().multiply(-1),
+                back.clone().multiply(-1))) {
+            for (double away : new double[] {1.5, 2.5, 3.5}) {
+                Location at = fitIn(room, centre.clone().add(direction.clone().multiply(away)));
+                if (canStand(at)) {
+                    return at;
+                }
+            }
+        }
+        return centre;
+    }
+
+    /**
+     * That spot, or the nearest one to it a body fits in without leaving the room.
+     *
+     * <p>A ring of monsters drawn around the middle of a room lands some of them in a wall or on a
+     * pillar sooner or later; the ring is the shape the section wants, and one block either way is
+     * not worth moving the whole ring for.
+     */
+    private Location fitIn(String room, Location at) {
+        if (insideRoom(room, at) && canStand(at)) {
+            return at;
+        }
+        for (int step = 1; step <= 4; step++) {
+            for (BlockFace way : new BlockFace[] {BlockFace.EAST, BlockFace.WEST, BlockFace.NORTH,
+                    BlockFace.SOUTH}) {
+                Location candidate = at.clone().add(way.getModX() * step, 0, way.getModZ() * step);
+                if (insideRoom(room, candidate) && canStand(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+        return at;
     }
 
     /**

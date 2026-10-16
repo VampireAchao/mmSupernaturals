@@ -1850,8 +1850,11 @@ public final class Hall {
                                 + "这是替代吃饭的那条路",
                         "杀掉鸡以后饱食度上升 2 点，能量 +100",
                         "右键那块牌放出一只鸡（旧的会被清掉）", "把它杀掉，回头看饱食度"));
-                sections.add(section("§5⑥ 休战 敌对怪物", 4, true, (w, y, x, z, width) -> {
-                    box(w, Material.BLACKSTONE, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
+                sections.add(section("§5⑥ 休战 敌对怪物", 4, true, 4, (w, y, x, z, width) -> {
+                    // The arena floor, across the room rather than the strip a small room's middle
+                    // would be: the monsters are laid out in rings around the middle of the room,
+                    // and a ring drawn on two different floors reads as two different rooms.
+                    box(w, Material.BLACKSTONE, x + 2, y, z + 2, x + width - 3, y, z + width - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "vampire"),
                             "§c召唤全部敌对怪物", "§7看它们打不打你");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "vampire"),
@@ -2880,9 +2883,28 @@ public final class Hall {
     }
 
     /**
+     * The same, for the one step that needs both a bigger room and no roof over it.
+     *
+     * <p>The truce room is the only room in any hall that takes four cells, and it does because of
+     * what it has to hold: forty-one monsters, laid out in rings around the middle of the room, and
+     * among them an ender dragon sixteen blocks from nose to tail. In a room the size of the others
+     * the outer rings are outside the walls, and the monsters that should be standing still in
+     * front of the player are standing in the next room. It is also left open to the sky, because
+     * the truce is the one rule here that is about who is looking at whom and nothing about the
+     * weather - a roof over it would only be a ceiling in the way of the dragon.
+     *
+     * <p>The four cells are two cells each way, which is the hall's largest room: forty-four
+     * across, a little over four times the floor of a standard one, with a ceiling to match.
+     */
+    private static Section section(String title, int slots, boolean openSky, int cells,
+            Station station, String goal, String ability, String expect, String... steps) {
+        return new Section(title, board(goal, expect), brief(goal, ability, expect, steps), slots,
+                openSky, station, cells, 0);
+    }
+
+    /**
      * A step that takes more than one cell of the grid, or a ceiling that is not the standard
-     * height - the entry room's directory wall and the truce room's forty-one monsters both need
-     * to say so.
+     * height.
      */
     private static Section section(String title, int slots, int cells, int headroom,
             Station station, String goal, String ability, String expect, String... steps) {
