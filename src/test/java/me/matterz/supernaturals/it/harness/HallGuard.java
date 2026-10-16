@@ -1086,7 +1086,7 @@ final class HallGuard implements Listener {
         List<Material> banned = bannedWeapons(race);
         if (banned.contains(wanted)) {
             note(player, "§e" + Hall.title(race) + " 用不了 " + wanted.name()
-                    + "（在它的禁用名单里），所以让他空手出手");
+                    + "（在它的禁用名单里），所以只能空手出手");
             return null;
         }
         return wanted;
@@ -1780,7 +1780,20 @@ final class HallGuard implements Listener {
         }
         prey.put(name, ghost);
         preyOwner.put(name, player.getName());
-        SuperNManager.convert(SuperNManager.get(npc), race);
+        // Guarded, and the reason is what an unguarded call did: a rule of the plugin's own threw
+        // in the middle of this method, and the exception carried straight out through the section
+        // and the click handler - so the seating, the teleport and the label below never ran, and
+        // the stand-in was left standing at the world's own spawn, in another world, while every
+        // board in the room went on saying there was nobody here. A section that loses its stand-in
+        // to somebody else's bug has to say so rather than go quiet; he is placed and dressed
+        // either way, and the console carries the cause.
+        try {
+            SuperNManager.convert(SuperNManager.get(npc), race);
+        } catch (RuntimeException failed) {
+            Bukkit.getLogger().warning("the stand-in " + name + " was put out, but turning him into "
+                    + race + " threw: " + failed.getClass().getName()
+                    + (failed.getMessage() == null ? "" : ": " + failed.getMessage()));
+        }
         Location spot = seatFor(player, seat, taken);
         taken.add(spot);
         // Dressed before he is moved, not after. What is in his hand when a watcher starts
@@ -1842,10 +1855,18 @@ final class HallGuard implements Listener {
         }
         Player npc = here.get(0);
         String[] parts = spec == null || spec.isBlank() ? new String[0] : spec.trim().split(":", 2);
-        Material item = parts.length > 0 ? Material.matchMaterial(parts[0].trim()) : null;
+        Material asked = parts.length > 0 ? Material.matchMaterial(parts[0].trim()) : null;
         double damage = parts.length > 1 ? Double.parseDouble(parts[1].trim()) : 1.0;
-        if (item != null) {
-            player.getInventory().setItemInMainHand(new ItemStack(item));
+        // Asked of the player's own race before it is put in his hand. The kill room hands out a
+        // diamond sword and a hundred damage so that one blow finishes the target - and a ghoul, a
+        // witch hunter and an enderborn are all forbidden that sword, which the plugin answers by
+        // zeroing the blow. Two of the four halls that have that room could therefore never kill
+        // anything in it: the board promised "one blow and he is dead" and the target kept all
+        // twenty of his health, for ever. An empty hand is legal for every race and still carries
+        // this race's own attack bonus, so a race that may not hold what was asked swings nothing.
+        Material item = legalWeapon(SuperNManager.get(player).getType(), asked, player);
+        if (asked != null) {
+            player.getInventory().setItemInMainHand(item == null ? null : new ItemStack(item));
         }
         if (!npc.getWorld().equals(player.getWorld())
                 || npc.getLocation().distance(player.getLocation()) > 4) {
