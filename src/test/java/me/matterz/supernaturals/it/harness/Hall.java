@@ -2474,12 +2474,26 @@ public final class Hall {
                 sections.add(section("§8⑦ 动物 与 点火", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
-                            new ItemStack(Material.PORKCHOP, 8)));
+                            new ItemStack(Material.PORKCHOP, 8),
+                            // The two spells that act on a supernatural target, so that the vampire
+                            // this room lets out can be used for what a priest is for. The boards
+                            // here are about the sword and are read as a fight room, which they are
+                            // - but a player who then reaches for a spell finds there is nothing in
+                            // the chest to cast one with, and the spell room that does have the
+                            // props is two doors back. Nobody walks two doors back for the prop of
+                            // the room they are standing in.
+                            new ItemStack(Material.FEATHER, 8),
+                            new ItemStack(Material.SUGAR, 8)));
                     switchpoint(w, y, x + 5, z + 3, Trigger.with(Kind.SPAWN_MOB, null, "COW"),
                             "§a放出一头牛", "§7拿剑砍它，伤害是 0");
                     switchpoint(w, y, x + 8, z + 3,
                             Trigger.with(Kind.SPAWN_NPCS, "priest", "vampire"),
-                            "§c放出一个吸血鬼", "§7再拿剑砍他");
+                            "§c放出一个吸血鬼", "§7砍他，或拿羽毛施法");
+                    // And the power to do anything about him with. A priest who has just been made
+                    // one has none, and every spell below its cost refuses with a sentence rather
+                    // than a number - so with no way to top up here, the one thing a player would
+                    // try on this room's vampire could only ever answer "not enough power".
+                    powerButton(w, y, x + 11, z, "priest");
                 }, "验证牧师的战斗规则：不伤无辜动物，对异族加重并点燃",
                         "对非敌对的动物（狼除外）伤害一律为 0，只提示 \"You cannot hurt innocent animals.\"；"
                                 + "对超自然玩家则额外加一倍基础伤害，并把对方点燃 50 tick（恶魔不会被点燃）；"
@@ -2488,6 +2502,8 @@ public final class Hall {
                         "牛挨多少下都不掉血；吸血鬼被打中会烧起来，伤害还翻倍",
                         "点「放出一头牛」，拿箱子里的铁剑砍它几下，看是否掉血",
                         "点「放出一个吸血鬼」，再砍他一下",
+                        "也可以拿箱子里的羽毛（放逐）或糖（驱魔）打他——法术在这里一样生效，"
+                                + "只是要花能量，箱子边那块牌补能量",
                         "看他身上有没有着火、聊天栏有没有提示"));
             }
             case "witchhunter" -> {
