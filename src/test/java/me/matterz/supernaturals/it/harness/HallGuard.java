@@ -2521,8 +2521,16 @@ final class HallGuard implements Listener {
      * <p>His account name cannot be changed, so it is the scoreboard that does the talking: one
      * team per race, whose prefix is shown above his head and in the tab list. A section that hands
      * the player three races has to let them see which is which before they can use them.
+     *
+     * <p>What was written is written down as well, and here rather than beside each caller: a
+     * name over a head is the only way to read what a stand-in is, it is written once, and a spell
+     * that turns him leaves him wearing the name of what he used to be. Whoever writes a label is
+     * the one who knows what he is now, so this is the record that says whether it needs writing
+     * again - and keeping it here means the sparring partner is covered too, not just the targets a
+     * section puts out by name.
      */
     private void labelRace(Player npc, String race) {
+        preyRace.put(npc.getName(), race);
         String label = RACE_LABEL.getOrDefault(race, "§7" + race);
         Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
         Team team = board.getTeam("mmr_" + race);
@@ -2683,7 +2691,6 @@ final class HallGuard implements Listener {
                 continue;
             }
             labelRace(npc, now);
-            preyRace.put(name, now);
             String who = preyOwner.get(name);
             Player owner = who == null ? null : Bukkit.getPlayerExact(who);
             if (owner != null) {
@@ -3617,6 +3624,7 @@ final class HallGuard implements Listener {
         }
         if (SPAR.equals(name)) {
             unstamp(name);
+            preyRace.remove(name);
             plugin.dropGhost(name);
         }
     }
