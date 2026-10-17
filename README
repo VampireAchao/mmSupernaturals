@@ -1,98 +1,208 @@
-mmSupernaturals, based off of the plugin "Supernatural Players" by [[http://forums.bukkit.org/members/matterz.8906/|Matterz]], is now being continued!It includes Vampires, Ghouls, Werewolves, Demons, Priests, and WitchHunter.
+# mmSupernaturals
 
-Recommended Plugins:
-Permissions
-WorldGuard
+A Paper plugin that adds eight supernatural races to Minecraft — Vampire, Ghoul, Werewolf,
+Demon, Priest, WitchHunter, Angel and EnderBorn — each with its own abilities, its own way of
+turning people, and its own counters. A player is an ordinary person until something turns them.
 
-Todo:
-Add (Offical) support for many permissions plugin
-Add a new (Secret) supernatural type
-I will give some hints to the new type as I develop it ;)
+Java 25 · Paper 26.3 (`api-version: 26.3`) · GPL-3.0
 
-Features
-General:
-Classes are Vampire, Ghoul, Werewolf, Demon, Priest, and WitchHunter.
-All classes have abilities that depend on your power level.
-All classes gain power in a certain way.
-WitchHunter kill list generate on server start. (Admins can remove players with the command /sn rmTarget)
-Class Join/Leave Information:
-Each class has a unique event required for joining or leaving.
-Joining a Class:
-Humans construct special Altars to convert to Vampires, starting with a solid Gold Block.
-Humans sometimes convert to Werewolves when dying to wild wolves at night.
-Pig Zombies sometimes have the ability to make humans undead rather than just dead.
-Any human who shows proper devotion to the Church may become a Priest.
-Non-Priest humans who can prove their Supernatural Hunting Abilities by slaying 3 different types of supernaturals without dying will be invited to the WitchHunters' Association.
-Humans who enter the Nether covered in dead animal skins (leather armor) and sacrifice themselves to the Inferno will become Demonic.
-Leaving a Class:
-Vampires construct special Altars to regain their humanity, starting with a solid Lapis Block.
-Werewolves must make themselves a Wolfbane potion, starting with an empty Bowl.
-Priests merely have to insult the Church by offering Coal to the donations' Altar.
-The Holy energy of the Church's Altar will sometimes cleanse a Ghoul and restore their humanity.
-Demons who die in icy water while carrying snowballs will find the demonic fire in their blood cooled.
-WitchHunters who exhibit extremely poor bow skills (kill themselves) will be removed from the Association.
+---
 
+## About this repository — please read
 
-[[http://dev.bukkit.org/server-mods/supernaturalplayers/pages/classes/|Classes]] (Includes spell details)
+**This is a community fork. The original repository is gone.**
 
-Commands:
-<optional Parameter>
-[required Parameter]
+mmSupernaturals began life around 2011 as *Supernatural Players*, a Bukkit plugin written by
+Matt "Matterz" Walker and later edited by mmiillkkaa. Both the original source repository and
+its dev.bukkit.org page have since disappeared from the internet — for years the project was,
+to all practical purposes, lost.
 
-Player:
-/sn help - Shows a list of available commands
-/sn power - Shows current class and powerlevel
-/sn list - Shows a list of online players in each class
-/sn classes - Shows a list of classes with a short description of each
+I used to play on servers running this plugin and I loved it. When I went looking for it again
+years later, all that was left were stale forks. So I forked the project and took over its
+maintenance myself, to keep the plugin working on modern Minecraft.
 
-Admins:
-/sn admin - Shows a list of available Admin commands
-/sn cure <playername> - Restores player to humanity (either reverting them to Priest or making them human)
-/sn convert <playername> [class] - Converts a player to the specified class
-/sn power <playername> [amount] - Gives player specified amount of power
-/sn reset <playername> - Resets a player's power to zero
-/sn rmTarget <playername> - Removes player from the WitchHunter kill list
-/sn reload <type> - Reloads the config.yml or data.yml file
-/sn save - Saves both the config.yml and data.yml files (default: config.yml)
-/sn restartTask - Restarts the task timer used for many passive abilities (in case of it crashing due to overload)
-/sn setChurch - Sets the player's current location as the Church
-/sn setBanish - Sets the player's current location as the Banish location
+What that means for you:
 
-Permissions:
+- This is **not** the original author's official repository — there isn't one anymore. Nothing
+  here is endorsed by the original authors.
+- It is maintained by a fan ([VampireAchao](https://github.com/VampireAchao)) in his spare
+  time. Issues and pull requests are very welcome.
+- The lineage is: Matterz's original (deleted) → [FaeyUmbrea's archived
+  fork](https://github.com/FaeyUmbrea/mmSupernaturals) → this fork.
 
-supernatural.command.help - access to /sn help
-supernatural.command.list - access to /sn list
-supernatural.command.power - access to /sn power
-supernatural.command.classes - access to /sn classes
-supernatural.command.killlist - access to /sn killlist
+### What has happened since the fork
 
-supernatural.player.shrineuse - access to vampire and priest shrines
-supernatural.player.wolfbane - access to wolfbane potion creation
-supernatural.player.preventwaterdamage - prevents ghouls from taking water damage
-supernatural.player.preventsundamage - prevents vampires from taking damage in sunlight
-supernatural.player.witchhuntersign - allows player to create WitchHunter signs used for WitchHunter Halls
+- The 2012 Eclipse project was migrated to a Maven build — `mvn package` produces the plugin jar.
+- The build was retargeted at modern Paper: Paper API 26.3, Java 25, `api-version: 26.3`.
+- A test harness was added: unit tests, plus scenario tests that boot a real Paper server and
+  drive fake players through a hall of test rooms (`mvn verify -Pit`).
+- A series of gameplay bugs were fixed along the way. Among them: the plugin's clock advanced
+  once per player instead of once per tick, so every timed rule ran faster the more people were
+  online (fixed in 1.4.1); an angel's summoning never spent the food it was cast with; and a
+  player's power could arrive unbounded — or not even a number — from a hand-edited save file.
+- The first published build,
+  [1.4.1](https://github.com/VampireAchao/mmSupernaturals/releases/tag/v1.4.1), is on the
+  Releases page.
 
-supernatural.admin.infinitepower - gives player unlimited power
-supernatural.admin.partial.curse - allows player to change their own class only
+## Installing
 
-supernatural.world.disabled - disables supernatural players in world if: (multiworld: true) in the config.yml
+1. Download `mmSupernaturals-1.4.1.jar` from the
+   [Releases](https://github.com/VampireAchao/mmSupernaturals/releases) page.
+2. Drop it into your server's `plugins/` directory.
+3. You need **Paper 26.3** and **Java 25**. WorldGuard is an optional soft dependency; a
+   permissions plugin is recommended.
+4. The plugin writes its own `config.yml` on first start. No command is needed to begin
+   playing — a player is an ordinary person until something turns them.
 
-supernatural.admin.command.adminhelp - access to /sn admin
-supernatural.admin.command.cure - access to /sn cure
-supernatural.admin.command.curse - access to /sn convert
-supernatural.admin.command.power - access to /sn power <playername> [amount]
-supernatural.admin.command.reset - access to /sn reset
-supernatural.admin.command.reload - access to /sn reload
-supernatural.admin.command.save - access to /sn save
-supernatural.admin.command.setchurch - access to /sn setChurch
-supernatural.admin.command.setbanish - access to /sn setBanish
+## The races
 
-Setting up:
+- **Human** — the default state. Everyone starts as one, and every race below is a way out of it.
+- **Vampire** — turned by an altar built of gold; burns in daylight unless protected; builds a
+  lapis altar to become human again.
+- **Ghoul** — the undead, made by pig zombies; takes damage from water unless protected; the
+  Church's altar can cleanse one back to humanity.
+- **Werewolf** — humans who die to wild wolves at night may turn; brews a Wolfbane potion to
+  turn back.
+- **Demon** — walked into the Nether in leather armor and surrendered to the Inferno; dies in
+  icy water while carrying snowballs to cool the demonic fire.
+- **Priest** — earned by devotion to the Church; leaves by insulting it with coal on the
+  donations altar.
+- **WitchHunter** — invited after slaying three different kinds of supernatural without dying;
+  carries a kill list that is regenerated on server start; removed from the Association by
+  killing themselves (poor bow skills).
+- **Angel** — summons animals with food offerings: a cow with beef, a wolf with a bone, a pig
+  with a porkchop.
+- **EnderBorn** — turns the players it kills, at a configurable chance
+  (`EnderBorn.Convert.Chance`).
 
-Download the plugin,
-Place it in your plugins directory,
-Start your server,
-Go to the Church and type the command: /sn setChurch,
-Go to the Banish location and type the command: /sn setBanish,
-Make a WitchHunter's Hall by placing an Iron Door with a sign next to it saying "WitchHunter" (Default)
-Done!
+All classes have abilities that depend on their power level, and gain power in their own way.
+
+## Joining and leaving a class
+
+Joining:
+
+- Humans construct special altars to convert to **Vampires**, starting with a solid gold block.
+- Humans sometimes convert to **Werewolves** when dying to wild wolves at night.
+- Pig zombies sometimes have the ability to make humans undead — **Ghouls** — rather than just
+  dead.
+- Any human who shows proper devotion to the Church may become a **Priest**.
+- Non-priest humans who can prove their supernatural hunting abilities by slaying 3 different
+  types of supernaturals without dying will be invited to the **WitchHunters'** Association.
+- Humans who enter the Nether covered in dead animal skins (leather armor) and sacrifice
+  themselves to the Inferno will become **Demons**.
+
+Leaving:
+
+- **Vampires** construct special altars to regain their humanity, starting with a solid lapis
+  block.
+- **Werewolves** must make themselves a Wolfbane potion, starting with an empty bowl.
+- **Priests** merely have to insult the Church by offering coal to the donations altar.
+- The holy energy of the Church's altar will sometimes cleanse a **Ghoul** and restore their
+  humanity.
+- **Demons** who die in icy water while carrying snowballs will find the demonic fire in their
+  blood cooled.
+- **WitchHunters** who exhibit extremely poor bow skills (kill themselves) will be removed from
+  the Association.
+
+Angel and EnderBorn have their own paths in as well — run `/sn classes` in game for the short
+version of each.
+
+## Commands
+
+`<required parameter>` · `[optional parameter]`
+
+Player commands:
+
+- `/sn help` — shows a list of available commands
+- `/sn power` — shows your current class and power level
+- `/sn list` — shows a list of online players in each class
+- `/sn classes` — shows a list of classes with a short description of each
+- `/sn killlist` — shows the WitchHunter kill list
+- `/sn join` — opts you in to the plugin (only used when `enableJoinCommand` is on; otherwise
+  everyone is in automatically)
+
+Admin commands:
+
+- `/sn admin` — shows a list of available admin commands
+- `/sn cure <playername>` — restores a player to humanity (reverting them to priest or making
+  them human)
+- `/sn convert <playername> [class]` — converts a player to the specified class
+- `/sn power <playername> [amount]` — gives a player the specified amount of power
+- `/sn reset <playername>` — resets a player's power to zero
+- `/sn rmTarget <playername>` — removes a player from the WitchHunter kill list
+- `/sn reload <type>` — reloads the `config.yml` or `data.yml` file
+- `/sn save` — saves both `config.yml` and `data.yml`
+- `/sn restartTask` — restarts the task timer used for many passive abilities (in case it
+  crashes due to overload)
+- `/sn setChurch` — sets your current location as the Church
+- `/sn church <add|remove|list|clear>` — manages the churches an altar can belong to (there can
+  be more than one)
+- `/sn setBanish` — sets your current location as the banish location
+
+## Permissions
+
+`plugin.yml` is the authoritative list. The classic set:
+
+- `supernatural.command.help` / `.list` / `.power` / `.classes` / `.killlist` — access to the
+  matching player commands (default: true)
+- `supernatural.player.shrineuse.vampire` / `.priest` — access to vampire and priest shrines
+  (default: true)
+- `supernatural.player.wolfbane` — wolfbane potion creation (default: true)
+- `supernatural.player.preventwaterdamage` — prevents ghouls from taking water damage
+  (default: false)
+- `supernatural.player.preventsundamage` — prevents vampires from taking damage in sunlight
+  (default: false)
+- `supernatural.player.witchhuntersign` — allows a player to create WitchHunter signs used for
+  WitchHunter halls (default: true)
+- `supernatural.admin.infinitepower` — unlimited power (default: op)
+- `supernatural.admin.partial.curse` — change your own class only (default: op)
+- `supernatural.world.enabled` — per-world toggle for whether supernatural rules apply
+  (default: true; used with multiworld)
+- `supernatural.admin.command.*` — one node per admin command (default: op)
+
+Wildcards: `supernatural.*` gives everything; `supernatural.command.*`,
+`supernatural.player.*` and `supernatural.admin.*` give their groups.
+
+## Setting up
+
+1. Download the plugin (or build it — see below) and place it in your `plugins/` directory.
+2. Start your server.
+3. Go to the Church and type `/sn setChurch` — or register several churches with
+   `/sn church add`.
+4. Go to the banish location and type `/sn setBanish`.
+5. Make a WitchHunter's hall by placing an iron door with a sign next to it saying
+   "WitchHunter" (default).
+6. Done.
+
+Recommended plugins: a permissions plugin, and WorldGuard (soft dependency).
+
+## Building from source
+
+You need JDK 25 and Maven.
+
+```bash
+mvn package
+```
+
+This builds `mmSupernaturals.jar`. By default the jar is written to `./server/plugins` beside
+the project — handy for testing against a local server; the `it` profile writes it to `target/`
+instead.
+
+Tests:
+
+```bash
+mvn test          # unit tests
+mvn verify -Pit   # unit + scenario tests: boots a real Paper server and drives fake players
+                  # through the test hall (slow — that is why they sit behind a profile)
+```
+
+## Credits
+
+- **Matt "Matterz" Walker** — original author of *Supernatural Players* (Bukkit), © 2011
+- **mmiillkkaa** — editor of the plugin, credited in `plugin.yml`
+- **FaeyUmbrea** — kept an archived fork of the project alive after the original disappeared
+- **VampireAchao** — maintainer of this fork
+
+## License
+
+GNU General Public License v3.0 — see [gpl-3.0.txt](gpl-3.0.txt).
