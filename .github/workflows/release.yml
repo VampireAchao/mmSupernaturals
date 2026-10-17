@@ -1,0 +1,52 @@
+name: Release
+
+# A release is a tag. The version in pom.xml and the tag have to agree, and the guard below is what
+# keeps them from drifting: a tag is cheap to type and it is the one thing about a release that
+# cannot be taken back.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag against the pom
+        run: |
+          pom="$(grep -m1 -o '<version>[^<]*</version>' pom.xml | sed 's/<[^>]*>//g')"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "pom.xml says $pom, the tag says $tag"
+          if [ "$pom" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $pom in pom.xml"
+            exit 1
+          fi
+          echo "VERSION=$pom" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # Unit tests, then the jar. The scenario tests boot a real Paper server, which is why they sit
+      # behind the `it` profile and stay a local step: a release should be gated on the tests that
+      # can run anywhere, and `mvn verify -Pit` is run by hand before the tag is pushed.
+      - name: Build
+        run: mvn -B -ntp verify
+
+      - name: Name the jar after the version
+        run: mv server/plugins/mmSupernaturals.jar "mmSupernaturals-${VERSION}.jar"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "mmSupernaturals-${VERSION}.jar" \
+            --title "$VERSION" --generate-notes
