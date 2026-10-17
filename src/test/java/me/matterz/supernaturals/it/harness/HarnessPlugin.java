@@ -19,6 +19,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
@@ -30,6 +31,7 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityShootBowEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
@@ -124,11 +126,17 @@ public final class HarnessPlugin extends JavaPlugin {
         // section let out goes home. Anything that changes a block inside the hall also repairs
         // on the spot; this is the backstop.
         getServer().getScheduler().runTaskTimer(this, guard::tick, 40L, 40L);
+        // And the fast sweep, at the rate a room empties: the guides come and go with their rooms,
+        // and whatever a room let out is taken back the moment nobody is standing in it. Two
+        // seconds is fine for putting furniture back and too slow for "I have walked out of that
+        // room and its monsters are still in it".
+        getServer().getScheduler().runTaskTimer(this, guard::sweep, 20L, 10L);
         // The priest's altar only answers within ten blocks of the church in the plugin's
         // configuration, and writing that file ourselves would stop the plugin generating its
         // own defaults - so the location is pointed at the hall instead, a moment after both
         // plugins have finished loading.
         getServer().getScheduler().runTaskLater(this, this::pointTheChurchAtTheHall, 40L);
+        getServer().getScheduler().runTaskLater(this, this::pointTheBanishPointAtTheHall, 40L);
         // The guardian-angel spell is matched against a material <em>name</em> from the plugin's
         // own configuration, and the default - "WOOL" - is not a material any more, so the spell
         // can never fire as shipped. The hall points it at one that exists, the same way the
@@ -166,6 +174,30 @@ public final class HarnessPlugin extends JavaPlugin {
     /** The hall, or null on a server that was not asked for one. */
     Hall hallOrNull() {
         return hall;
+    }
+
+    /**
+     * Points the priests' banish point at the hall.
+     *
+     * <p>The point is one place in the plugin's configuration - an admin stands where it should be
+     * and runs {@code /sn setbanish} - and as shipped it is the middle of the overworld at y=80,
+     * which over this hall is open sky. A banish there is a teleport into midair followed by a
+     * fall: it proves the teleport happened and then kills the person for it, and the coordinate
+     * the spell now announces is one nobody can walk to and look at. Pointed at the lobby spawn
+     * instead, so that "you were banished to world (0, -18, 4)" names somewhere real.
+     */
+    private void pointTheBanishPointAtTheHall() {
+        if (hall == null) {
+            return;
+        }
+        Location at = hall.lobbySpawn();
+        SNConfigHandler.priestBanishWorld = at.getWorld().getName();
+        SNConfigHandler.priestBanishLocationX = at.getBlockX();
+        SNConfigHandler.priestBanishLocationY = at.getBlockY();
+        SNConfigHandler.priestBanishLocationZ = at.getBlockZ();
+        SNConfigHandler.priestBanishLocation = at.clone();
+        getLogger().info("priest banish point is at " + at.getWorld().getName() + " "
+                + at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ());
     }
 
     /**
@@ -226,7 +258,11 @@ public final class HarnessPlugin extends JavaPlugin {
         if (actor == null || worn == null) {
             return "err " + args[0] + " could not be brought up";
         }
-        return Nms.skin(worn);
+        // Prefixed like every other reply: the control client turns anything that does not start
+        // with "ok " into a refusal, so a probe that answers with the bare report reads as the
+        // server having refused to bring the stand-in up at all - which is what the skin scenario
+        // was told, while holding the skin it had just asked for, in the message.
+        return "ok " + Nms.skin(worn);
     }
 
     /** Takes a stand-in back out, which {@code quit} cannot do - it only knows harness actors. */
@@ -320,6 +356,13 @@ public final class HarnessPlugin extends JavaPlugin {
                 return give(rest);
             case "perm":
                 return perm(rest);
+            case "spread":
+                // What a room that holds the turning open has written, and what it has to put
+                // back. Two numbers, because there are two rules: three races roll the chance
+                // they share and the enderborn rolls its own. A room that restored only the
+                // first would leave every enderborn kill turning its victim, for ever, silently.
+                return "ok spread=" + SNConfigHandler.spreadChance
+                        + " enderborn=" + SNConfigHandler.enderSpreadChance;
             case "tp":
                 return teleport(rest);
             case "interact":
@@ -334,10 +377,24 @@ public final class HarnessPlugin extends JavaPlugin {
                 return "ok " + Nms.skin(player(rest.trim()));
             case "grace":
                 return "ok " + guard.graceReport(player(rest.trim()));
+            case "anchor":
+                return "ok " + guard.anchorReport(player(rest.trim()));
             case "guides":
                 return guard.guideReport(rest.trim());
+            case "leftovers":
+                return guard.leftoverReport();
+            case "summonspots":
+                return guard.summonReport(rest);
+            case "spell":
+                return guard.spellReport(rest);
+            case "said":
+                return said(rest);
+            case "strays":
+                return guard.strayReport(rest);
             case "talk":
                 return guard.talkReport(rest.trim());
+            case "npchit":
+                return guard.npcHitReport(rest.trim());
             case "drop":
                 return drop(rest);
             case "hall":
@@ -354,6 +411,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return signLine(rest);
             case "signage":
                 return signage();
+            case "boats":
+                return boats(rest);
             case "light":
                 return light();
             case "heights":
@@ -382,6 +441,14 @@ public final class HarnessPlugin extends JavaPlugin {
                 return step(rest);
             case "leftclick":
                 return leftClick(rest);
+            case "shoot":
+                return shoot(rest);
+            case "arrows":
+                return arrows();
+            case "motion":
+                return motion(rest);
+            case "grapple":
+                return grapple(rest);
             case "strike":
                 return strike(rest);
             case "whack":
@@ -401,6 +468,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return buttons(rest);
             case "section":
                 return section(rest);
+            case "fixtures":
+                return fixtures(rest);
             case "point":
                 return point(rest);
             case "mobs":
@@ -852,6 +921,83 @@ public final class HarnessPlugin extends JavaPlugin {
             out.append("\n  owes a scene board: ").append(String.join(", ", hall.scenesMissing()));
         }
         return out.toString();
+    }
+
+    /**
+     * Hits every boat the hall put down, and a second boat that is not the hall's, the same number
+     * of times - so that "a hall boat does not break" is a measurement rather than a claim.
+     *
+     * <p>The second boat is the point of the check, not the count. Both boats are the same type,
+     * in the same world, damaged the same way; the only thing that differs is the tag, so a run
+     * that leaves one standing and takes the other apart has found the tag and nothing else. If
+     * both survived, the blows are not reaching boats at all and the check has proved nothing -
+     * which is why the blows the guard refused are counted as well.
+     */
+    private String boats(String rest) {
+        int blows = rest == null || rest.isBlank() ? 60 : Integer.parseInt(rest.trim());
+        List<String> report = new ArrayList<>();
+        for (Location home : hall.boatSpots()) {
+            World world = home.getWorld();
+            // Loaded first, on purpose. A chunk that is not loaded still holds its boat, and a
+            // search inside one answers "nothing here" - which would read as "the boat was
+            // destroyed" when the truth is "nobody had been to that room yet".
+            world.getChunkAt(home);
+            Entity moored = null;
+            double where = -1;
+            List<String> seen = new ArrayList<>();
+            for (Entity entity : world.getNearbyEntities(home, 24, 24, 24)) {
+                if (entity.getType() != EntityType.OAK_BOAT) {
+                    continue;
+                }
+                double away = entity.getLocation().distance(home);
+                seen.add(Math.round(entity.getLocation().getX()) + ","
+                        + Math.round(entity.getLocation().getY()) + ","
+                        + Math.round(entity.getLocation().getZ())
+                        + " tags=" + entity.getScoreboardTags()
+                        + " d=" + Math.round(away) + (entity.isValid() ? "" : " INVALID"));
+                if (entity.getScoreboardTags().contains(Hall.MOORED)
+                        && (moored == null || away < where)) {
+                    moored = entity;
+                    where = away;
+                }
+            }
+            // Put down well clear of the pool, so a boat that does come apart does not leave its
+            // drop in the water where the next tester swims through it.
+            Location aside = home.clone().add(0, 0, 6);
+            Entity control = world.spawnEntity(aside, EntityType.OAK_BOAT);
+            control.setPersistent(true);
+            int refusedBefore = guard.boatBlowsRefused();
+            for (int blow = 0; blow < blows; blow++) {
+                if (moored != null && moored.isValid()) {
+                    Nms.hit(moored, 1.0);
+                }
+                if (control.isValid()) {
+                    Nms.hit(control, 1.0);
+                }
+            }
+            boolean controlSurvived = control.isValid();
+            if (controlSurvived) {
+                control.remove();
+            } else {
+                for (Entity stray : world.getNearbyEntities(aside, 3, 3, 3)) {
+                    if (stray instanceof Item item
+                            && item.getItemStack().getType() == Material.OAK_BOAT) {
+                        stray.remove();
+                    }
+                }
+            }
+            report.add(world.getName() + " " + home.getBlockX() + "," + home.getBlockY() + ","
+                    + home.getBlockZ()
+                    + " blows=" + blows
+                    + " moored=" + (moored != null && moored.isValid()
+                            ? "there@" + Math.round(where) : "gone")
+                    + (moored != null && moored.isValid() ? ""
+                            : " boatsSeen=[" + String.join(" ; ", seen) + "]")
+                    + " refused=" + (guard.boatBlowsRefused() - refusedBefore)
+                    + " control=" + (controlSurvived ? "there" : "broke"));
+        }
+        return report.isEmpty() ? "err no boat is on the books"
+                : "ok " + String.join(" | ", report);
     }
 
     private Block blockAt(String rest) {
@@ -1340,6 +1486,116 @@ public final class HarnessPlugin extends JavaPlugin {
     }
 
     /**
+     * Looses a hunter's arrow, the way drawing a bow and letting go would.
+     *
+     * <p>{@code HunterManager.shootArrow} is handed the bow event and reads none of it - the thing
+     * it acts on is the shooter - so an arrow can be loosed here with no bow, no draw and no
+     * client, and still be on the real path. The arrow is the server's own, so everything
+     * downstream of it is what happens to somebody who really shot: the hit, the grapple, and the
+     * pull. What it hits is decided by where the player is looking, which is the same thing that
+     * decides it for anybody else.
+     */
+    private String shoot(String rest) {
+        Player player = player(rest.trim().split("\\s+")[0]);
+        boolean cancelled = SupernaturalsPlugin.instance.getHunterManager()
+                .shootArrow(player, (EntityShootBowEvent) null);
+        return "ok " + player.getName() + " cancelled=" + cancelled
+                + " held=" + player.getInventory().getItemInMainHand().getType()
+                + " power=" + (int) SuperNManager.get(player).getPower()
+                + " tracked=" + SupernaturalsPlugin.instance.getHunterManager().getArrowMap().size()
+                + " grappling="
+                + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                + " at=" + player.getLocation().getBlockX() + ","
+                + player.getLocation().getBlockY() + "," + player.getLocation().getBlockZ();
+    }
+
+    /**
+     * Every arrow the hunter manager is still tracking, for the probe.
+     *
+     * <p>The map is keyed by the arrow object itself, so an arrow that was fired and whose hit
+     * never reached the manager looks exactly like an arrow that was never fired at all: nothing at
+     * all happens, and no message says so. This is what tells those two apart - what the manager is
+     * holding, where each of them is, and whether it is still a live arrow.
+     */
+    private String arrows() {
+        var tracked = SupernaturalsPlugin.instance.getHunterManager().getArrowMap();
+        if (tracked.isEmpty()) {
+            return "ok 0 tracked";
+        }
+        List<String> found = new ArrayList<>();
+        for (var entry : tracked.entrySet()) {
+            var arrow = entry.getKey();
+            var at = arrow.getLocation();
+            found.add(entry.getValue() + "@" + at.getBlockX() + "," + at.getBlockY() + ","
+                    + at.getBlockZ() + " world="
+                    + (at.getWorld() == null ? "?" : at.getWorld().getName())
+                    + " valid=" + arrow.isValid() + " inBlock=" + arrow.isInBlock());
+        }
+        return "ok " + tracked.size() + " " + String.join(" | ", found);
+    }
+
+    /**
+     * What a player is moving at, for the probe, and whether the hall thinks he is being pulled.
+     *
+     * <p>A velocity is the whole of what a grapple does - it is set every tick and the server moves
+     * the player by it - and it is also the one part of the answer a player with no client cannot
+     * show: a {@code ServerPlayer} with nobody behind it is not driven through the ordinary living
+     * tick, so the speed is set and nothing moves and the two are indistinguishable from the
+     * outside. Reading the speed tells them apart, and tells "the pull never started" apart from
+     * "the pull started and the server ignored it".
+     */
+    private String motion(String rest) {
+        Player player = player(rest.trim().split("\\s+")[0]);
+        var speed = player.getVelocity();
+        return "ok " + player.getName()
+                + " velocity=" + round(speed.getX()) + "," + round(speed.getY()) + ","
+                + round(speed.getZ())
+                + " onGround=" + player.isOnGround()
+                + " grappling=" + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                + " at=" + player.getLocation().getBlockX() + ","
+                + player.getLocation().getBlockY() + "," + player.getLocation().getBlockZ();
+    }
+
+    /** A number to two places, for a probe reply that has to stay readable. */
+    private static String round(double value) {
+        return String.valueOf(Math.round(value * 100.0) / 100.0);
+    }
+
+    /**
+     * Starts a pull toward a point straight above a player, for the probe.
+     *
+     * <p>The ability is a velocity set once a tick, so the only thing checkable from outside is
+     * whether the pull runs - and "it never ran" is a different fault from "it ran and stopped
+     * immediately", which is what a hit that landed too close to the shooter produces. Asking for
+     * a pull toward a point whose distance is known tells those two apart without an arrow, a bow
+     * or a wall.
+     */
+    private String grapple(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = player(args[0]);
+        double up = args.length > 1 ? Double.parseDouble(args[1]) : 5.0;
+        Location target = player.getLocation().clone().add(0, up, 0);
+        SupernaturalsPlugin.instance.getHunterManager().startGrappling(player, target);
+        // Read back from inside the same tick loop, a few ticks apart. A pull longer than the time
+        // it takes to get a reply out of the control channel cannot be sampled from outside it: the
+        // answer would always arrive after it had already stopped, which is a fact about the
+        // channel and not about the pull.
+        for (long delay : new long[] {1L, 3L, 6L}) {
+            final long after = delay;
+            Bukkit.getScheduler().runTaskLater(SupernaturalsPlugin.instance, () -> getLogger().info(
+                    "[pull] +" + after + "t velocity=" + round(player.getVelocity().getX()) + ","
+                            + round(player.getVelocity().getY()) + ","
+                            + round(player.getVelocity().getZ())
+                            + " grappling="
+                            + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                            + " y=" + round(player.getLocation().getY())), delay);
+        }
+        return "ok " + player.getName() + " pulling toward " + target.getBlockX() + ","
+                + target.getBlockY() + "," + target.getBlockZ()
+                + " away=" + round(player.getLocation().distance(target));
+    }
+
+    /**
      * Kills one player as another, the way a real fight would end.
      *
      * <p>A fake player cannot swing, and the prey a witch hunter section puts out are players
@@ -1382,6 +1638,25 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok cancelled=" + event.isCancelled() + " victim=" + victim.getName()
                 + " race=" + SuperNManager.get(victim).getType()
                 + " held=" + attacker.getInventory().getItemInMainHand().getType();
+    }
+
+    /**
+     * What the server has said to a fake client lately, for asserting on a message.
+     *
+     * <p>A player with no client receives nothing anybody can see, and most of what a plugin has to
+     * tell a player is exactly that: a sentence in chat. The harness keeps those packets on their
+     * way out (see {@link Nms#said}), so this reads the last few back. It is the only way to check a
+     * message at all - the banish spell now announces the coordinate it sent somebody to, and no
+     * other part of the server knows that sentence was ever written.
+     */
+    private String said(String rest) {
+        String name = rest.trim();
+        List<String> lines = Nms.said(name);
+        if (lines.isEmpty()) {
+            return "ok (nothing has been said to " + name + ")";
+        }
+        List<String> recent = lines.subList(Math.max(0, lines.size() - 8), lines.size());
+        return "ok " + lines.size() + ": " + String.join(" || ", recent);
     }
 
     /** What is holding a stand-in invulnerable, for working out which field has to be cleared. */
@@ -1550,6 +1825,28 @@ public final class HarnessPlugin extends JavaPlugin {
         }
         return "ok " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ()
                 + " " + at.getWorld().getName();
+    }
+
+    /**
+     * Everything the hall put in one room that a player can touch, with the text on it.
+     *
+     * <p>The companion of {@code sign}, which reads one board whose coordinates are already known;
+     * this one answers "what does room five actually say" without walking to room five - including
+     * the boards the entry room uses to open the two ways into a race, which is where a hall can
+     * promise a shrine that was never built.
+     */
+    private String fixtures(String rest) {
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: fixtures <race> <index>";
+        }
+        List<String> found = hall.fixturesIn(args[0], intOf(args[1]));
+        return found.isEmpty()
+                ? "err nothing placed in " + args[0] + " " + args[1]
+                : "ok " + found.size() + ":\n  " + String.join("\n  ", found);
     }
 
     private String section(String rest) {        if (hall == null) {

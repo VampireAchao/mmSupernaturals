@@ -273,13 +273,18 @@ public class GhoulManager extends ClassManager {
 		if (bonds.containsValue(player)) {
 			for (SuperNPlayer ghoul : bonds.keySet()) {
 				if (bonds.get(ghoul).equals(player)) {
+					// This side is the one that was bonded *to*, so the ghoul is who has to be
+					// told and whose name goes in the sentence. Asking the map for this player
+					// answers null - he is the value here, not a key - and asking that null for a
+					// name is a NullPointerException thrown out of whichever rule called this:
+					// a convert, a cure or a revert. The bonded party of a bond that ends is the
+					// ghoul, on both counts.
 					SuperNManager.sendMessage(player, "Removed Unholy Bond from "
-							+ ChatColor.WHITE + bonds.get(ghoul).getName());
-					SuperNManager.sendMessage(bonds.get(player), "Unholy Bond removed!");
+							+ ChatColor.WHITE + ghoul.getName());
+					SuperNManager.sendMessage(ghoul, "Unholy Bond removed!");
 					if (SNConfigHandler.debugMode) {
 						SupernaturalsPlugin.log("Unholy Bond removed from "
-								+ player.getName() + " with "
-								+ bonds.get(player).getName());
+								+ ghoul.getName() + " with " + player.getName());
 					}
 					bonds.remove(ghoul);
 					return;

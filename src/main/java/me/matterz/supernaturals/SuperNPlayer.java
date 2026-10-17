@@ -216,7 +216,19 @@ public class SuperNPlayer implements Serializable {
 	// -------------------------------------------- //
 	// Limiting value of double //
 	// -------------------------------------------- //
+	/**
+	 * A number held between two bounds, which is where a player's power lives.
+	 *
+	 * <p>{@code Double.NaN} is checked for by hand because every comparison with it is false: the
+	 * two bounds below would pass it straight through, and power set to a non-number is power that
+	 * is never less than a price - every cost in the plugin waived at once, and no way back, since
+	 * a non-number plus a cost is still a non-number. It cannot be reached from play; a corrupted
+	 * or hand-edited save file is the way in, which is exactly the file this has to survive.
+	 */
 	public double limitDouble(double d, double min, double max) {
+		if (Double.isNaN(d)) {
+			return min;
+		}
 		if (d < min) {
 			return min;
 		}

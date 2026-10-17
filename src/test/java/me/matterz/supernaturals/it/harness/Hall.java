@@ -80,6 +80,15 @@ public final class Hall {
         /** Hands the player power, so a section can be reached without grinding for it. */
         POWER,
 
+        /**
+         * Turns the operator's infinite power off and on again.
+         *
+         * <p>Every operator holds the permission that refuses every power loss, so a section about
+         * losing power cannot be run by the person most likely to be running it. This is the switch
+         * that puts the cost back.
+         */
+        INFINITE_POWER,
+
         /** Moves one hall's own world to midday. */
         DAY,
 
@@ -702,6 +711,24 @@ public final class Hall {
     private final Map<String, Location> points = new LinkedHashMap<>();
 
     /**
+     * The tag every boat the hall put down wears.
+     *
+     * <p>On the boat rather than in a note kept here, because the two things asked of it - "may
+     * not be broken" and "put it back" - are asked while it is out in the world, and because a
+     * tag travels with the boat through a chunk save, a server restart and the hall being rebuilt
+     * around it. It is also the only thing that tells a boat the hall put down apart from one a
+     * player rowed in to keep.
+     */
+    static final String MOORED = "mm_hall_boat";
+
+    /** A boat the hall put down, and the mark it was put down on. */
+    private record Moored(String world, double x, double y, double z, EntityType type) {
+    }
+
+    /** The boats the hall put down. One, at the moment - the ghoul's pool. */
+    private final List<Moored> moored = new ArrayList<>();
+
+    /**
      * Each room's guide: where he stands, and what he says, keyed {@code race.index}.
      *
      * <p>A room's long teaching lives here rather than on its wall - see {@link Section} - and the
@@ -856,7 +883,7 @@ public final class Hall {
         int baseHead = cell[2];
 
         List<Section> sections = new ArrayList<>();
-        sections.add(entrySection(race));
+        sections.add(entrySection(race, sections));
         sections.addAll(sectionsFor(race, baseHead));
         List<Placement> plan = layOut(sections);
 
@@ -1299,7 +1326,7 @@ public final class Hall {
                 "§c跳进岩浆", "§7点了就下池子");
         sectionHead(nether, y, x0 + SLOT, z0, "§f② 陪练 伤害测试",
                 brief("在下界也能正常打伤害、拿能量",
-                        "恶魔在下界不掉能量（每 5 秒的 −4 只在离开下界、又没站在火里时才扣），"
+                        "恶魔在下界不掉能量（每 5 秒的 -20 只在离开下界、又没站在火里时才扣），"
                                 + "还免疫火焰、燃烧、爆炸和摔落伤害。这里的陪练是用来确认"
                                 + "你在下界的伤害数值和主世界一致",
                         "陪练站在你面前，真实掉血；打不动就再右键一次那块牌把他刷新",
@@ -1414,13 +1441,36 @@ public final class Hall {
      * he loses health when he is hit, and the button puts him back to full.
      */
     /**
+     * A room of a hall as the entry room's board would name it: that room's own title, without the
+     * number the title carries for its own wall.
+     *
+     * <p>The entry room's two boards say what the two ways into a race are, and they used to say
+     * "go to the conversion shrine" in all eight halls - and only one of the eight has a shrine.
+     * A ghoul's way in is a corridor in the nether, a demon's is a pool of lava, a witch hunter's
+     * is an enrolment, a werewolf's is a bite at night, an enderborn's is a pearl and some clay.
+     * Naming the room the board opens cannot go stale when a room is rewritten, which is exactly
+     * what the old wording had already done.
+     */
+    private static String opened(List<Section> sections, int index) {
+        if (index < 0 || index >= sections.size()) {
+            return "§f第 " + index + " 间";
+        }
+        return sections.get(index).title().replaceFirst("(§.)\\s*[①②③④⑤⑥⑦⑧⑨]\\s*", "$1");
+    }
+
+    /**
      * The room every hall opens with: what this hall is, and the way out of it.
      *
      * <p>This used to be furniture bolted onto the corridor after the fact, at the near end, which
      * is why it once wrote over the first step's signs. It is a room like every other room now,
      * which is what makes it impossible for it to land on top of anything.
+     *
+     * <p>It is handed the list of the hall's steps because its two ways in name them: the boards
+     * carry the titles of the rooms they open, and those rooms do not exist yet when this is
+     * built. The list is read when the board is written rather than when this is called, by which
+     * time it is complete.
      */
-    private Section entrySection(String race) {
+    private Section entrySection(String race, List<Section> sections) {
         // A standard room, and that is the change: it used to be the largest in the hall - four
         // cells, forty-four across, eighteen high - because its far wall was a directory of every
         // other room. Size was a consequence of the wall, and the wall is gone.
@@ -1429,18 +1479,22 @@ public final class Hall {
                     new ItemStack(Material.BREAD, 8)));
             // Two ways into the race, and the three ways out every room has. No directory: the
             // rest of the hall is walked, room by room, each board naming the one after it.
-            // Two ways in, and the numbers are not what they look like. Room one is the shrine and
+            // Two ways in, and the numbers are not what they look like. Room one is the way in and
             // room two is the kill - not the other way round, which is how this was first written
             // and how it was wrong for every one of the eight halls. The kill room is spliced into
             // the step list at position one, and the entry room is put in front of that list
             // afterwards, so what is one over there is two in here. The check in raceHall says so
             // out loud rather than leaving it to a player to report.
+            //
+            // Neither board describes its room; each names it, in that room's own words. Seven of
+            // the eight races have no shrine at all, and a board that offered one to all of them
+            // sent people looking for something that was never built.
             switchpoint(w, y, x + 1, z + 3,
                     Trigger.with(Kind.GO_ROOM, race, race + ":1"),
-                    "§c去 转化祭坛", "§7第①间：变成这一族");
+                    opened(sections, 1), "§7第①间 · 变成这一族");
             switchpoint(w, y, x + 5, z + 3,
                     Trigger.with(Kind.GO_ROOM, race, race + ":2"),
-                    "§c被本族杀死", "§7第②间：杀死也转化");
+                    opened(sections, 2), "§7第②间 · 被杀也转化");
             switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.RETURN_START, race),
                     "§f回大厅中央", "§7站回入口正中");
             switchpoint(w, y, x + 13, z + 3, Trigger.of(Kind.EXIT_ROOM),
@@ -1448,12 +1502,12 @@ public final class Hall {
             switchpoint(w, y, x + 17, z + 3, Trigger.of(Kind.LEAVE_HALL),
                     "§a离开大厅", "§7去下面的世界");
         }, "这里是" + title(race) + "的测试大厅",
-                "一族的能力拆成一间一间的房，一间只讲一件事。进门这间只放两条路："
-                        + "走祭坛变成这一族，或者被这一族杀死变成这一族。其余房间顺着每间房里的"
-                        + "「下一间」一间一间走，每一间的牌子上都写着那一间讲什么",
-                "点「去 转化祭坛」或「被本族杀死」，你就站在那一间房的正中间，"
-                        + "聊天栏会说出它的名字",
-                "进门先看这两块牌，挑一条路走",
+                "一族的能力拆成一间一间的房，一间只讲一件事。进门这间只放两条路，"
+                        + "两块牌上写着它们各自去哪一间：一条是这一族自己的入门方式，"
+                        + "一条是被这一族杀死。其余房间顺着每间房里的「下一间」一间一间走，"
+                        + "每块牌上写着那一间讲什么",
+                "点入口那两块牌中的一块，你就站在那一间房的正中间，聊天栏会说出它的名字",
+                "进门先看这两块牌：一块是这一族的入门方式，一块是「被杀也转化」",
                 "其余房间靠每间房里的「上一间 / 下一间」串着走，按顺序走完就是这一族的全部环节",
                 "每间房进门左手边都有一格红色羊毛，上面是退出：按下去回初始大厅并恢复人类",
                 "牌子上写着「离开大厅」的那一块，是去下面的玩法世界");
@@ -1598,7 +1652,7 @@ public final class Hall {
      */
     private Section convertSection(String race) {
         String chance = switch (race) {
-            case "enderborn" -> "10%（代码里写死的 0.10，没有配置项）";
+            case "enderborn" -> "10%（EnderBorn.Convert.Chance 默认 0.10）";
             default -> "35%（Supernatural.SpreadChance 默认 0.35）";
         };
         String extra = switch (race) {
@@ -1712,13 +1766,17 @@ public final class Hall {
                 "被杀死这一条只对「人类阵营」算数（人类、牧师、猎巫人、天使），"
                         + "所以已经从人类变过的人，别人杀你也不会再变一次——这一间因此从「先变回人类」开始。"
                         + "四个族的击杀转化是概率：吸血鬼、食尸鬼、狼人各 35%"
-                        + "（Supernatural.SpreadChance 默认 0.35），末影族 10%（代码里写死的）。"
+                        + "（Supernatural.SpreadChance 默认 0.35），末影族 10%"
+                        + "（EnderBorn.Convert.Chance 默认 0.10，是它自己的那个数）。"
+                        + "「必中开关」把这两个数"
+                        + "一起改成 100%，末影族也不例外。"
                         + "恶魔不走概率，走条件：打你的人得是恶魔，而你死的那一刻手上要拿着地狱岩，这样是 100%。"
                         + "狼人还多一个条件：只在他杀你的那一刻是夜晚才算。",
                 "你会死一次，然后变成那个种族的身份；聊天栏有提示，头顶和 tab 里的标签也跟着改。"
                         + "本厅的房间还是那些房间，想变回来就回还原房",
                 "先点「先变回人类」——被杀死这条只对人类阵营算数",
-                "不想等概率就再点「必中开关」，把本房的概率临时改成 100%（离开这间自动恢复）",
+                "不想等概率就再点「必中开关」，本房两个数（含末影族那个）一起改成 100%，"
+                        + "离开这间自动恢复",
                 "点「被本族杀死」：他从远处走过来，真的把你打死",
                 "看他杀完那一刻你的种族；还不对就再点一次，概率的东西要多试",
                 "这一间只放这一族——想试别的族，去那一族的大厅");
@@ -1805,8 +1863,11 @@ public final class Hall {
                                 + "这是替代吃饭的那条路",
                         "杀掉鸡以后饱食度上升 2 点，能量 +100",
                         "右键那块牌放出一只鸡（旧的会被清掉）", "把它杀掉，回头看饱食度"));
-                sections.add(section("§5⑥ 休战 敌对怪物", 4, true, (w, y, x, z, width) -> {
-                    box(w, Material.BLACKSTONE, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
+                sections.add(section("§5⑥ 休战 敌对怪物", 4, true, 4, (w, y, x, z, width) -> {
+                    // The arena floor, across the room rather than the strip a small room's middle
+                    // would be: the monsters are laid out in rings around the middle of the room,
+                    // and a ring drawn on two different floors reads as two different rooms.
+                    box(w, Material.BLACKSTONE, x + 2, y, z + 2, x + width - 3, y, z + width - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "vampire"),
                             "§c召唤全部敌对怪物", "§7看它们打不打你");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "vampire"),
@@ -1923,8 +1984,15 @@ public final class Hall {
                         "先点一次「能量 +1000」",
                         "拿猪排左键空气，看有没有僵尸出现",
                         "骨头和铁剑收进背包，后面几节要用"));
-                sections.add(section("§5④ 休战 僵尸系怪物", 4, true, (w, y, x, z, width) -> {
-                    box(w, Material.MOSS_BLOCK, x + 3, y, z + 5, x + width - 4, y, z + DEPTH - 3);
+                sections.add(section("§5④ 休战 僵尸系怪物", 4, true, 4, (w, y, x, z, width) -> {
+                    // Forty-one monsters in rings around the middle of the room - exactly the step
+                    // the vampire hall has, on exactly the same list, and it takes four cells for
+                    // exactly the same reason: the outermost ring is sixteen blocks out, and a
+                    // twenty-one wide room has eight to give. What that looked like was a room whose
+                    // monsters were stacked in its walls, and, for the ones the clamp pushed past
+                    // the wall entirely, monsters standing in the rooms next door before anybody
+                    // had called them.
+                    box(w, Material.MOSS_BLOCK, x + 2, y, z + 2, x + width - 3, y, z + width - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "ghoul"),
                             "§c召唤僵尸系怪物", "§7看它们打不打你");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "ghoul"),
@@ -2026,9 +2094,15 @@ public final class Hall {
                     //
                     // Spawned by type, not by class: Boat is an abstract base on this server and
                     // asking for one by class throws while the plugin is still enabling.
-                    Entity boat = w.spawnEntity(new Location(w, x + 10.5, y + 2, z + 9.5),
-                            EntityType.OAK_BOAT);
+                    //
+                    // Tagged, and remembered, because this boat is the whole of the step it
+                    // belongs to and a boat is not a block: nothing in repair() would put it back.
+                    Location mark = new Location(w, x + 10.5, y + 2, z + 9.5);
+                    Entity boat = w.spawnEntity(mark, EntityType.OAK_BOAT);
                     boat.setPersistent(true);
+                    boat.addScoreboardTag(MOORED);
+                    moored.add(new Moored(w.getName(), mark.getX(), mark.getY(), mark.getZ(),
+                            EntityType.OAK_BOAT));
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.DIP_WATER, "ghoul"),
                             "§9跳进水里", "§7站着别动，等它掉血");
                     switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.RESTORE_HEALTH),
@@ -2042,14 +2116,19 @@ public final class Hall {
                         "站在水里血条每秒掉 4 点，几秒钟就见底；上岸立刻停；坐进船里一点不掉",
                         "先点「先回满血再看」，半血进去根本来不及看",
                         "点「跳进水里」，数到 3 就自己上岸，看血条少了多少",
-                        "捡起池子里那条船坐上（对着水面右键），再泡 10 秒，确认血条一点不动",
+                        "右键池子里那条船坐上去（对着船点，不是对着水面——对着水面是又放一条），"
+                                + "再泡 10 秒，确认血条一点不动",
                         "下船再泡一次，几秒就会被「溶解」死"));
                 sections.add(section("§2⑨ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BONE, 6),
                             new ItemStack(Material.IRON_SWORD, 1)));
+                    // "super", not "random": a bond needs somebody the plugin counts as
+                    // supernatural to attach to, and "random" drew from all eight - a run that
+                    // rolled a priest, a witch hunter or an angel left the room with nothing
+                    // bonded and nothing to see, which the board had already promised otherwise.
                     switchpoint(w, y, x + 6, z + 3,
-                            Trigger.with(Kind.SPAWN_NPCS, "ghoul", "random,random"),
+                            Trigger.with(Kind.SPAWN_NPCS, "ghoul", "super,super"),
                             "§c放出两个同伴", "§7随机超自然种族");
                     switchpoint(w, y, x + 10, z + 3,
                             Trigger.with(Kind.USE_ON_NPC, "ghoul", "BONE"),
@@ -2239,12 +2318,12 @@ public final class Hall {
                 }, "验证恶魔能把别人变成恶魔",
                         "手持地狱岩攻击另一名同样手持地狱岩的玩家，耗 2000 能量，会把对方直接"
                                 + "转成恶魔。两边都得拿着地狱岩，缺一边就只是普通一击——"
-                                + "所以你自己也得从箱子里拿一块。注意地狱岩不是武器，"
-                                + "拿它砍人几乎不掉血，这里要的也不是伤害",
-                        "打完之后对方的种族变成 demon，头顶标签和聊天栏都会变",
+                                + "所以你自己也得从箱子里拿一块。转化那一下被法术吃掉、不掉血；"
+                                + "之后他已经是恶魔，再打就是普通一击（地狱岩很钝，只有 1 点）",
+                        "打完那一下对方的种族变成 demon，头顶标签和聊天栏都会变",
                         "点「放出持地狱岩的异族」——他手上真的拿着地狱岩",
                         "从箱子拿一块地狱岩拿在手上",
-                        "点「用地狱岩打他」（自己走过去打一下也行），看他的种族",
+                        "点「用地狱岩打他」（自己走过去打一下也行），看他的种族和标签",
                         "没变就再打一下：能量不够会提示，先点「能量 +1000」"));
                 sections.add(section("§4⑤ 免疫 火与爆炸", 2, (w, y, x, z, width) -> {
                     box(w, Material.POLISHED_BLACKSTONE, x + 5, y, z + 5, x + 13, y, z + 11);
@@ -2285,11 +2364,15 @@ public final class Hall {
                             "§b查看能量", "§7记下这个数");
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.POWER_READ),
                             "§b再查一次", "§7隔一分钟再点");
-                    powerButton(w, y, x + 9, z, "demon");
+                    switchpoint(w, y, x + 9, z + 3, Trigger.of(Kind.INFINITE_POWER),
+                            "§e无限能量 开/关", "§7OP 默认开着，测掉能前先关");
+                    powerButton(w, y, x + 12, z, "demon");
                 }, "验证恶魔离开下界与火源之后会一直掉能量",
                         "不在下界、脚下方块也不是火或岩浆时，每 5 秒 -20 能量"
                                 + "（Demon.Power.Loss = 4，每秒结算）。这是恶魔最大的枷锁："
-                                + "不在火旁边就一直在流失",
+                                + "不在火旁边就一直在流失。大厅会替你临时关掉 OP 默认的"
+                                + "「无限能量」权限（不关的话这一段什么都看不出来），"
+                                + "想开回来就点「无限能量 开/关」",
                         "站在这里能量一路下降；跳进上一节的岩浆里则会涨——那是对照",
                         "点一次「查看能量」，把数字记住",
                         "原地等一分钟，再点一次，看掉了多少",
@@ -2353,13 +2436,13 @@ public final class Hall {
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.SPAR),
                             "§f叫陪练过来", "§7法术都要打在他身上");
                     switchpoint(w, y, x + 5, z + 3, spell("FEATHER"),
-                            "§7羽毛 · 放逐", "§7把异族送到放逐点");
+                            "§7羽毛 · 放逐", "§7打他一下，送放逐点");
                     switchpoint(w, y, x + 8, z + 3, spell("SUGAR"),
-                            "§7糖 · 驱魔", "§7把异族恢复成人类");
+                            "§7糖 · 驱魔", "§7打他一下，变回人类");
                     switchpoint(w, y, x + 11, z + 3, spell("FLINT"),
-                            "§7燧石 · 治愈诅咒", "§7对方也要拿着燧石");
+                            "§7燧石 · 治愈诅咒", "§7打他一下，都拿燧石");
                     switchpoint(w, y, x + 14, z + 3, spell("PAPER"),
-                            "§7纸 · 治疗", "§7给人类回 10 点血");
+                            "§7纸 · 治疗", "§7打他一下，回10血");
                     powerButton(w, y, x + 6, z, "priest");
                 }, "验证牧师的四个单体法术都能触发",
                         "全部四个都用「拿物品攻击目标」触发，不是右键：羽毛＝放逐，耗 4000，"
@@ -2369,10 +2452,11 @@ public final class Hall {
                                 + "另外牧师打超自然目标会点燃对方、伤害翻倍，打普通动物则完全无效（狼除外）",
                         "每个法术都在那个陪练身上真实生效：他先变成吸血鬼（一个真的超自然"
                                 + "单位），法术按普通攻击的路径打上去，掉血、变身、传送都是真的，"
-                                + "不是播一条消息。你也可以自己拿物品去打他，效果完全一样",
+                                + "不是播一条消息。法术得你自己打——牌子只把物品发到你手里、"
+                                + "把靶子叫到你面前，不会替你出手",
                         "点「叫陪练过来」，他会先变成异族，然后走过来站到你面前",
-                        "手持箱子里的法术物品打他一下，看陪练的变化和聊天栏",
-                        "四件物品逐个试，每个法术的牌只放一次"));
+                        "拿手里的法术物品打他一下，看陪练的变化和聊天栏",
+                        "四块牌逐个试；每点一次就重新发一件物品、把靶子叫回来"));
                 sections.add(section("§5⑤ 法术 汲取与守护", 2, (w, y, x, z, width) -> {
                     spellBench(w, y, x, z, Material.BOOK, Material.WHITE_WOOL, Material.BOWL);
                     switchpoint(w, y, x + 5, z + 3, spell("BOOK"),
@@ -2407,12 +2491,26 @@ public final class Hall {
                 sections.add(section("§8⑦ 动物 与 点火", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
-                            new ItemStack(Material.PORKCHOP, 8)));
+                            new ItemStack(Material.PORKCHOP, 8),
+                            // The two spells that act on a supernatural target, so that the vampire
+                            // this room lets out can be used for what a priest is for. The boards
+                            // here are about the sword and are read as a fight room, which they are
+                            // - but a player who then reaches for a spell finds there is nothing in
+                            // the chest to cast one with, and the spell room that does have the
+                            // props is two doors back. Nobody walks two doors back for the prop of
+                            // the room they are standing in.
+                            new ItemStack(Material.FEATHER, 8),
+                            new ItemStack(Material.SUGAR, 8)));
                     switchpoint(w, y, x + 5, z + 3, Trigger.with(Kind.SPAWN_MOB, null, "COW"),
                             "§a放出一头牛", "§7拿剑砍它，伤害是 0");
                     switchpoint(w, y, x + 8, z + 3,
                             Trigger.with(Kind.SPAWN_NPCS, "priest", "vampire"),
-                            "§c放出一个吸血鬼", "§7再拿剑砍他");
+                            "§c放出一个吸血鬼", "§7砍他，或拿羽毛施法");
+                    // And the power to do anything about him with. A priest who has just been made
+                    // one has none, and every spell below its cost refuses with a sentence rather
+                    // than a number - so with no way to top up here, the one thing a player would
+                    // try on this room's vampire could only ever answer "not enough power".
+                    powerButton(w, y, x + 11, z, "priest");
                 }, "验证牧师的战斗规则：不伤无辜动物，对异族加重并点燃",
                         "对非敌对的动物（狼除外）伤害一律为 0，只提示 \"You cannot hurt innocent animals.\"；"
                                 + "对超自然玩家则额外加一倍基础伤害，并把对方点燃 50 tick（恶魔不会被点燃）；"
@@ -2421,6 +2519,8 @@ public final class Hall {
                         "牛挨多少下都不掉血；吸血鬼被打中会烧起来，伤害还翻倍",
                         "点「放出一头牛」，拿箱子里的铁剑砍它几下，看是否掉血",
                         "点「放出一个吸血鬼」，再砍他一下",
+                        "也可以拿箱子里的羽毛（放逐）或糖（驱魔）打他——法术在这里一样生效，"
+                                + "只是要花能量，箱子边那块牌补能量",
                         "看他身上有没有着火、聊天栏有没有提示"));
             }
             case "witchhunter" -> {
@@ -2441,9 +2541,14 @@ public final class Hall {
                 sections.add(section("§7② 入会 铁门与告示牌", 1, (w, y, x, z, width) -> {
                     door(w, x + 6, y + 1, z + DEPTH / 2);
                     set(w, STELE, x + 7, y + 1, z + DEPTH / 2);
-                    set(w, STELE, x + 7, y + 2, z + DEPTH / 2);
-                    signOn(w, x + 7, y + 1, z + DEPTH / 2, BlockFace.EAST, "WitchHunter");
                     set(w, Material.SEA_LANTERN, x + 7, y + 2, z + DEPTH / 2);
+                    // At the second block, which is where a board belongs - this one was left at
+                    // the player's feet when every other board in the building was raised, and it
+                    // is the one board here that has to be read: the lesson of the room is that
+                    // the door reads the sign, so the sign has to be legible from standing. The
+                    // door's own check looks through a five-by-five cube around it, so a board one
+                    // block higher is read exactly the same.
+                    signOn(w, x + 7, y + 2, z + DEPTH / 2, BlockFace.EAST, "WitchHunter");
                     switchpoint(w, y, x + 2, z + 3, Trigger.of(Kind.INVITE_HUNTER),
                             "§a直接发一张邀请", "§7跳过杀怪，图快的用这个");
                 }, "验证铁门入会：门旁告示牌必须写着 WitchHunter",
@@ -2580,7 +2685,8 @@ public final class Hall {
                 }, "验证末影族的死亡次数上限：第 5 次死亡自动变回人类",
                         "每死一次扣 300 能量并累计一次；累计到第 5 次时自动恢复人类，"
                                 + "计数器清零。这是末影族唯一的自救路径，不用找别人帮忙。"
-                                + "（配置里 10% 概率把被击杀者转成末影族，也要先有人死给你）",
+                                + "（10% 概率把被击杀者转成末影族——这个概率写在代码里，"
+                                + "不读任何配置项；也要先有人死给你）",
                         "每死一次聊天栏报出还剩几次；第 5 次之后你变回人类",
                         "先变成末影族，回到这一格",
                         "连点「死一次」，每次死亡后回到出生点再点下一次",
@@ -2686,11 +2792,12 @@ public final class Hall {
                             new ItemStack(Material.PORKCHOP, 8)));
                     powerButton(w, y, x + 6, z, "angel");
                 }, "验证天使的三种召唤",
-                        "都按左键触发，各耗 5000 能量：生牛肉召牛、骨头召一只已驯服的狼"
-                                + "（归你所有、满血）、猪肉召猪。左键空气时它们落在你身前 2 格，"
-                                + "左键方块时落在你指的位置上方；落点会自己挑能站人、脚下有地的地方，"
-                                + "不会再生成在方块内部憋死",
-                        "三种动物出现在你身前或你指的地方，而且十几秒后还活着",
+                        "都按左键触发，各耗 5000 能量，还会吃掉手里那一块：生牛肉召牛、"
+                                + "骨头召一只已驯服的狼（归你所有、满血）、猪肉召猪。"
+                                + "左键空气时它们落在你身前 2 格，左键方块时落在你指的位置上方；"
+                                + "落点会自己挑能站人、脚下有地的地方，不会再生成在方块内部憋死",
+                        "三种动物出现在你身前或你指的地方，而且十几秒后还活着；"
+                                + "每召一次手里少一块、能量少 5000",
                         "拿箱子里的三种肉，对着地面或空中左键一次",
                         "等十几秒再看一眼，召唤物必须还活着",
                         "两只手的物品栏都不一样的话，换一种肉再来一次"));
@@ -2819,9 +2926,28 @@ public final class Hall {
     }
 
     /**
+     * The same, for the one step that needs both a bigger room and no roof over it.
+     *
+     * <p>The truce room is the only room in any hall that takes four cells, and it does because of
+     * what it has to hold: forty-one monsters, laid out in rings around the middle of the room, and
+     * among them an ender dragon sixteen blocks from nose to tail. In a room the size of the others
+     * the outer rings are outside the walls, and the monsters that should be standing still in
+     * front of the player are standing in the next room. It is also left open to the sky, because
+     * the truce is the one rule here that is about who is looking at whom and nothing about the
+     * weather - a roof over it would only be a ceiling in the way of the dragon.
+     *
+     * <p>The four cells are two cells each way, which is the hall's largest room: forty-four
+     * across, a little over four times the floor of a standard one, with a ceiling to match.
+     */
+    private static Section section(String title, int slots, boolean openSky, int cells,
+            Station station, String goal, String ability, String expect, String... steps) {
+        return new Section(title, board(goal, expect), brief(goal, ability, expect, steps), slots,
+                openSky, station, cells, 0);
+    }
+
+    /**
      * A step that takes more than one cell of the grid, or a ceiling that is not the standard
-     * height - the entry room's directory wall and the truce room's forty-one monsters both need
-     * to say so.
+     * height.
      */
     private static Section section(String title, int slots, int cells, int headroom,
             Station station, String goal, String ability, String expect, String... steps) {
@@ -3035,6 +3161,68 @@ public final class Hall {
             repaired = true;
         }
         return repaired;
+    }
+
+    /**
+     * Puts a hall's boats back on their marks.
+     *
+     * <p>A boat is furniture of a room that cannot be run without it - the one in the ghoul's pool
+     * is there so that "a boat is how you stay dry" can be sat in rather than read - and a boat is
+     * not a block, so none of the repair above touches it. It cannot be broken any more: the guard
+     * refuses every blow aimed at it. It can still be <em>lost</em>, though, and rowing it out of
+     * the pool is the obvious way - the board tells the player to get in it, and getting in it is
+     * also how a boat is moved. A room whose one prop is three rooms away is a dead room.
+     *
+     * <p>Only ever looked for in a chunk that is already loaded. An unloaded chunk still holds its
+     * entities, so a search there would answer "gone" and put a second boat in the pool every two
+     * seconds - and by the time anybody looked, the pool would be full of them.
+     */
+    public boolean restoreBoats() {
+        boolean put = false;
+        for (Moored spot : moored) {
+            World target = Bukkit.getWorld(spot.world());
+            if (target == null
+                    || !target.isChunkLoaded(((int) Math.floor(spot.x())) >> 4,
+                            ((int) Math.floor(spot.z())) >> 4)) {
+                continue;
+            }
+            Location home = new Location(target, spot.x(), spot.y(), spot.z());
+            List<Entity> here = new ArrayList<>();
+            for (Entity entity : target.getNearbyEntities(home, 16, 16, 16)) {
+                if (entity.getType() == spot.type() && entity.getScoreboardTags().contains(MOORED)) {
+                    here.add(entity);
+                }
+            }
+            if (here.isEmpty()) {
+                Entity fresh = target.spawnEntity(home, spot.type());
+                fresh.setPersistent(true);
+                fresh.addScoreboardTag(MOORED);
+                put = true;
+                continue;
+            }
+            for (Entity boat : here) {
+                // Never while somebody is in it: a boat is moved by the person sitting in it, and
+                // yanking it out from under them is how a step becomes a puzzle. They get out, and
+                // the next sweep brings it home.
+                if (boat.getPassengers().isEmpty() && boat.getLocation().distanceSquared(home) > 16) {
+                    boat.teleport(home);
+                    put = true;
+                }
+            }
+        }
+        return put;
+    }
+
+    /** Where the boats the hall put down belong, for a probe that wants to hit one. */
+    public List<Location> boatSpots() {
+        List<Location> spots = new ArrayList<>();
+        for (Moored spot : moored) {
+            World target = Bukkit.getWorld(spot.world());
+            if (target != null) {
+                spots.add(new Location(target, spot.x(), spot.y(), spot.z()));
+            }
+        }
+        return spots;
     }
 
     private static boolean asBuilt(Block block, Fixture fixture) {        if (block.getType() != fixture.type()) {
@@ -4052,6 +4240,35 @@ public final class Hall {
                 }
             }
         }
+    }
+
+    /**
+     * Everything the hall placed in one room that a player can touch, and the text on it.
+     *
+     * <p>A board is what a player is told to do, and this is the only way to read one without
+     * walking to the room. It earns its place because a board can be wrong in a way nothing else
+     * notices: it can name a room that does not exist, offer a shrine the race does not have, or
+     * promise a number the plugin does not use - and every one of those three has happened here.
+     */
+    public List<String> fixturesIn(String race, int index) {
+        Box zone = zones.get("room." + race + "." + index);
+        Location landing = roomSpawn(race, index);
+        if (zone == null || landing == null) {
+            return List.of();
+        }
+        String world = landing.getWorld().getName();
+        List<String> found = new ArrayList<>();
+        for (Map.Entry<Location, Fixture> entry : fixtures.entrySet()) {
+            Location at = entry.getKey();
+            if (!world.equals(at.getWorld().getName()) || !zone.holds(at)) {
+                continue;
+            }
+            List<String> lines = entry.getValue().lines();
+            found.add(at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ()
+                    + " " + entry.getValue().type().name()
+                    + " " + (lines == null ? "(no text)" : String.join(" / ", lines)));
+        }
+        return found;
     }
 
     private void set(World target, Material material, int x, int y, int z) {

@@ -20,6 +20,7 @@
 package me.matterz.supernaturals.util;
 
 import me.matterz.supernaturals.SupernaturalsPlugin;
+import me.matterz.supernaturals.io.SNConfigHandler;
 
 import org.bukkit.Location;
 import org.bukkit.entity.Arrow;
@@ -62,12 +63,39 @@ public class ArrowUtil implements Runnable {
 			SupernaturalsPlugin.instance.getHunterManager().splitArrow(player, arrow);
 			return;
 		} else {
-			if (player.getLocation().distance(targetLocation) < 3) {
+			// Location#distance throws for two places in different worlds rather than answering,
+			// and a pull is a player and a target that can be parted by a teleport or a portal.
+			// That is the one case the ability has nothing to say about, so it ends here instead
+			// of throwing out of a repeating task.
+			if (player.getWorld() != null && targetLocation.getWorld() != null
+					&& !player.getWorld().equals(targetLocation.getWorld())) {
+				if (SNConfigHandler.debugMode) {
+					SupernaturalsPlugin.log("grapple for " + player.getName() + " stopped: what it "
+							+ "caught is in " + targetLocation.getWorld().getName() + ", and he is not");
+				}
+				SupernaturalsPlugin.instance.getHunterManager().stopGrappling(player);
+				return;
+			}
+			double away = player.getLocation().distance(targetLocation);
+			if (away < 3) {
+				// Why it stopped, and not that it ticked: a pull that ends immediately and a pull
+				// that never started look the same from outside the server, and the two are told
+				// apart by the one number the ability has - how far away the thing it hit was.
+				if (SNConfigHandler.debugMode) {
+					SupernaturalsPlugin.log("grapple for " + player.getName() + " stopped: what it "
+							+ "caught is only " + Math.round(away) + " blocks away");
+				}
 				SupernaturalsPlugin.instance.getHunterManager().stopGrappling(player);
 				return;
 			}
 
+			long elapsed = System.currentTimeMillis() - startTime;
 			if (startTime + 500 + grappleDistance * 70 < System.currentTimeMillis()) {
+				if (SNConfigHandler.debugMode) {
+					SupernaturalsPlugin.log("grapple for " + player.getName() + " ran out of time: "
+							+ elapsed + "ms spent of " + Math.round(500 + grappleDistance * 70)
+							+ "ms allowed, " + Math.round(away) + " blocks still to go");
+				}
 				SupernaturalsPlugin.instance.getHunterManager().stopGrappling(player);
 				return;
 			}

@@ -79,7 +79,7 @@ public class SNPlayerMonitor implements Listener {
 			SuperNManager.sendMessage(snplayer, "The mmSupernaturals whitelist!");
 		}
 
-		if (SupernaturalsPlugin.hasPermissions(player, "supernatural.admin.infinitepower")) {
+		if (SuperNManager.holdsInfinitePower(snplayer)) {
 			snplayer.setPower(10000); // Making power really infinite.
 		}
 

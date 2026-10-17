@@ -80,6 +80,7 @@ public class SNConfigHandler {
 	public static double priestDrainFactor;
 	public static double hunterPowerArrowDamage;
 	public static double enderDamageFactor;
+	public static double enderSpreadChance;
 	public static int jumpBloodCost;
 	public static int dashBloodCost;
 	public static int truceBreakTime;
@@ -428,6 +429,10 @@ public class SNConfigHandler {
 			config.set("EnderBorn.Power.DeathPenalty", 300);
 			config.set("EnderBorn.Power.Kill", 50);
 			config.set("EnderBorn.Power.EnderPearl", 100);
+			// The enderborn's own turning, a tenth where the other races roll the shared chance.
+			// A key of its own so a server can tune it, and so the hall can hold it open the same
+			// way it holds the shared one open.
+			config.set("EnderBorn.Convert.Chance", 0.1);
 
 			config.set("Angel.Power.Heal.HealthGain", 5);
 			config.set("Angel.Power.Heal.PowerCost", 3000);
@@ -1185,6 +1190,11 @@ public class SNConfigHandler {
 		enderDeathPowerPenalty = config.getInt("EnderBorn.Power.DeathPenalty");
 		enderKillPower = config.getInt("EnderBorn.Power.Kill");
 		enderPearlPower = config.getInt("EnderBorn.Power.EnderPearl");
+		// Read with its default spelled out, unlike the keys around it: those were in every
+		// config before this one existed, and the defaults block only ever runs for a config
+		// file that is not there yet. A server that upgrades keeps its old config.yml, so a
+		// key without a default here would read 0.0 - an enderborn that never turns anybody.
+		enderSpreadChance = config.getDouble("EnderBorn.Convert.Chance", 0.1);
 		enderWeaponsString = config.getStringList("EnderBorn.Weapon.Restrictions");
 
 		angelHealHealthGain = config.getInt("Angel.Power.Heal.HealthGain");

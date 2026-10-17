@@ -128,6 +128,7 @@ public class AngelManager extends ClassManager {
 			player.getWorld().spawnEntity(spot, EntityType.COW);
 			event.setCancelled(true);
 			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned cow.");
+			spendOffering(player);
 			return true;
 		}
 		if (itemInHandMaterial.equals(Material.BONE)) {
@@ -137,12 +138,36 @@ public class AngelManager extends ClassManager {
 			spawnedWolf.setHealth(20);
 			event.setCancelled(true);
 			SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned wolf.");
+			spendOffering(player);
 			return true;
 		}
 		player.getWorld().spawnEntity(spot, EntityType.PIG);
 		event.setCancelled(true);
 		SuperNManager.alterPower(snplayer, -SNConfigHandler.angelSummonPowerCost, "Summoned pig.");
+		spendOffering(player);
 		return true;
+	}
+
+	/**
+	 * Takes the offering out of the angel's hand, which is one of them.
+	 *
+	 * <p>Every other ability of this shape spends the thing it is cast with: a werewolf calling a
+	 * wolf spends the porkchop in its hand, and a demon spends the redstone it throws. The angel's
+	 * summoning spent only its power, and left the beef, the bone or the porkchop sitting in the
+	 * hand it was cast with - a summon that cost a thousandth of what it was meant to, because the
+	 * offering was unlimited. It went unnoticed for the plain reason that this branch was
+	 * unreachable until recently: an angel could not summon anything at all, so nobody ever watched
+	 * an offering not being spent.
+	 *
+	 * <p>One is taken, and the empty hand is left empty, exactly as the wolf-call does it.
+	 */
+	private static void spendOffering(Player player) {
+		ItemStack offering = player.getItemInHand();
+		if (offering == null || offering.getAmount() <= 1) {
+			player.getInventory().setItemInMainHand(null);
+			return;
+		}
+		offering.setAmount(offering.getAmount() - 1);
 	}
 
 	@Override

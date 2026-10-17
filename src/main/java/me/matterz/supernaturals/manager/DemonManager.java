@@ -391,6 +391,17 @@ public class DemonManager extends ClassManager {
 	public boolean convert(Player player, Player target) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		SuperNPlayer snvictim = SuperNManager.get(target);
+		// A demon is what this spell makes, so there is nothing left to do to one. Converting him
+		// into one again is not merely wasted - the cast swallows the blow that carried it, and the
+		// spell succeeded, so the blow is swallowed every time: the netherrack could never be swung
+		// at the very person the conversion sections hand it out beside, and the price was paid on
+		// every swing. He is refused here, which lets the hit land as the ordinary one it looks
+		// like.
+		if (snvictim.isDemon()) {
+			SuperNManager.sendMessage(snplayer, target.getName()
+					+ " is already a demon.");
+			return false;
+		}
 		if (snplayer.getPower() < SNConfigHandler.demonConvertPower) {
 			SuperNManager.sendMessage(snplayer, "Not enough power to convert!");
 			return false;

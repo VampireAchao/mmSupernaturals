@@ -15,12 +15,12 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Biome;
 import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Chicken;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Flying;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.PigZombie;
 import org.bukkit.entity.Player;
@@ -51,15 +51,21 @@ import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.vehicle.VehicleDamageEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.permissions.PermissionAttachment;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -68,6 +74,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -119,6 +126,9 @@ final class HallGuard implements Listener {
      */
     private static final Set<String> UNROOMABLE = Set.of();
 
+    /** How many monsters go on each ring of the truce room, before the next ring out is used. */
+    private static final int PER_RING = 10;
+
     /** How much a sword does before the plugin has its say. */
     private static final Map<Material, Double> BLADES = Map.of(
             Material.WOODEN_SWORD, 4.0,
@@ -140,6 +150,27 @@ final class HallGuard implements Listener {
 
     /** The one chicken a chicken section keeps, which lives until it is killed. */
     private final Set<UUID> chickens = new HashSet<>();
+
+    /**
+     * The room each thing the hall let out was let out in, so a room nobody is standing in can be
+     * swept the moment it empties.
+     *
+     * <p>Recorded as the room it was summoned in, not as wherever the entity happens to be
+     * standing now. A monster wanders, and one that has drifted into the next room would be
+     * reclaimed by whoever is in <em>that</em> room - which is neither the room whose visitor
+     * asked for it nor the room whose step is over. A null means it was let out somewhere that is
+     * not a room at all, and such a thing is left to the switches.
+     */
+    private final Map<UUID, String> propRooms = new HashMap<>();
+
+    /**
+     * The same, for the hall's stand-in players: the test prey and the sparring partner.
+     *
+     * <p>A stand-in is a player as far as the server is concerned, so he is a resident of whatever
+     * room he is standing in - and a room with a stand-in in it would never read as empty. He is
+     * therefore kept out of the count of who is in a room, and swept by his own entry here.
+     */
+    private final Map<String, String> standInRooms = new HashMap<>();
 
     /** The floating numbers, so a sweep does not mistake them for something that escaped. */
     private final Set<UUID> marks = new HashSet<>();
@@ -196,6 +227,12 @@ final class HallGuard implements Listener {
     private final Map<String, String> preyRace = new HashMap<>();
     private final Map<String, String> preyOwner = new HashMap<>();
 
+    /**
+     * The permission attachments the hall has put on people, e.g. the one that takes an operator's
+     * infinite power away so a power cost can be watched. Kept so the same switch can hand it back.
+     */
+    private final Map<String, PermissionAttachment> powerLimits = new HashMap<>();
+
     /** The seats taken during the current spawn, so two stand-ins never share one place. */
     private final List<Location> taken = new ArrayList<>();
 
@@ -210,6 +247,16 @@ final class HallGuard implements Listener {
      * plugin was configured with, and no room is responsible for putting anything back.
      */
     private Double spreadWas;
+
+    /**
+     * The enderborn's own conversion chance, held open at the same time and put back with it.
+     *
+     * <p>It is a second number because it is a second rule: three races roll the chance they
+     * share, and the enderborn rolls a number of its own ({@code EnderBorn.Convert.Chance}). A
+     * switch that wrote only the first of them promised the enderborn room a conversion that was
+     * certain and then rolled a tenth, and said "35%" while it did it.
+     */
+    private Double enderWas;
 
     /** The walk the stand-in is currently on, so a second section cannot start another. */
     private BukkitTask walkTask;
@@ -403,6 +450,7 @@ final class HallGuard implements Listener {
         }
         if (where != null) {
             player.teleport(where);
+            anchorTo(player, where);
         }
         resetVitals(player);
         protectedUntil.put(name, ticks + GRACE_TICKS);
@@ -726,6 +774,7 @@ final class HallGuard implements Listener {
                 SuperNManager.alterPower(SuperNManager.get(player), 1000, "Test hall");
                 note(player, "§b能量 +1000");
             }
+            case INFINITE_POWER -> toggleInfinitePower(player);
             case DAY -> setClock(player, block.getWorld(), 6000L, "§e这个大厅改成白天了");
             case NIGHT -> setClock(player, block.getWorld(), 18000L, "§9这个大厅改成夜晚了");
             case PREPARE_GHOUL -> prepareGhoul(player, hall);
@@ -1018,24 +1067,34 @@ final class HallGuard implements Listener {
     /**
      * Makes the chance of being turned certain, for the room whose whole subject is being turned.
      *
-     * <p>The roll stays the plugin's - this writes the number the roll is compared against, which
+     * <p>The roll stays the plugin's - this writes the numbers the rolls are compared against, which
      * the plugin reads at the moment of the kill, so the kill, the message and the new race all
-     * still come out of the plugin's own path. It is a toggle as well as a switch because a player
-     * who has just watched the certain version should be able to watch the real one without
-     * leaving the room, and it is put back automatically on the way out either way.
+     * still come out of the plugin's own path. There are two of those numbers and both are written:
+     * the chance that three races share, and the enderborn's own, which the plugin reads from its
+     * own setting the same way - leaving the second one out made the switch a lie in the one hall
+     * that needed it most. It is a toggle as well as a switch because a player who has just watched
+     * the certain version should be able to watch the real one without leaving the room, and it is
+     * put back automatically on the way out either way.
      */
     private void toggleSpread(Player player) {
         if (spreadWas == null) {
             spreadWas = SNConfigHandler.spreadChance;
+            enderWas = SNConfigHandler.enderSpreadChance;
             SNConfigHandler.spreadChance = 1.0;
-            note(player, "§c这一间的转化已改成必定成功（原值 " + percent(spreadWas)
+            SNConfigHandler.enderSpreadChance = 1.0;
+            note(player, "§c这一间的转化已改成必定成功（原值 " + held()
                     + "，离开这间房会自动恢复）");
             return;
         }
-        SNConfigHandler.spreadChance = spreadWas;
-        double restored = spreadWas;
-        spreadWas = null;
-        note(player, "§a这一间的转化已恢复成原来的概率（" + percent(restored) + "）");
+        String was = held();
+        restoreSpread();
+        note(player, "§a这一间的转化已恢复成原来的概率（" + was + "）");
+    }
+
+    /** The two chances a room is holding open, as the percentages they are configured as. */
+    private String held() {
+        return "吸血鬼/食尸鬼/狼人 " + percent(spreadWas)
+                + "、末影族 " + percent(enderWas);
     }
 
     /** A probability as the percentage it is configured as: 0.35 reads "35%", not "0.4". */
@@ -1044,16 +1103,21 @@ final class HallGuard implements Listener {
     }
 
     /**
-     * Puts the plugin's conversion chance back to what it was configured as.
+     * Puts the plugin's conversion chances back to what they were.
      *
-     * <p>Called everywhere a player leaves the room that borrowed it. A teaching setting that
+     * <p>Called everywhere a player leaves the room that borrowed them. A teaching setting that
      * outlived the room would be a lie the next room tells, and the rooms after this one are about
-     * the real chance.
+     * the real chance. Both numbers go back together: a room that restored one of them would leave
+     * the enderborn's roll at a hundred percent for everybody who came after.
      */
     private void restoreSpread() {
         if (spreadWas != null) {
             SNConfigHandler.spreadChance = spreadWas;
             spreadWas = null;
+        }
+        if (enderWas != null) {
+            SNConfigHandler.enderSpreadChance = enderWas;
+            enderWas = null;
         }
     }
 
@@ -1085,7 +1149,7 @@ final class HallGuard implements Listener {
         List<Material> banned = bannedWeapons(race);
         if (banned.contains(wanted)) {
             note(player, "§e" + Hall.title(race) + " 用不了 " + wanted.name()
-                    + "（在它的禁用名单里），所以让他空手出手");
+                    + "（在它的禁用名单里），所以只能空手出手");
             return null;
         }
         return wanted;
@@ -1130,7 +1194,11 @@ final class HallGuard implements Listener {
             return;
         }
         clearHallMobs(player, null);
-        Location at = player.getLocation().add(2.5, 0, 0.5);
+        // Through the same four questions every other summon answers. This one used to drop its
+        // monster two and a half blocks along x from the player without asking anything - which is
+        // inside the wall whenever he is reading the board that called for it, and reading the
+        // board is the only way this board is ever used.
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         try {
             Entity spawned = player.getWorld().spawnEntity(at, type);
             spawned.setPersistent(true);
@@ -1164,6 +1232,33 @@ final class HallGuard implements Listener {
                 : "§7已空挥一次（手持弓才会切换箭种）");
     }
 
+    /**
+     * Turns the tester's infinite power off, or back on.
+     *
+     * <p>The permission that refuses every power loss is declared {@code default: op}, so it is
+     * held by every operator - which on a test server is the one person who runs the hall. For
+     * them, a section whose whole point is that the number falls shows a number that never moves,
+     * and a section that charges for a spell shows a charge that was never taken. Nothing in the
+     * hall said so, and the question was asked about exactly this: a demon whose power did not
+     * fall once it was out of the lava.
+     *
+     * <p>An attachment of {@code false} is what turns it off: it is scoped to this plugin, it
+     * outranks the operator's default, and taking it away restores whatever they had. It goes in
+     * the book so the next press can hand it back.
+     */
+    private void toggleInfinitePower(Player player) {
+        String node = SuperNManager.infPowerPermissions;
+        PermissionAttachment held = powerLimits.remove(player.getName());
+        if (held != null) {
+            player.removeAttachment(held);
+        } else {
+            powerLimits.put(player.getName(), player.addAttachment(plugin, node, false));
+        }
+        note(player, player.hasPermission(node)
+                ? "§e无限能量：开着 §7（你又扣不掉能量了：掉能、法术花费、珍珠护身都不花钱；再点一下关掉）"
+                : "§a无限能量：关掉了 §7（掉能和法术花费都是真的；再点一下开回来）");
+    }
+
     /** Reads the hunter's bounty list back, and gets one added if there is room. */
     private void bounty(Player player) {
         HunterManager.addBounty();
@@ -1181,7 +1276,61 @@ final class HallGuard implements Listener {
             return;
         }
         player.teleport(where);
+        anchorTo(player, where);
         note(player, what);
+    }
+
+    /**
+     * Moves a player's respawn point to the room they are standing in.
+     *
+     * <p>Dying in the fifth room and opening their eyes at the hall's door made every death read as
+     * being sent back to the start: the anchor was set once, when the player walked into the hall,
+     * and nothing they did afterwards moved it. It moves with them now, room by room - and it is
+     * the room's own landing rather than the spot they were standing on, because a room may well
+     * kill somebody somewhere nobody can stand: a pool, a shaft, the top of a fall. The landing is
+     * the one place in a room that is always safe.
+     *
+     * <p>Silent about anywhere that is not a room, on purpose. The lobby, the return pad and the
+     * world outside the hall each have an anchor of their own, set when the player was sent there,
+     * and a teleport within one of those must not move it.
+     */
+    private void anchorTo(Player player, Location where) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null || where == null) {
+            return;
+        }
+        String room = hall.roomAt(where);
+        if (room == null) {
+            return;
+        }
+        int dot = room.lastIndexOf('.');
+        if (dot < 0) {
+            return;
+        }
+        int index;
+        try {
+            index = Integer.parseInt(room.substring(dot + 1));
+        } catch (NumberFormatException notARoom) {
+            return;
+        }
+        Location landing = hall.roomSpawn(room.substring(0, dot), index);
+        if (landing != null) {
+            player.setRespawnLocation(landing, true);
+        }
+    }
+
+    /** Where a player is, and where they would come back if they died there, for the probe. */
+    String anchorReport(Player player) {
+        Location anchor = player.getRespawnLocation();
+        Hall hall = plugin.hallOrNull();
+        String room = hall == null
+                ? "(no hall on this server)"
+                : String.valueOf(hall.roomAt(player.getLocation()));
+        return player.getName() + " room=" + room + " respawns at "
+                + (anchor == null
+                        ? "the world's own spawn - no anchor has been set"
+                        : anchor.getWorld().getName() + " " + anchor.getBlockX() + ","
+                                + anchor.getBlockY() + "," + anchor.getBlockZ());
     }
 
     /**
@@ -1402,10 +1551,16 @@ final class HallGuard implements Listener {
     private void spawnAngryWolves(Player player) {
         Hall hall = plugin.hallOrNull();
         List<Wolf> wolves = new ArrayList<>();
-        for (int index = 0; index < 3; index++) {
-            double angle = index * 2.1;
-            Location at = player.getLocation().clone()
-                    .add(Math.cos(angle) * 4, 0, Math.sin(angle) * 4);
+        List<Location> taken = new ArrayList<>();
+        // Three places, apart from the player and from each other. The candidates come back nearest
+        // first and every one handed out is struck off, which is what stops the second wolf landing
+        // inside the first - the old version drew three fixed angles at a fixed radius and did not
+        // check any of them against the ones already placed.
+        for (Location at : summonCandidates(player, taken, SUMMON_FAR)) {
+            if (wolves.size() >= 3) {
+                break;
+            }
+            taken.add(at);
             try {
                 Wolf wolf = player.getWorld().spawn(at, Wolf.class, spawned -> {
                     spawned.setAngry(true);
@@ -1437,7 +1592,7 @@ final class HallGuard implements Listener {
      */
     private void prepareGhoul(Player player, Hall hall) {
         clearHallMobs(player, null);
-        Location at = player.getLocation().add(1.5, 0, 1.5);
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         PigZombie pigman = player.getWorld().spawn(at, PigZombie.class, spawned -> {
             spawned.setCustomName("大厅僵尸猪人");
             spawned.setCustomNameVisible(true);
@@ -1462,7 +1617,7 @@ final class HallGuard implements Listener {
             note(player, "§c现在是白天，先点「夜晚」再来放狼");
             return;
         }
-        Location at = player.getLocation().add(1.5, 0, 1.5);
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         Wolf wolf = player.getWorld().spawn(at, Wolf.class, spawned -> {
             spawned.setAngry(true);
             spawned.setPersistent(true);
@@ -1484,8 +1639,9 @@ final class HallGuard implements Listener {
                 chicken.remove();
             }
             chickens.remove(id);
+            propRooms.remove(id);
         }
-        Location at = player.getLocation().add(1.5, 0, 1.5);
+        Location at = summonSpot(player, List.of(), SUMMON_FAR);
         Chicken chicken = player.getWorld().spawn(at, Chicken.class, spawned -> {
             spawned.setAware(false);
             spawned.setPersistent(true);
@@ -1494,6 +1650,8 @@ final class HallGuard implements Listener {
             spawned.setCustomNameVisible(true);
         });
         chickens.add(chicken.getUniqueId());
+        Hall hall = plugin.hallOrNull();
+        propRooms.put(chicken.getUniqueId(), hall == null ? null : hall.roomAt(player.getLocation()));
         note(player, "§2鸡来了，它不会动");
     }
 
@@ -1513,10 +1671,22 @@ final class HallGuard implements Listener {
         }
         List<EntityType> wanted = new ArrayList<>(
                 "ghoul".equals(race) ? SNConfigHandler.ghoulTruce : SNConfigHandler.vampireTruce);
-        Hall hall = plugin.hallOrNull();
-        Location centre = player.getLocation();
+        Hall.Box pen = pen(player, race);
+        // Around the middle of the room, not around the player. A board is read from the far end of
+        // the room or from the doorway, and a ring drawn where the player happens to be standing
+        // puts most of it in a wall - which is how a room about "watch whether they come at you"
+        // ended up showing a handful of monsters and a lot of nothing.
+        Location centre = middleOf(pen, player.getLocation());
+        // Everywhere a walk from the player reaches, inside this room. The ring is the shape the
+        // step wants; this is what decides whether a point on it is somewhere a monster can stand
+        // and still come at him from. A ring drawn through a pillar, or through the wall of a room
+        // too narrow to hold it, lands monsters in both - and the board's own words are that they
+        // come at you.
+        List<Location> reach = walkable(player, pen);
         List<String> refused = new ArrayList<>();
+        int stranded = 0;
         int placed = 0;
+        double furthest = 0;
         for (EntityType type : wanted) {
             if (type == null) {
                 continue;
@@ -1526,38 +1696,82 @@ final class HallGuard implements Listener {
                 continue;
             }
             if (type == EntityType.ENDER_DRAGON) {
-                if (placeDragon(hall, race, centre)) {
+                if (placeDragon(pen, centre)) {
                     placed++;
                 } else {
                     refused.add(type.name());
                 }
                 continue;
             }
-            double ring = 3 + (placed / 6) * 2;
-            double angle = placed * 1.1;
-            Location at = clamp(hall, race,
-                    centre.clone().add(Math.cos(angle) * ring, 0, Math.sin(angle) * ring));
+            // Rings of ten, six blocks out and three and a half further out each turn: forty
+            // monsters come to four rings, the outermost sixteen blocks from the middle, which
+            // leaves a few blocks of floor between the outside of the ring and the wall. That
+            // margin is the point - a ring drawn wide enough to touch the wall is a ring whose
+            // outermost monsters are inside it, and the room was built at four cells for exactly
+            // this: in any other room the outer rings are past the walls, and monsters that should
+            // be standing in front of the player are standing in the next room.
+            int ring = placed / PER_RING;
+            double angle = (placed % PER_RING) * (2 * Math.PI / PER_RING) + ring * 0.35;
+            double out = 6 + ring * 3.5;
+            Location at = nearestReachable(reach, clampIn(pen,
+                    centre.clone().add(Math.cos(angle) * out, 0, Math.sin(angle) * out)));
+            if (at == null) {
+                // A place on this ring that a monster could stand on, and nothing close enough to
+                // it to call the point home. Left out and counted, rather than dropped in a wall.
+                stranded++;
+                continue;
+            }
             try {
                 Entity spawned = centre.getWorld().spawnEntity(at, type);
                 spawned.setPersistent(true);
-                keepIn(hall, spawned, centre);
+                keepIn(plugin.hallOrNull(), spawned, centre);
                 placed++;
+                furthest = Math.max(furthest, at.distance(centre));
             } catch (RuntimeException notPlaceable) {
                 refused.add(type.name());
             }
         }
-        note(player, "§c召唤了 " + placed + " 只怪物"
+        // How far out the furthest one went, said out loud. "Forty-one of them, all inside the
+        // room" is the thing this note exists to be able to claim, and a count on its own cannot
+        // claim it - forty monsters clamped to the hall's own edge is also a count of forty.
+        note(player, "§c召唤了 " + placed + " 只怪物，最远的离房间中心 " + Math.round(furthest) + " 格"
+                + (stranded == 0 ? "" : "；" + stranded + " 个环位走不到你，已跳过")
                 + (refused.isEmpty() ? "" : "；室内放不下的：" + String.join("、", refused)));
     }
 
-    /** A dragon, in the middle of the section with room to be a dragon in. */
-    private boolean placeDragon(Hall hall, String race, Location centre) {
-        Location at = clamp(hall, race, centre.clone()).add(0, 6, 0);
+    /** How far a point on a shape may be moved to land on floor a walk can reach. */
+    private static final double RING_SLACK = 6.0;
+
+    /**
+     * The reachable block nearest a wanted place, or {@code null} when the nearest is too far away.
+     *
+     * <p>Six blocks of slack, because a ring is a shape drawn on the floor of a room and a monster
+     * is a thing that has to stand on it: where the shape and the floor disagree - a pillar, a lip,
+     * the corner of a room built a cell too small - it is the ring that is worth moving. Past six
+     * the shape is gone, and the caller is better off knowing that than having a monster in the
+     * wrong place.
+     */
+    private static Location nearestReachable(List<Location> reach, Location wanted) {
+        Location best = null;
+        double shortest = RING_SLACK;
+        for (Location at : reach) {
+            double away = at.distance(wanted);
+            if (away < shortest) {
+                shortest = away;
+                best = at;
+            }
+        }
+        return best == null ? null : middleOfBlock(best);
+    }
+
+    /** A dragon, in the middle of the room with room to be a dragon in. */
+    private boolean placeDragon(Hall.Box pen, Location centre) {
+        Location at = clampIn(pen, centre.clone()).add(0, 6, 0);
         try {
             EnderDragon dragon = centre.getWorld().spawn(at, EnderDragon.class);
             dragon.setPhase(EnderDragon.Phase.HOVER);
             dragon.setPersistent(true);
-            keepIn(hall, dragon, centre);
+            keepIn(plugin.hallOrNull(), dragon, centre);
             return true;
         } catch (RuntimeException | LinkageError notPlaceable) {
             plugin.getLogger().warning("could not summon the ender dragon: " + notPlaceable);
@@ -1565,9 +1779,35 @@ final class HallGuard implements Listener {
         }
     }
 
-    /** Keeps a spawn point inside its hall, however many neighbours are already standing there. */
-    private Location clamp(Hall hall, String race, Location at) {
-        Hall.Box zone = hall == null ? null : hall.zone("hall." + race);
+    /**
+     * The box a section's monsters have to stay inside: the room the player is testing in, or the
+     * race's whole hall when they are not standing in one.
+     *
+     * <p>It was the hall for everything, which is the other half of how forty monsters ended up in
+     * the neighbouring rooms. The rings a small room cannot hold were clamped to the hall's own
+     * edge - a boundary several rooms away from the room they were drawn in.
+     */
+    private Hall.Box pen(Player player, String race) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return null;
+        }
+        String room = roomOf(player);
+        Hall.Box inRoom = room == null ? null : hall.zone("room." + room);
+        return inRoom != null ? inRoom : hall.zone("hall." + race);
+    }
+
+    /** The middle of a box, at the height of the player standing in it. */
+    private static Location middleOf(Hall.Box zone, Location fallback) {
+        if (zone == null) {
+            return fallback;
+        }
+        return new Location(fallback.getWorld(),
+                (zone.x1() + zone.x2()) / 2.0, fallback.getY(), (zone.z1() + zone.z2()) / 2.0);
+    }
+
+    /** Keeps a point inside the box a section is working in, however many are already there. */
+    private static Location clampIn(Hall.Box zone, Location at) {
         if (zone == null) {
             return at;
         }
@@ -1583,6 +1823,7 @@ final class HallGuard implements Listener {
             entity.addScoreboardTag(HALL_MOB);
             hallMobs.put(entity.getUniqueId(), home.clone());
             hallEntities.put(entity.getUniqueId(), entity);
+            propRooms.put(entity.getUniqueId(), hall.roomAt(home));
         }
     }
 
@@ -1616,6 +1857,10 @@ final class HallGuard implements Listener {
                 entity.remove();
             }
         }
+        // The rooms are empty of all of it by now, so the ledger for "which room was this let out
+        // in" goes with them. The stand-ins keep their own, because prey are deliberately not
+        // cleared here.
+        propRooms.clear();
         // Prey are deliberately *not* cleared here. Taking the hall's monsters back happens on
         // every death, and a section's prey are players: clearing them from here meant killing one
         // of the three a witch hunter section puts out took the other two with it.
@@ -1648,15 +1893,35 @@ final class HallGuard implements Listener {
                 break;
             }
             // "vampire" is one; "vampire:NETHERRACK" is one holding netherrack, which is what a
-            // spell that needs both sides to be holding something asks for; "random" is one of
-            // the supernatural races, for a section whose point is that any of them will do.
+            // spell that needs both sides to be holding something asks for. "random" is one of the
+            // eight races, for a section whose point is that any of them will do; "super" is one
+            // of the races the plugin itself calls supernatural, for a section whose rule turns
+            // the rest away - the ghoul's bond will not attach to a priest, a witch hunter or an
+            // angel, and a section that rolled one of those would do nothing at all while saying
+            // nothing about why.
             String[] spec = one.trim().split(":", 2);
-            String race = unroll(spec[0].trim());
+            String asked = spec[0].trim();
             Material hand = spec.length > 1 ? Material.matchMaterial(spec[1].trim()) : null;
-            if (race.isEmpty()) {
-                continue;
+            Player npc = null;
+            // A named race is asked for once and taken as it comes. "super" is rolled again when
+            // the plugin would not have it - a third of the rolls get thrown away, which is not a
+            // reason for a section to come up with nobody.
+            int tries = asked.equalsIgnoreCase("super") ? 12 : 1;
+            for (int attempt = 0; attempt < tries && npc == null; attempt++) {
+                String race = unroll(asked);
+                if (race.isEmpty()) {
+                    break;
+                }
+                Player stand = putPrey(player, seat, race, hand);
+                if (stand == null) {
+                    continue;
+                }
+                if (asked.equalsIgnoreCase("super") && !SuperNManager.get(stand).isSuper()) {
+                    clearPrey(stand.getName());
+                    continue;
+                }
+                npc = stand;
             }
-            Player npc = putPrey(player, seat, race, hand);
             if (npc == null) {
                 continue;
             }
@@ -1668,9 +1933,17 @@ final class HallGuard implements Listener {
                         + "（头上和 tab 里有种族名）");
     }
 
-    /** "random" means one of the supernatural races; anything else is itself. */
+    /**
+     * "random" is one of the eight races and "super" one of the ones the plugin calls
+     * supernatural; anything else is itself.
+     *
+     * <p>The two names roll the same dice and differ only in who accepts the result. Which races
+     * count as supernatural is asked of the plugin ({@link SuperNPlayer#isSuper()}) rather than
+     * written down here, because the line has moved before: the four that report as people are
+     * the ones whose race the plugin will not bond, cure or spread through.
+     */
     private static String unroll(String race) {
-        if (race.equalsIgnoreCase("random")) {
+        if (race.equalsIgnoreCase("random") || race.equalsIgnoreCase("super")) {
             return SUPERNATURAL.get(ThreadLocalRandom.current().nextInt(SUPERNATURAL.size()));
         }
         return race;
@@ -1697,7 +1970,24 @@ final class HallGuard implements Listener {
         }
         prey.put(name, ghost);
         preyOwner.put(name, player.getName());
-        SuperNManager.convert(SuperNManager.get(npc), race);
+        // Which room he was put out in, so that walking out of it takes him with it. Taken from the
+        // player rather than from the seat: he is placed next to a board that may be read from a
+        // corner, and the corner is the one spot in a room that is still the room.
+        standInRooms.put(name, roomOf(player));
+        // Guarded, and the reason is what an unguarded call did: a rule of the plugin's own threw
+        // in the middle of this method, and the exception carried straight out through the section
+        // and the click handler - so the seating, the teleport and the label below never ran, and
+        // the stand-in was left standing at the world's own spawn, in another world, while every
+        // board in the room went on saying there was nobody here. A section that loses its stand-in
+        // to somebody else's bug has to say so rather than go quiet; he is placed and dressed
+        // either way, and the console carries the cause.
+        try {
+            SuperNManager.convert(SuperNManager.get(npc), race);
+        } catch (RuntimeException failed) {
+            Bukkit.getLogger().warning("the stand-in " + name + " was put out, but turning him into "
+                    + race + " threw: " + failed.getClass().getName()
+                    + (failed.getMessage() == null ? "" : ": " + failed.getMessage()));
+        }
         Location spot = seatFor(player, seat, taken);
         taken.add(spot);
         // Dressed before he is moved, not after. What is in his hand when a watcher starts
@@ -1759,10 +2049,18 @@ final class HallGuard implements Listener {
         }
         Player npc = here.get(0);
         String[] parts = spec == null || spec.isBlank() ? new String[0] : spec.trim().split(":", 2);
-        Material item = parts.length > 0 ? Material.matchMaterial(parts[0].trim()) : null;
+        Material asked = parts.length > 0 ? Material.matchMaterial(parts[0].trim()) : null;
         double damage = parts.length > 1 ? Double.parseDouble(parts[1].trim()) : 1.0;
-        if (item != null) {
-            player.getInventory().setItemInMainHand(new ItemStack(item));
+        // Asked of the player's own race before it is put in his hand. The kill room hands out a
+        // diamond sword and a hundred damage so that one blow finishes the target - and a ghoul, a
+        // witch hunter and an enderborn are all forbidden that sword, which the plugin answers by
+        // zeroing the blow. Two of the four halls that have that room could therefore never kill
+        // anything in it: the board promised "one blow and he is dead" and the target kept all
+        // twenty of his health, for ever. An empty hand is legal for every race and still carries
+        // this race's own attack bonus, so a race that may not hold what was asked swings nothing.
+        Material item = legalWeapon(SuperNManager.get(player).getType(), asked, player);
+        if (asked != null) {
+            player.getInventory().setItemInMainHand(item == null ? null : new ItemStack(item));
         }
         if (!npc.getWorld().equals(player.getWorld())
                 || npc.getLocation().distance(player.getLocation()) > 4) {
@@ -1770,9 +2068,24 @@ final class HallGuard implements Listener {
         }
         faceThe(player, npc);
         player.swingMainHand();
+        String was = SuperNManager.get(npc).getType();
         land(player, npc, damage);
+        String now = SuperNManager.get(npc).getType();
+        // Read before and after, because a spell can answer the blow by changing the target instead
+        // of hurting him - and then the aim of the section is the change, not the health bar. Left
+        // at "he still has 20 health" this reads as a weapon that does not work, which is what the
+        // demon's conversion looked like from the outside: the spell ate every hit and nothing on
+        // the target moved. Whoever swung is told which of the two happened.
+        boolean turned = !now.equals(was);
+        if (turned) {
+            labelRace(npc, now);
+            preyRace.put(npc.getName(), now);
+        }
         note(player, "§7你拿" + (item == null ? "手里的东西" : item.name()) + "打在 "
                 + npc.getName() + " 身上"
+                + (turned ? "，§a他的种族变成了 " + RACE_LABEL.getOrDefault(now, now)
+                        + "§7（这一下被法术吃掉了，没造成伤害）"
+                        : "")
                 + (npc.isDead() ? "§c（他倒了，稍后会在原地复活）"
                         : "§7（他还剩 " + trim(npc.getHealth()) + " 点血）"));
     }
@@ -1785,6 +2098,10 @@ final class HallGuard implements Listener {
      * who also pays power for the privilege - and none of that is visible until somebody other
      * than the player is being hit. The blow is the server's, so the ordinary handler runs and
      * the split happens exactly as it would between two people.
+     *
+     * <p>What the attacker swings is chosen by his own race rather than by the section, because
+     * the plugin refuses a blow struck with a weapon the race may not hold - and a section that
+     * handed out a sword regardless looked like a room that did nothing.
      */
     private void npcHitsNpc(Player player, String spec) {
         List<Player> here = preyOnline(player);
@@ -1799,16 +2116,59 @@ final class HallGuard implements Listener {
             return;
         }
         double damage = spec == null || spec.isBlank() ? 6.0 : Double.parseDouble(spec.trim());
+        String race = SuperNManager.get(attacker).getType();
         attacker.teleport(spotFor(target));
-        attacker.getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
+        // Handed over only if his race may hold it. A ghoul, a witch hunter and a werewolf at
+        // night all ban the sword, and the plugin answers a banned weapon by zeroing the blow -
+        // so the section used to report "20.0 -> 20.0" and read as broken rather than as the rule
+        // it was showing. An empty hand is legal for every race and still takes that race's attack
+        // bonus, so falling back to it loses nothing but the sword.
+        Material hand = legalWeapon(race, Material.IRON_SWORD, player);
+        attacker.getInventory().setItemInMainHand(hand == null ? null : new ItemStack(hand));
         Nms.pushEquipment(attacker);
         faceThe(attacker, target);
         attacker.swingMainHand();
         double before = target.getHealth();
         land(attacker, target, damage);
-        note(player, "§7" + attacker.getName() + "砍了 " + target.getName() + " 一下："
+        note(player, "§7" + describe(attacker, race, hand) + " 砍了 " + target.getName() + " 一下："
                 + trim(before) + " → " + trim(target.getHealth())
                 + " §7（看你自己掉了多少血、能量少了多少）");
+    }
+
+    /**
+     * Brings two stand-ins up as the races named and has the second swing at the first, so
+     * "does the blow land" can be asked and answered with the numbers rather than by eye.
+     *
+     * <p>Worth having because the answer is not just a number: a race that may not hold the
+     * weapon it was handed deals nothing at all, and that cannot be told apart from a target that
+     * was never really hit unless whoever reports it also says who swung and with what. One race
+     * name does both - which is what the ghoul's own room wants.
+     */
+    String npcHitReport(String rest) {
+        String[] parts = rest == null ? new String[0] : rest.trim().split("\\s+");
+        Player tester = parts.length > 0 && !parts[0].isBlank()
+                ? Bukkit.getPlayerExact(parts[0])
+                : null;
+        if (tester == null) {
+            return "err no such player: " + (parts.length > 0 ? parts[0] : "");
+        }
+        String first = parts.length > 1 && !parts[1].isBlank() ? parts[1] : "vampire";
+        String second = parts.length > 2 && !parts[2].isBlank() ? parts[2] : first;
+        spawnNpcs(tester, first + "," + second);
+        List<Player> here = preyOnline(tester);
+        if (here.size() < 2) {
+            return "err only " + here.size() + " stand-in(s) came up for " + first + "," + second;
+        }
+        Player target = here.get(0);
+        Player attacker = here.get(1);
+        double before = target.getHealth();
+        npcHitsNpc(tester, "6");
+        double after = target.getHealth();
+        return "ok attacker=" + SuperNManager.get(attacker).getType()
+                + " hand=" + attacker.getInventory().getItemInMainHand().getType()
+                + " victim=" + SuperNManager.get(target).getType()
+                + " " + trim(before) + "->" + trim(after)
+                + " dealt=" + trim(before - after);
     }
 
     /** The living stand-ins this player's section brought up, in the world they are standing in. */
@@ -1864,21 +2224,17 @@ final class HallGuard implements Listener {
      * it is just no longer preferred over a place he can actually get to.
      */
     private Location seatFor(Player player, int seat, List<Location> taken) {
-        Location centre = player.getLocation();
-        String room = roomOf(player);
-        Vector facing = flat(centre.getDirection());
-        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
-        List<Vector> directions = List.of(facing.clone().multiply(-1), left,
-                left.clone().multiply(-1), facing);
-        for (int attempt = 0; attempt < 12; attempt++) {
-            Vector direction = directions.get(Math.min(attempt / 3, directions.size() - 1));
-            double ahead = 3.0 + (attempt % 3) * 1.6;
-            Location at = centre.clone().add(direction.clone().multiply(ahead));
-            if (insideRoom(room, at) && canStand(at) && clearOf(at, taken)) {
-                return at;
-            }
+        // The same four questions every other summon answers, with the seat simply deciding which
+        // of the places that passed is asked for: they come back nearest first and the ones already
+        // handed out are passed in as taken, so the second stand-in is given the next place rather
+        // than the first one again. What was here walked a fixed arc of its own and asked about
+        // floor, room and overlap - but never whether the player could see the seat, nor whether a
+        // stand-in could walk from it to him, which is the whole of what a stand-in is for.
+        List<Location> spots = summonCandidates(player, taken, SUMMON_FAR);
+        if (spots.isEmpty()) {
+            return spotFor(player);
         }
-        return spotFor(player);
+        return spots.get(Math.min(seat, spots.size() - 1));
     }
 
     /** A horizontal unit vector, with a fallback when a player is looking straight up or down. */
@@ -1911,15 +2267,251 @@ final class HallGuard implements Listener {
         return zone == null || zone.holds(at);
     }
 
-    /** True when nothing has already been put down within a block of that spot. */
-    private static boolean clearOf(Location at, List<Location> taken) {
-        for (Location other : taken) {
-            if (other.getWorld().equals(at.getWorld())
-                    && other.distanceSquared(at) < 1.0) {
+    // -- where a board may put what it calls up ----------------------------
+
+    /**
+     * How close to the player a summon may land, and how far away.
+     *
+     * <p>Nearer than this and the thing is inside him, which the server resolves by pushing it into
+     * the nearest block that will take it - a wall, in a room whose boards are all on walls.
+     * Further than this and it is behind something, or across the room facing away: a step that
+     * says "watch this one" has to put it somewhere watching is possible from.
+     */
+    private static final double SUMMON_NEAR = 1.5;
+    private static final double SUMMON_FAR = 6.0;
+
+    /** How many blocks the walk search will look at before it gives up. */
+    private static final int WALK_BUDGET = 4096;
+
+    /**
+     * The places a board's summon is allowed to stand.
+     *
+     * <p>Four things have to be true of one, and every board that calls something up now asks for
+     * all four in one place. Before this each board decided for itself, and the ones that decided
+     * nothing said so out loud: the general "let one out" board put its monster at the player's
+     * position moved two and a half blocks along x, which is inside the wall whenever the player is
+     * reading a board - the only time that board is ever used - and the truce step drew a ring
+     * sixteen blocks out inside a room eight blocks wide, which stacked monsters in the wall and,
+     * for the ones the clamp pushed past it, in the rooms next door.
+     *
+     * <p>The four, cheapest first:
+     *
+     * <ul>
+     *   <li><b>Inside the room.</b> The player's own room, not the hall: rooms are separate builds
+     *       with no way between them, so something standing in the next one is something the person
+     *       who asked for it will never see. A player who is not in a room at all - the lobby, a
+     *       corridor - gets no restriction, because there is no room to get wrong.
+     *   <li><b>On floor, not in a block.</b> Feet on something solid and two blocks of air, which
+     *       is what {@link #canStand} has always meant.
+     *   <li><b>Walkable to the player.</b> A search over standing blocks outwards from the player,
+     *       bounded by the room. A monster that cannot path to him is a monster that stands in a
+     *       corner while the step promises it will come at him, and nothing about looking at the
+     *       spawn point says so - only asking whether a route exists does.
+     *   <li><b>In the player's line of sight.</b> Sampled along the line from his eyes, refusing an
+     *       occluding block. Being in the room is not the same thing: the truce room has pillars
+     *       in it, and a ring drawn through one puts monsters behind it.
+     * </ul>
+     */
+    private List<Location> summonCandidates(Player player, List<Location> taken, double far) {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return List.of();
+        }
+        String room = roomOf(player);
+        Hall.Box inside = room == null ? null : hall.zone("room." + room);
+        List<Location> found = new ArrayList<>();
+        for (Location at : walkable(player, inside)) {
+            Location spot = middleOfBlock(at);
+            if (seatTaken(taken, spot)) {
+                continue;
+            }
+            double away = spot.distance(player.getLocation());
+            if (away < SUMMON_NEAR || away > far) {
+                continue;
+            }
+            if (!seeFrom(player, spot)) {
+                continue;
+            }
+            found.add(spot);
+        }
+        found.sort(Comparator.comparingDouble(at -> at.distance(player.getLocation())));
+        return found;
+    }
+
+    /**
+     * The nearest place a board's summon may stand, or the old search when nothing passed.
+     *
+     * <p>The fallback is not a loophole, it is the one case the four questions cannot answer:
+     * a player standing somewhere he cannot stand - in the pool, on a fence, mid-jump - has no
+     * walk to search and would otherwise be unable to use a board at all. That is rare, and the
+     * weaker search underneath still asks for floor inside the room.
+     */
+    private Location summonSpot(Player player, List<Location> taken, double far) {
+        List<Location> spots = summonCandidates(player, taken, far);
+        return spots.isEmpty() ? freeSpot(player) : spots.get(0);
+    }
+
+    /**
+     * Everywhere a creature could stand and walk, starting from the player.
+     *
+     * <p>A walk over blocks rather than a pathfind: the question is not "which way is shortest" but
+     * "is there a way at all", and a room is a flat box of a few hundred blocks - enumerating the
+     * whole of it is cheaper than answering that for any single place in it would be. A step up or
+     * down counts as well as a step across, since a room may have a raised floor or a lip, and
+     * refusing those would rule out places a player can plainly walk to.
+     *
+     * <p>Includes the player's own block, so that a caller wanting "somewhere that is not under
+     * him" filters on distance rather than on the search.
+     */
+    private List<Location> walkable(Player player, Hall.Box inside) {
+        List<Location> found = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        Location start = player.getLocation().getBlock().getLocation();
+        if (!canStand(start)) {
+            // Nowhere to start from, so there is no honest answer to "what can reach him" - and
+            // inventing one would hand out monsters behind walls with the search's blessing.
+            return found;
+        }
+        Deque<Location> open = new ArrayDeque<>();
+        seen.add(blockKey(start));
+        open.add(start);
+        while (!open.isEmpty() && found.size() < WALK_BUDGET) {
+            Location at = open.poll();
+            found.add(at);
+            for (int[] step : WALK_STEPS) {
+                Location next = at.clone().add(step[0], step[1], step[2]);
+                if (inside != null && !inside.holds(next)) {
+                    continue;
+                }
+                if (!canStand(next) || !seen.add(blockKey(next))) {
+                    continue;
+                }
+                open.add(next);
+            }
+        }
+        return found;
+    }
+
+    /** Across, and one block up or down: what a walk over a flat room with a lip in it looks like. */
+    private static final int[][] WALK_STEPS = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+        {1, 1, 0}, {-1, 1, 0}, {0, 1, 1}, {0, 1, -1},
+        {1, -1, 0}, {-1, -1, 0}, {0, -1, 1}, {0, -1, -1}};
+
+    /**
+     * Whether the player can see a place: no occluding block between his eyes and it.
+     *
+     * <p>Sampled every quarter block rather than ray-traced, because the question is about blocks
+     * and a quarter block is well inside the width of one: a line that slips through the seam
+     * between two blocks is not a line a player would call seeing something. Both ends are trimmed
+     * - the eyes are inside the player's own head, and the far end is inside whatever the summon is
+     * standing on.
+     */
+    private static boolean seeFrom(Player player, Location at) {
+        Location eye = player.getEyeLocation();
+        Location middle = at.clone().add(0, 0.9, 0);
+        if (eye.getWorld() == null || !eye.getWorld().equals(middle.getWorld())) {
+            return false;
+        }
+        Vector along = middle.toVector().subtract(eye.toVector());
+        double length = along.length();
+        if (length < 0.5) {
+            return true;
+        }
+        along.multiply(1.0 / length);
+        for (double walked = 0.6; walked < length - 0.4; walked += 0.25) {
+            Block between = eye.clone().add(along.clone().multiply(walked)).getBlock();
+            if (between.getBlockData().isOccluding()) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** Whether one of the places already handed out is this block. */
+    private static boolean seatTaken(List<Location> taken, Location at) {
+        for (Location one : taken) {
+            if (sameBlock(one, at)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A block as one number, for the walk search's books. */
+    private static long blockKey(Location at) {
+        return ((long) (at.getBlockX() & 0x3FFFFFF) << 38)
+                | ((long) (at.getBlockY() & 0xFFF) << 26)
+                | (at.getBlockZ() & 0x3FFFFFF);
+    }
+
+    /**
+     * Somewhere near the player that a small body fits in and that is inside their own room.
+     *
+     * <p>The hall spawns things beside the player - a chicken to kill, a pigman, a wolf - and every
+     * one of them was put at the player's own position moved a block and a half on both axes. That
+     * is fine in the middle of a room and it is inside the wall when the player is standing at one,
+     * which is exactly where a player reading a board stands. A chicken in a block cannot be walked
+     * to or hit, and killing it is the whole of what that step is for.
+     *
+     * <p><b>The player's own block is never a candidate, and that is the fix rather than a
+     * detail.</b> It used to be the last resort, and a chicken put down where somebody is standing
+     * is a chicken inside him: the server resolves that by pushing it out into the nearest block
+     * willing to take it, which in a room whose boards are all on walls is the wall. The board in
+     * the vampire hall read "let one out, it will not move, kill it for food" and the chicken
+     * suffocated a second after it appeared - reported, reproduced, and this is what it was.
+     *
+     * <p>Behind the player first, because the board they are reading is on the wall in front of
+     * them. Then their sides, then in front; two blocks out before one, so a body is not dropped
+     * against somebody's shoulder. If none of those is floor, the whole ring around the player is
+     * walked, so that a room whose only free floor is beside him still gets him out of the player's
+     * own block rather than into it.
+     */
+    private Location freeSpot(Player player) {
+        String room = roomOf(player);
+        Location centre = player.getLocation();
+        Vector back = flat(centre.getDirection()).multiply(-1);
+        Vector side = new Vector(-back.getZ(), 0, back.getX());
+        List<Vector> ways = List.of(back, side, side.clone().multiply(-1),
+                back.clone().multiply(-1));
+        for (double away : new double[] {2.5, 1.5, 3.5, 4.5}) {
+            for (Vector way : ways) {
+                Location at = middleOfBlock(centre.clone().add(way.clone().multiply(away)));
+                if (!sameBlock(at, centre) && insideRoom(room, at) && canStand(at)) {
+                    return at;
+                }
+            }
+        }
+        for (int radius = 1; radius <= 4; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
+                        // The ring itself, not the square it encloses: nearer blocks were tried
+                        // on the way out, and re-testing them here would only reorder the search.
+                        continue;
+                    }
+                    Location at = middleOfBlock(centre.clone().add(dx, 0, dz));
+                    if (insideRoom(room, at) && canStand(at)) {
+                        return at;
+                    }
+                }
+            }
+        }
+        return centre;
+    }
+
+    /** A place snapped to the middle of its block, which is where a body actually stands. */
+    private static Location middleOfBlock(Location at) {
+        Location middle = at.clone();
+        middle.setX(at.getBlockX() + 0.5);
+        middle.setZ(at.getBlockZ() + 0.5);
+        return middle;
+    }
+
+    /** Whether two places are the same block of the same world. */
+    private static boolean sameBlock(Location a, Location b) {
+        return a.getWorld() != null && a.getWorld().equals(b.getWorld())
+                && a.getBlockX() == b.getBlockX() && a.getBlockZ() == b.getBlockZ();
     }
 
     /**
@@ -1928,8 +2520,16 @@ final class HallGuard implements Listener {
      * <p>His account name cannot be changed, so it is the scoreboard that does the talking: one
      * team per race, whose prefix is shown above his head and in the tab list. A section that hands
      * the player three races has to let them see which is which before they can use them.
+     *
+     * <p>What was written is written down as well, and here rather than beside each caller: a
+     * name over a head is the only way to read what a stand-in is, it is written once, and a spell
+     * that turns him leaves him wearing the name of what he used to be. Whoever writes a label is
+     * the one who knows what he is now, so this is the record that says whether it needs writing
+     * again - and keeping it here means the sparring partner is covered too, not just the targets a
+     * section puts out by name.
      */
     private void labelRace(Player npc, String race) {
+        preyRace.put(npc.getName(), race);
         String label = RACE_LABEL.getOrDefault(race, "§7" + race);
         Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
         Team team = board.getTeam("mmr_" + race);
@@ -1947,8 +2547,8 @@ final class HallGuard implements Listener {
 
     /** What one stand-in is, for the message that says who turned up. */
     private String describe(Player npc, String race, Material hand) {
-        String shown = RACE_LABEL.getOrDefault(race, race);
-        return shown + "§7(" + npc.getName() + (hand == null ? "" : " 拿 " + hand.name()) + ")";
+        String shown = race == null ? "?" : RACE_LABEL.getOrDefault(race, race);
+        return shown + "§7(" + npc.getName() + (hand == null ? " 空手" : " 拿 " + hand.name()) + ")";
     }
 
     /**
@@ -1979,6 +2579,7 @@ final class HallGuard implements Listener {
         revives.remove(name);
         preyRace.remove(name);
         preyOwner.remove(name);
+        standInRooms.remove(name);
         if (prey.remove(name) != null) {
             unstamp(name);
             plugin.dropGhost(name);
@@ -2059,6 +2660,94 @@ final class HallGuard implements Listener {
             note(owner, "§a" + name + " 转化成功了：他现在是 "
                     + RACE_LABEL.getOrDefault(now, now)
                     + "§a（连着杀是为了等这一下；想再试一次，点「放出一个人类」会重新放一个）");
+        }
+    }
+
+    /**
+     * Keeps every stand-in's race label level with what the plugin says he is.
+     *
+     * <p>The label over a stand-in's head is the hall's own - a scoreboard prefix - and the plugin
+     * that changes what he is knows nothing about it. A spell that turns somebody therefore leaves
+     * him wearing the name of what he used to be, and every section that turns people says the
+     * opposite in as many words ("his label over his head changes too"). A tester who has just spent
+     * two thousand power on a conversion and still sees a vampire's name hanging over the target has
+     * no way to tell the spell worked - which is exactly what the demon's netherrack looked like
+     * when this was found: no damage on the bar, no change on the label, nothing at all.
+     *
+     * <p>The kill-driven conversions have their own moment, {@link #turnedOver}; this is the one for
+     * a stand-in who is turned while he stands there, alive, and it is a sweep rather than a hook on
+     * purpose: the spell is the plugin's, and nothing here is told when one lands.
+     */
+    private void relabelStandIns() {
+        for (String name : new ArrayList<>(preyRace.keySet())) {
+            Player npc = Bukkit.getPlayerExact(name);
+            if (npc == null) {
+                continue;
+            }
+            String now = SuperNManager.get(npc).getType();
+            String was = preyRace.get(name);
+            if (now == null || now.equals(was)) {
+                continue;
+            }
+            labelRace(npc, now);
+            String who = preyOwner.get(name);
+            Player owner = who == null ? null : Bukkit.getPlayerExact(who);
+            if (owner != null) {
+                note(owner, "§a" + name + " 的种族变成了 "
+                        + RACE_LABEL.getOrDefault(now, now) + "§a（头顶的标签已经跟着改）");
+            }
+        }
+    }
+
+    /**
+     * Drops the book-keeping for people who have left.
+     *
+     * <p>An attachment belongs to the player object it was made on, so a player who logs out leaves
+     * theirs behind - and somebody who comes back is a new object with none. Keeping the dead entry
+     * would make the next press of the power switch try to take away an attachment that is not
+     * there, which reads as "the switch does nothing".
+     */
+    private void forgetDeparted() {
+        for (Iterator<String> gone = powerLimits.keySet().iterator(); gone.hasNext();) {
+            if (Bukkit.getPlayerExact(gone.next()) == null) {
+                gone.remove();
+            }
+        }
+    }
+
+    /**
+     * Who the hall has already taken the operator's infinite power away from.
+     *
+     * <p>Said once. Somebody who wants it back presses the switch; being told again on every step
+     * would be the hall arguing with the person using it.
+     */
+    private final Set<String> lentTheirPower = new HashSet<>();
+
+    /**
+     * Gives the operator the power costs the sections are about, once, and says why.
+     *
+     * <p>The permission that refuses every loss is held by operators by default, and an operator is
+     * whoever walks the hall. For them nothing that costs power costs anything: the demon's drain
+     * never runs, no spell is ever short, and a pearl held under a blow protects for free - each of
+     * which is a section, and each of which therefore read as a rule that does not work rather than
+     * as a rule nobody was paying for. Nothing in the plugin is changed: this is a permission
+     * attachment owned by the hall, it outranks the operator's default, and the drain room's switch
+     * hands it straight back.
+     */
+    private void lendBackTheCosts() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (lentTheirPower.contains(player.getName())
+                    || !player.hasPermission(SuperNManager.infPowerPermissions)) {
+                continue;
+            }
+            lentTheirPower.add(player.getName());
+            if (!powerLimits.containsKey(player.getName())) {
+                powerLimits.put(player.getName(),
+                        player.addAttachment(plugin, SuperNManager.infPowerPermissions, false));
+            }
+            note(player, "§7你在测试大厅里：已临时把无限能量权限关掉 ——"
+                    + "掉能、法术花费、珍珠护身这些「要花能量」的环节才看得见。"
+                    + "想开回来就点「无限能量 开/关」那块牌");
         }
     }
 
@@ -2238,8 +2927,15 @@ final class HallGuard implements Listener {
         // what the person running the test can actually see. Without the second one the section
         // says "the stand-in holds a wooden sword" and shows an iron one.
         Nms.pushEquipment(spar);
-        Location start = approachFrom(player);
+        // The same search as everything else a board calls up: floor in this room, a walk from it to
+        // the player, and in his line of sight. The far end of it on purpose, because what follows
+        // is a walk in - every other caller takes the nearest place, and this one takes the last.
+        List<Location> starts = summonCandidates(player, List.of(), WALK_FROM);
+        Location start = starts.isEmpty() ? freeSpot(player) : starts.get(starts.size() - 1);
         spar.teleport(facing(start, player.getLocation()));
+        // Down on the books as this room's, the same as any other stand-in: a room he was left
+        // standing in after its visitor walked out is a room still holding a person.
+        standInRooms.put(SPAR, roomOf(player));
         return spar;
     }
 
@@ -2406,42 +3102,6 @@ final class HallGuard implements Listener {
         }
     }
 
-    /**
-     * A clear spot a few blocks off to walk in from.
-     *
-     * <p>The player's own facing first, then the four sides, and the longest run of standable
-     * floor wins - so he arrives along an open line instead of pushing out of a wall.
-     */
-    private Location approachFrom(Player player) {
-        Location at = player.getLocation();
-        List<Vector> ways = new ArrayList<>();
-        Vector looking = at.getDirection().setY(0);
-        if (looking.lengthSquared() > 0.01) {
-            ways.add(looking.normalize());
-        }
-        for (BlockFace way : new BlockFace[] {BlockFace.NORTH, BlockFace.SOUTH,
-                BlockFace.EAST, BlockFace.WEST}) {
-            ways.add(new Vector(way.getModX(), 0, way.getModZ()));
-        }
-        Location best = at.clone();
-        int bestClear = 0;
-        for (Vector way : ways) {
-            int clear = 0;
-            for (int distance = 1; distance <= WALK_FROM; distance++) {
-                Location spot = at.clone().add(way.clone().multiply(distance));
-                if (!canStand(spot)) {
-                    break;
-                }
-                clear = distance;
-            }
-            if (clear > bestClear) {
-                bestClear = clear;
-                best = at.clone().add(way.clone().multiply(clear));
-            }
-        }
-        return best;
-    }
-
     /** A spot with its yaw turned towards somebody, so he walks in looking where he is going. */
     private static Location facing(Location at, Location target) {
         Location turned = at.clone();
@@ -2489,38 +3149,24 @@ final class HallGuard implements Listener {
         return spar;
     }
 
+    /** How far from the player a stand-in being brought round to his side may stand. */
+    private static final double SPOT_FAR = 4.0;
+
     /**
-     * A place in front of the player that a person can actually stand in.
+     * A place beside the player that a stand-in can be sent to - and be hit from.
      *
-     * <p>Two blocks along the player's facing was all this used to do, which put the stand-in
-     * inside the wall whenever the player happened to be looking at one - and a stand-in inside a
-     * wall is one nobody can see or hit. Nearer spots are tried next, then the player's own feet,
-     * then the four sides.
-     */
-    /**
-     * The stand-in's place when there is no room left in front to try: close to the player, in a
-     * direction he can get to.
+     * <p>Held to the same four answers as a summon, because it is the same question: a stand-in
+     * moved in by a board that means "now hit him" has to be somewhere the player can see him and
+     * somewhere he could have walked from. What was here asked about floor, the room, and which way
+     * the player was facing, and the second of those had a hole in it - a player reading a board is
+     * standing against a wall, and "in front of him" is the far side of it.
      *
-     * <p>The old version of this reached for the player's own block, then for a step that was still
-     * ahead of him - so a player standing against the wall he just clicked got a stand-in inside the
-     * wall or past it. Directions and the room check are the same as {@link #seatFor}, only the
-     * distances are smaller because this is the attempt that has to work.
+     * <p>Four blocks rather than the six a summon gets: this is the version that has to be in reach
+     * of the player's arm, and every caller is about to hit something.
      */
     private Location spotFor(Player player) {
-        Location at = player.getLocation();
-        String room = roomOf(player);
-        Vector facing = flat(at.getDirection());
-        Vector left = new Vector(-facing.getZ(), 0, facing.getX());
-        for (Vector direction : List.of(facing.clone().multiply(-1), left,
-                left.clone().multiply(-1), facing)) {
-            for (int distance = 3; distance >= 1; distance--) {
-                Location candidate = at.clone().add(direction.clone().multiply(distance));
-                if (insideRoom(room, candidate) && canStand(candidate)) {
-                    return candidate;
-                }
-            }
-        }
-        return at;
+        List<Location> spots = summonCandidates(player, List.of(), SPOT_FAR);
+        return spots.isEmpty() ? freeSpot(player) : spots.get(0);
     }
 
     /** Somewhere with two blocks of air and something solid underneath. */
@@ -2569,11 +3215,21 @@ final class HallGuard implements Listener {
     }
 
     /**
-     * Casts one of a priest's spells at the stand-in.
+     * Sets a priest's spell up: the item into the player's hand, a stand-in to use it on, and the
+     * walk in.
      *
-     * <p>Every priest spell fires when the priest <b>attacks a target</b> with the item in hand.
-     * Most act on a supernatural target; healing and Guardian Angel require a human. The spell's
-     * own messages go to the caster, which is the player standing here.
+     * <p><b>The spell itself is the player's to cast, and this deliberately does not cast it.</b>
+     * Every priest spell fires when the priest <b>attacks a target</b> with the item in hand, and
+     * for a while this board did that attack on the player's behalf the moment the stand-in
+     * arrived: the board said "hold the feather and hit him", the player pressed the board, and the
+     * one thing being tested - that a swing with this item in hand does this - was the one thing
+     * the player never did. That is the one part of it you cannot work out by reading, either: a
+     * feather is a piece of litter in an inventory, and only a blow struck with it says otherwise.
+     * So this hands over the item, brings the stand-in in, and stops.
+     *
+     * <p>Eight of the item rather than one. A spell consumes what it was cast with, so a single
+     * feather made this a board a player could use exactly once and then had to press again for -
+     * which is a worse version of the same mistake, since the point is to try it and see.
      */
     private void testSpell(Player player, String itemName) {
         Material item = itemName == null ? null : Material.matchMaterial(itemName);
@@ -2598,22 +3254,29 @@ final class HallGuard implements Listener {
             spar.getInventory().setItemInMainHand(new ItemStack(item));
             Nms.pushEquipment(spar);
         }
-        player.getInventory().setItemInMainHand(new ItemStack(item));
+        player.getInventory().setItemInMainHand(new ItemStack(item, SPELL_STACK));
         note(player, "§f陪练（现在是 " + SuperNManager.get(spar).getType() + "）从 "
                 + Math.round(spar.getLocation().distance(player.getLocation()))
-                + " 格外走过来，走近了就打他一下施法");
-        walkIn(spar, player, () -> castAt(player, spar, item));
+                + " 格外走过来；等他站定，拿手里的 " + item.name() + " 打他一下施法");
+        walkIn(spar, player, () -> note(player, "§7陪练站好了——拿手里的 " + item.name()
+                + " 打他一下（牌子只发道具，不替你出手）"));
     }
 
-    /** One attack from the priest at the stand-in, which is how every spell fires. */
+    /** How many of a spell's item a board hands out, so a spell can be tried more than once. */
+    private static final int SPELL_STACK = 8;
+
     /**
-     * Lands the spell on the stand-in through the server's own damage path.
+     * The priest's swing, made on the player's behalf, for the probe.
      *
-     * <p>A priest's spells are triggered by attacking somebody with the item, and the handler that
-     * decides what happens reads a damage event. Raising that event by hand makes the handler run
-     * while nothing is actually hit - the target's health never moves, nothing is knocked back,
-     * and a spell that turned out to be broken would still look as though it worked. This deals
-     * real damage, so the same handler runs off the same kind of event a real blow produces.
+     * <p>Nothing in the hall calls this any more. A board hands over the item and brings a target
+     * in, and the swing is the player's; this is the same swing made by the harness, so that a
+     * scenario can assert what a spell does without a keyboard.
+     *
+     * <p>It goes through the server's own attack rather than raising a damage event by hand. A
+     * priest's spells hang off a damage event, so a hand-raised one runs the handler while nothing
+     * is hit - health never moves, nothing is knocked back, and a spell that was broken outright
+     * still looks as though it worked. Real damage means the same handler, off the same kind of
+     * event a player's own blow produces.
      */
     private void castAt(Player player, Player spar, Material item) {
         faceThe(player, spar);
@@ -2622,6 +3285,40 @@ final class HallGuard implements Listener {
         note(player, "§7" + item.name() + " 打在 " + spar.getName() + " 身上（"
                 + SuperNManager.get(spar).getType() + "，血 " + trim(spar.getHealth())
                 + "）：看聊天栏和对方种族变成了什么");
+    }
+
+    /**
+     * Casts one of the priest's spells at the stand-in the way the player's own blow would, for
+     * the probe.
+     *
+     * <p>The counterpart of {@code mmp whack}, which needs both sides named: this one finds the
+     * stand-in, puts the item into the caster's hand, and reports where the two of them ended up.
+     * The last part is what a banish is worth asserting - the whole of its effect is a change of
+     * place, and nothing else about it is observable from the caster's side.
+     */
+    String spellReport(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = args.length > 0 ? Bukkit.getPlayerExact(args[0]) : null;
+        Material item = args.length > 1 ? Material.matchMaterial(args[1]) : null;
+        if (player == null) {
+            return "err no such player: " + (args.length > 0 ? args[0] : "(none)");
+        }
+        if (item == null) {
+            return "err usage: spell <player> <material>";
+        }
+        Player spar = Bukkit.getPlayerExact(SPAR);
+        if (spar == null) {
+            return "err no stand-in up - use the board that brings one in first";
+        }
+        player.getInventory().setItemInMainHand(new ItemStack(item, SPELL_STACK));
+        Location before = spar.getLocation().clone();
+        castAt(player, spar, item);
+        Location after = spar.getLocation();
+        return "ok " + player.getName() + " cast " + item.name() + " at " + spar.getName()
+                + " race=" + SuperNManager.get(spar).getType()
+                + " from=" + before.getBlockX() + "," + before.getBlockY() + "," + before.getBlockZ()
+                + " to=" + after.getBlockX() + "," + after.getBlockY() + "," + after.getBlockZ()
+                + " world=" + (after.getWorld() == null ? "?" : after.getWorld().getName());
     }
 
     // -- keeping the tests honest ------------------------------------------
@@ -2746,6 +3443,50 @@ final class HallGuard implements Listener {
         }
     }
 
+    /**
+     * A boat the hall put down does not break.
+     *
+     * <p>The boat in the ghoul's pool is the whole of one step: "a ghoul standing in water
+     * dissolves, a ghoul sitting in a boat does not" is an exemption that cannot be tried without
+     * one, and a board that tells a player to get into a boat is a board that gets the boat hit -
+     * by the same sword they were just told to swing, sooner or later, and by accident. A boat
+     * comes apart after a few dozen hits and drops itself as an item, so the room ends up with its
+     * one prop lying on the floor and a step nobody can run.
+     *
+     * <p>Nothing about the step is about breaking boats, so they are simply not breakable. Every
+     * blow aimed at one is refused, and that is deliberately the whole of the block rather than an
+     * attack check: the same call is the collision damage a boat takes for being rowed into a
+     * wall, which is the other way a tester loses this boat without meaning to.
+     *
+     * <p><b>This listens for {@code VehicleDamageEvent}, and it has to.</b> The first attempt
+     * listened for {@code EntityDamageEvent}, which reads like the obvious event and is never
+     * fired for a vehicle at all: the hierarchy is {@code VehicleDamageEvent extends VehicleEvent},
+     * so a boat's damage is not a kind of entity damage as far as the event system is concerned,
+     * and the handler was dead code that looked right. What caught it was {@code mmp boats} hitting
+     * a second, untagged boat alongside the hall's: the control came apart and the hall's boat came
+     * apart with it.
+     */
+    @EventHandler
+    public void onBoatHit(VehicleDamageEvent event) {
+        if (event.getVehicle().getScoreboardTags().contains(Hall.MOORED)) {
+            event.setCancelled(true);
+            boatBlowsRefused++;
+        }
+    }
+
+    /**
+     * How many blows at a hall boat have been refused so far.
+     *
+     * <p>Counted so that "a hall boat does not break" can be told apart from "nothing was ever
+     * aimed at it": a smash that reports the boat still there and no blow refused has proved
+     * nothing at all.
+     */
+    int boatBlowsRefused() {
+        return boatBlowsRefused;
+    }
+
+    private int boatBlowsRefused;
+
     /** An enderman in a truce section does not get to take the section with it. */
     @EventHandler
     public void onChange(EntityChangeBlockEvent event) {
@@ -2800,6 +3541,258 @@ final class HallGuard implements Listener {
     }
 
     /**
+     * The fast half of the hall's housekeeping: the guides come and go with their rooms, and
+     * whatever a room let out is taken back when the room empties.
+     *
+     * <p>Half a second where the furniture sweep is two. A room that empties is a step that is
+     * over, and the person who walked out of it is the person who would otherwise be looking at
+     * what it left behind - a ring of forty monsters standing in a room nobody is in, a chicken
+     * on the floor of a room somebody finished with an hour ago.
+     */
+    void sweep() {
+        Hall hall = plugin.hallOrNull();
+        if (hall == null) {
+            return;
+        }
+        refreshGuides(hall);
+        relabelStandIns();
+        lendBackTheCosts();
+        forgetDeparted();
+        reclaimEmptyRooms(hall);
+    }
+
+    /**
+     * Takes back everything that was let out in a room nobody is standing in any more.
+     *
+     * <p>The guides already came and went with their rooms, and the furniture is put back twice a
+     * second - but what a section <em>let out</em> was only ever taken back when a switch was
+     * pressed. Walking out of the room instead of pressing one left it all standing: the monsters
+     * are persistent, the sweep re-anchors them to their marks, and a room that is empty of people
+     * is a room whose step is over. That is the rule now, and it is applied to monsters, to the
+     * chicken, and to the stand-in players alike.
+     *
+     * <p>The hall's own furniture is not a resident and does not count. A guide is a player
+     * standing in the room he explains, and a stand-in is a player in the room whose step put him
+     * there; counting either would mean no room ever read as empty, so both are excluded from the
+     * count and swept by their own entries in the books.
+     */
+    private void reclaimEmptyRooms(Hall hall) {
+        Set<String> occupied = occupiedRooms(hall);
+        for (Map.Entry<UUID, String> entry : new ArrayList<>(propRooms.entrySet())) {
+            String room = entry.getValue();
+            if (room == null || occupied.contains(room)) {
+                continue;
+            }
+            take(entry.getKey());
+        }
+        for (Map.Entry<String, String> entry : new ArrayList<>(standInRooms.entrySet())) {
+            String room = entry.getValue();
+            if (room == null || occupied.contains(room)) {
+                continue;
+            }
+            takeStandIn(entry.getKey());
+        }
+        // The sparring partner is one per world, not one per room, so his room emptying is not the
+        // only way he is spent: a player who leaves the world altogether leaves him behind, and a
+        // player who comes back is served by a fresh one built where he is rather than by a
+        // stand-in teleported across a dimension, which is the move that leaves a player with no
+        // client invulnerable and useless as a target.
+        Player spar = Bukkit.getPlayerExact(SPAR);
+        if (spar != null && !visitorsIn(spar.getWorld())) {
+            standInRooms.remove(SPAR);
+            unstamp(SPAR);
+            plugin.dropGhost(SPAR);
+        }
+    }
+
+    /** The rooms somebody running a test is actually standing in. */
+    private Set<String> occupiedRooms(Hall hall) {
+        Set<String> occupied = new HashSet<>();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (furniture(player.getName())) {
+                continue;
+            }
+            String room = hall.roomAt(player.getLocation());
+            if (room != null) {
+                occupied.add(room);
+            }
+        }
+        return occupied;
+    }
+
+    /** Whether a name belongs to the hall rather than to somebody running a test. */
+    private boolean furniture(String name) {
+        return SPAR.equals(name) || guides.containsKey(name)
+                || prey.containsKey(name) || standInRooms.containsKey(name);
+    }
+
+    /** Whether anybody at all is running a test in a world. */
+    private boolean visitorsIn(World world) {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getWorld().equals(world) && !furniture(player.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Takes one thing the hall let out back out of the world, and off the books. */
+    private void take(UUID id) {
+        propRooms.remove(id);
+        hallMobs.remove(id);
+        chickens.remove(id);
+        Entity entity = hallEntities.remove(id);
+        if (entity == null) {
+            entity = Bukkit.getEntity(id);
+        }
+        if (entity != null) {
+            removeSpectres(entity);
+            entity.remove();
+        }
+    }
+
+    /** Takes one of the hall's stand-in players back out, whether he is prey or the partner. */
+    private void takeStandIn(String name) {
+        standInRooms.remove(name);
+        if (prey.containsKey(name)) {
+            clearPrey(name);
+            return;
+        }
+        if (SPAR.equals(name)) {
+            unstamp(name);
+            preyRace.remove(name);
+            plugin.dropGhost(name);
+        }
+    }
+
+    /**
+     * What the hall is still holding in rooms nobody is in, for the probe.
+     *
+     * <p>An empty hall and a hall whose leavings were swept are the same picture from outside, and
+     * "the room is clean" is exactly the claim that needed to be checkable rather than asserted:
+     * a room's own step is over when nothing of it is left standing.
+     */
+    String leftoverReport() {
+        Hall hall = plugin.hallOrNull();
+        Map<String, Integer> byRoom = new TreeMap<>();
+        for (String room : propRooms.values()) {
+            byRoom.merge(String.valueOf(room), 1, Integer::sum);
+        }
+        List<String> occupied = new ArrayList<>();
+        if (hall != null) {
+            occupied.addAll(occupiedRooms(hall));
+        }
+        Collections.sort(occupied);
+        List<String> standing = new ArrayList<>();
+        standInRooms.forEach((name, room) -> standing.add(name + "@" + room));
+        Collections.sort(standing);
+        return "ok props=" + propRooms.size() + " byRoom=" + byRoom
+                + " standins=" + standing + " occupied=" + occupied
+                + " boarded=" + hallMobs.size() + " chickens=" + chickens.size();
+    }
+
+    /**
+     * What a board would be allowed to call up here, for the probe.
+     *
+     * <p>The four questions are the kind that can be answered wrongly without looking wrong: "there
+     * is floor over there" and "he can see the floor over there" stop being the same statement the
+     * moment a room has a pillar in it, and "he can walk to it" is a third statement again. This
+     * prints the counts rather than a verdict - how far a walk from the player reaches, how many
+     * places pass all four, and, of the blocks around him that are inside his room, how many are
+     * full of wall, how many he cannot see, and how many are simply too far.
+     */
+    String summonReport(String rest) {
+        Hall hall = plugin.hallOrNull();
+        String name = rest.trim().split("\\s+")[0];
+        Player player = Bukkit.getPlayerExact(name);
+        if (player == null) {
+            return "err no such player: " + name;
+        }
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        String room = roomOf(player);
+        Hall.Box inside = room == null ? null : hall.zone("room." + room);
+        List<Location> spots = summonCandidates(player, List.of(), SUMMON_FAR);
+        int nearby = 0;
+        int inWall = 0;
+        int hidden = 0;
+        int tooFar = 0;
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                Location at = middleOfBlock(player.getLocation().clone().add(dx, 0, dz));
+                if (inside != null && !inside.holds(at)) {
+                    continue;
+                }
+                nearby++;
+                if (!canStand(at)) {
+                    inWall++;
+                } else if (!seeFrom(player, at)) {
+                    hidden++;
+                } else if (at.distance(player.getLocation()) > SUMMON_FAR) {
+                    tooFar++;
+                }
+            }
+        }
+        return "ok " + player.getName() + " room=" + room
+                + " reachable=" + walkable(player, inside).size()
+                + " candidates=" + spots.size()
+                + " nearby=" + nearby + " inWall=" + inWall
+                + " hidden=" + hidden + " tooFar=" + tooFar
+                + (spots.isEmpty() ? ""
+                        : " nearest=" + trim(spots.get(0).distance(player.getLocation())));
+    }
+
+    /**
+     * Every living thing in a world and which room it is standing in, for the probe.
+     *
+     * <p>This is the half of "inside the room" that the books cannot answer. A summon's room is
+     * recorded where it was called up, which says where it was meant to be and nothing about where
+     * it went: a monster pushed through a wall by a clamp is filed under the room it was called in
+     * and standing in the one next door. Reading the world back is the only way to tell those two
+     * apart - and a monster whose feet or head are inside a block is the other thing a ring drawn
+     * in a room too small for it produces.
+     */
+    String strayReport(String rest) {
+        Hall hall = plugin.hallOrNull();
+        World world = Bukkit.getWorld(rest.trim());
+        if (hall == null) {
+            return "err no hall on this server";
+        }
+        if (world == null) {
+            return "err no such world: " + rest.trim();
+        }
+        Map<String, Integer> byRoom = new TreeMap<>();
+        List<String> stuck = new ArrayList<>();
+        int loose = 0;
+        for (LivingEntity entity : world.getLivingEntities()) {
+            if (entity instanceof Player || entity instanceof Flying) {
+                // Guidance stands in a room on purpose, and a ghast is not a thing that stands.
+                continue;
+            }
+            String room = hall.roomAt(entity.getLocation());
+            if (room == null) {
+                loose++;
+            } else {
+                byRoom.merge(room, 1, Integer::sum);
+            }
+            Location at = entity.getLocation();
+            if (!at.getBlock().getType().isAir()
+                    || !at.clone().add(0, 1, 0).getBlock().getType().isAir()) {
+                // Named, not just counted. "One of them is in a block" is a thing a fight between
+                // forty monsters produces on its own - a silverfish burrows, an explosion throws -
+                // and being able to tell that apart from "the ring was drawn through a wall" is the
+                // whole difference between a summon that works and one that merely looks quiet.
+                stuck.add(entity.getType().name() + "@" + at.getBlockX() + "," + at.getBlockY()
+                        + "," + at.getBlockZ());
+            }
+        }
+        return "ok " + world.getName() + " byRoom=" + byRoom
+                + " outsideRooms=" + loose + " inBlocks=" + stuck.size()
+                + (stuck.isEmpty() ? "" : " " + String.join(" ", stuck.subList(0, Math.min(6, stuck.size()))));
+    }
+
+    /**
      * The backstop, twice a second: the hall's own furniture goes back, and everything a section
      * let out goes back to its own section.
      */
@@ -2809,9 +3802,11 @@ final class HallGuard implements Listener {
             return;
         }
         List<String> before = hall.wrongFixtures();
-        refreshGuides(hall);
         if (hall.repair()) {
             plugin.getLogger().info("put the hall's switches back: " + before);
+        }
+        if (hall.restoreBoats()) {
+            plugin.getLogger().info("put a hall boat back on its mark");
         }
         for (Map.Entry<UUID, Location> entry : new HashMap<>(hallMobs).entrySet()) {
             Entity entity = hallEntities.get(entry.getKey());

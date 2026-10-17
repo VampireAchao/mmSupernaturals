@@ -555,6 +555,12 @@ public class HunterManager extends HumanManager {
 		final SuperNPlayer snplayer = SuperNManager.get(player);
 
 		if (!player.getInventory().contains(Material.ARROW)) {
+			// Said out loud. Every other way shooting can fail here says something - no power, wrong
+			// zone, still recovering - and this one said nothing at all: a bow that draws and looses
+			// and produces no arrow, no message and no arrow in the air, which is what "the ability
+			// is broken" looks like from the player's side. It is also the failure that has nothing
+			// to do with the ability.
+			SuperNManager.sendMessage(snplayer, "You have no arrows to shoot.");
 			return false;
 		}
 

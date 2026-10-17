@@ -365,12 +365,32 @@ public class PriestManager extends HumanManager {
 		}
 		if (snplayer.getPower() > SNConfigHandler.priestPowerBanish) {
 			if (snvictim.isSuper()) {
+				// Asked before the power is spent rather than after: a banish with nowhere to send
+				// anybody is not a banish, and taking the power for it would be charging for a
+				// spell that did nothing at all. The point is set by an admin standing where it
+				// should be and running /sn setbanish, so it can genuinely not be set.
+				Location where = SNConfigHandler.priestBanishLocation;
+				if (where == null || where.getWorld() == null) {
+					SuperNManager.sendMessage(snplayer, "No banish point is set - an admin has to "
+							+ "stand where it should be and run /sn setbanish.");
+					return false;
+				}
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.priestPowerBanish, "Banished "
 						+ victim.getName());
 				SuperNManager.sendMessage(snvictim, "You were banished by "
 						+ ChatColor.WHITE + snplayer.getName() + ChatColor.RED
 						+ "!");
-				victim.teleport(SNConfigHandler.priestBanishLocation);
+				victim.teleport(where);
+				// Where he went, said to both of them. A banish is a teleport to a point somebody
+				// else chose, and neither player can see that point - not before it happens and
+				// not after. The one who was sent has to be told, or the first thing he sees is an
+				// unfamiliar place with nothing explaining why; the one who sent him has to be
+				// told where he sent him, because a spell whose whole effect is "you are now
+				// somewhere else" says nothing at all until the somewhere can be named.
+				String report = describe(where);
+				SuperNManager.sendMessage(snvictim, "You were banished to " + report + ".");
+				SuperNManager.sendMessage(snplayer,
+						"Banished " + victim.getName() + " to " + report + ".");
 				ItemStack item = player.getItemInHand();
 				if (item.getAmount() == 1) {
 					player.setItemInHand(null);
@@ -385,6 +405,23 @@ public class PriestManager extends HumanManager {
 			SuperNManager.sendMessage(snplayer, "Not enough power to banish.");
 			return false;
 		}
+	}
+
+	/**
+	 * A place as {@code world (x, y, z)}, for the messages that have to name one.
+	 *
+	 * <p>It answers for a point that is not set as well, so that a sentence comes back rather than
+	 * a crash. The banish this names asks before it spends anything and refuses to cast when the
+	 * point is missing, so that answer is the one nobody should see - but {@code priestBanishLocation}
+	 * is written from a world name in the configuration, and a name no world answers to is a
+	 * banish point that is not one.
+	 */
+	private static String describe(Location at) {
+		if (at == null || at.getWorld() == null) {
+			return "an unset banish point";
+		}
+		return at.getWorld().getName() + " (" + at.getBlockX() + ", " + at.getBlockY() + ", "
+				+ at.getBlockZ() + ")";
 	}
 
 	public boolean heal(Player player, Player victim) {

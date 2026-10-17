@@ -1,5 +1,6 @@
 package me.matterz.supernaturals.it.harness;
 
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
@@ -16,9 +17,14 @@ import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayDeque;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.Deque;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -90,7 +96,7 @@ final class Nms {
                     minecraftServer, serverLevel, profile, clientInformation);
 
             Class<?> connectionClass = load("net.minecraft.network.Connection");
-            Object connection = newInMemoryConnection(connectionClass);
+            Object connection = newInMemoryConnection(connectionClass, name);
 
             Class<?> cookieClass = load("net.minecraft.server.network.CommonListenerCookie");
             Object cookie = cookieClass
@@ -307,7 +313,7 @@ final class Nms {
      * moment the chunk map starts tracking them. There is nobody to send anything to,
      * so the outbound stage is replaced with a sink.
      */
-    private static Object newInMemoryConnection(Class<?> connectionClass)
+    private static Object newInMemoryConnection(Class<?> connectionClass, String name)
             throws ReflectiveOperationException {
         Class<?> packetFlowClass = load("net.minecraft.network.protocol.PacketFlow");
         Object serverbound = enumConstant(packetFlowClass, "SERVERBOUND");
@@ -324,16 +330,90 @@ final class Nms {
         Object connection = connectionClass.getConstructor(packetFlowClass).newInstance(serverbound);
         connectionClass.getField("channel").set(connection, channel);
         connectionClass.getField("address").set(connection, new InetSocketAddress("127.0.0.1", 0));
+        WATCHED.put(channel, name);
         return connection;
     }
 
-    /** Swallows everything the server tries to send a client that is not there. */
+    /**
+     * Swallows everything the server tries to send a client that is not there.
+     *
+     * <p>It reads the chat out of them on the way past first - see {@link #said}. Everything else
+     * is released and forgotten exactly as before.
+     */
     private static final class DiscardOutbound extends ChannelOutboundHandlerAdapter {
         @Override
         public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) {
+            remember(context.channel(), message);
             ReferenceCountUtil.release(message);
             promise.setSuccess();
         }
+    }
+
+    /** How many of a fake client's messages are kept, so a chatty step cannot fill memory. */
+    private static final int SAID_KEPT = 40;
+
+    /** How much of a printed packet is kept: enough for a sentence, not for a whole inventory. */
+    private static final int SAID_LONGEST = 1000;
+
+    /**
+     * The last few things the server said to each fake client, by name.
+     *
+     * <p>{@code player.sendMessage} ends in exactly one packet, and every message a plugin sends a
+     * player goes through it - which made chat the one part of a plugin's behaviour no scenario
+     * could see, since there is nobody to see it. The packet is in the handler on its way out
+     * regardless, so its text is kept rather than dropped: a few dozen strings per stand-in, and
+     * "the spell announces where it sent him" stops being a claim.
+     *
+     * <p>Kept for as long as the server runs and never cleared, and only the last {@link
+     * #SAID_KEPT} of them per name: a scenario that asserts on a sentence has to read the tail it
+     * just caused, not the whole list, because the name it is reading may have been used by an
+     * earlier step as well. Nothing clears it on disconnect for the same reason it is not a
+     * scenario's business: what a name was told is history, and the count that comes back from
+     * {@link #said} says how much of it there is.
+     */
+    private static final Map<String, Deque<String>> SAID = new ConcurrentHashMap<>();
+
+    /** Which fake client a channel belongs to. */
+    private static final Map<Channel, String> WATCHED = new ConcurrentHashMap<>();
+
+    private static void remember(Channel channel, Object packet) {
+        String who = WATCHED.get(channel);
+        if (who == null) {
+            return;
+        }
+        String text = chatOf(packet);
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        Deque<String> said = SAID.computeIfAbsent(who, name -> new ArrayDeque<>());
+        said.addLast(text);
+        while (said.size() > SAID_KEPT) {
+            said.removeFirst();
+        }
+    }
+
+    /**
+     * The text of a system-chat packet, or {@code null} for anything else.
+     *
+     * <p>Recognised by name rather than by type, like everything else in this file: the packet
+     * classes live in the server jar, which this file cannot see. A record prints its own parts, so
+     * the sentence the server was sending is in the printed form, which is all a scenario needs to
+     * search for a phrase in. A packet longer than {@link #SAID_LONGEST} is cut off at that point -
+     * the printed form carries the component's own formatting around the text, so the cap is a
+     * guard on a pathological message rather than a limit a sentence meets.
+     */
+    private static String chatOf(Object packet) {
+        if (!packet.getClass().getSimpleName().contains("SystemChat")) {
+            return null;
+        }
+        String printed = String.valueOf(packet);
+        return printed.length() > SAID_LONGEST ? printed.substring(0, SAID_LONGEST) : printed;
+    }
+
+    /** What the server has said to one fake client, oldest first. */
+    static List<String> said(String name) {
+        Deque<String> said = SAID.get(name);
+        return said == null ? List.of() : List.copyOf(said);
     }
 
     /** The same derivation an offline-mode server uses, so ops.json can pre-authorise. */
@@ -362,6 +442,29 @@ final class Nms {
             throw new IllegalStateException(
                     "the server no longer provides " + name
                             + " - this test harness needs updating for this Paper version", e);
+        }
+    }
+
+    /**
+     * Lands one blow on something that is not alive - a boat, in practice.
+     *
+     * <p>There is no Bukkit call for this. The boats this server builds are {@code Vehicle} and
+     * nothing else: the interface that carries {@code damage(double)} is {@code Damageable}, and a
+     * boat is not one, so a punch cannot be asked for through the API at all. What a punch does
+     * underneath is hand the boat to the server's own damage entry point, and that is what this
+     * does - the same route an arrow or a collision takes, so the events fire exactly as they do
+     * when a player swings at one.
+     */
+    static void hit(org.bukkit.entity.Entity entity, double amount) {
+        try {
+            Object handle = call(entity, "getHandle");
+            Object source = call(call(handle, "damageSources"), "generic");
+            handle.getClass()
+                    .getMethod("hurt", load("net.minecraft.world.damagesource.DamageSource"),
+                            float.class)
+                    .invoke(handle, source, (float) amount);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("could not hit " + entity, e);
         }
     }
 
@@ -425,14 +528,13 @@ final class Nms {
      * into. A stand-in has no client, so nothing ever confirms anything and the state stays on it
      * for good. The fields are cleared by name and each is optional: the ones that do not exist
      * on a build are the ones whose problem that build does not have.
+     *
+     * <p>There are two gates that read that state, and both are opened below: one wants to know
+     * that the player has finished arriving, the other that its client has finished loading. A
+     * stand-in fails both forever, for the same reason.
      */
     static void arrive(Object serverPlayer) {
-        Object connection = null;
-        try {
-            connection = call(serverPlayer, "connection");
-        } catch (ReflectiveOperationException ignored) {
-            // No connection to clear; the fields below are still worth clearing.
-        }
+        Object connection = connectionOf(serverPlayer);
         // The name matters and every obvious guess is wrong: on this build the flag that makes a
         // player untouchable is the one that says it is still changing dimension, and it is called
         // isChangingDimension. A stand-in is put straight into the world it belongs in and never
@@ -448,6 +550,38 @@ final class Nms {
         if (connection != null) {
             plant(connection, "awaitingPositionFromClient", null);
             plant(connection, "awaitingTeleportTime", 0);
+            // The load window, which is the second half of the same gate and was the half nobody
+            // had looked at. `ServerPlayer#isInvulnerableTo` refuses a blow outright while
+            // `connection.hasClientLoaded()` is false, and that answers "not yet" while
+            // `clientLoadedTimeoutTimer` is still counting down (60 ticks, set when a player is
+            // placed) or `waitingForRespawn` is set. No client means nobody ever says "loaded", so
+            // a stand-in spends his first three seconds untouchable - and a room that asks one
+            // stand-in to hit another hits him in the tick he was spawned, which lands here
+            // instead of on him. This is read at the moment of the blow, not at spawn, so it has
+            // to be cleared here rather than once at birth.
+            plant(connection, "waitingForRespawn", false);
+            plant(connection, "clientLoadedTimeoutTimer", 0);
+        }
+    }
+
+    /**
+     * A server player's packet listener, which is where the rest of the "not yet arrived" state
+     * lives.
+     *
+     * <p>It needs its own method because the obvious way to ask is wrong. The field is called
+     * {@code connection}, no method is, and a lookup that only knows how to call methods comes
+     * back empty and - worse - silent. Everything on the listener was therefore cleared nowhere,
+     * for as long as that looked like a miss instead of an answer.
+     */
+    private static Object connectionOf(Object serverPlayer) {
+        Object connection = fieldOf(serverPlayer, "connection");
+        if (connection != null) {
+            return connection;
+        }
+        try {
+            return call(serverPlayer, "getConnection");
+        } catch (ReflectiveOperationException ignored) {
+            return null;
         }
     }
 
@@ -571,12 +705,7 @@ final class Nms {
             // Already a handle, or has none; scan what came in either way.
         }
         StringBuilder out = new StringBuilder();
-        Object connection = null;
-        try {
-            connection = call(player, "connection");
-        } catch (ReflectiveOperationException ignored) {
-            // No connection on this build.
-        }
+        Object connection = connectionOf(player);
         scan(player, out);
         Object abilities = fieldOf(player, "abilities");
         if (abilities != null) {
