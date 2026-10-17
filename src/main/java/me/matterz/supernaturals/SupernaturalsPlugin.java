@@ -423,8 +423,13 @@ public class SupernaturalsPlugin extends JavaPlugin {
 	}
 
 	public static void log(Level level, String msg) {
-		Logger.getLogger("Minecraft").log(level, "["
-				+ instance.getDescription().getFullName() + "] " + msg);
+		// Read before the plugin is enabled - and read by the tests, which run with no plugin at
+		// all - is a case this has to answer: the description is on the instance, and asking the
+		// instance for it is the crash. A line without the version on it is still a line.
+		String prefix = instance == null
+				? "[mmSupernaturals] "
+				: "[" + instance.getDescription().getFullName() + "] ";
+		Logger.getLogger("Minecraft").log(level, prefix + msg);
 	}
 
 }

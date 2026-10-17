@@ -40,8 +40,7 @@ What that means for you:
   drive fake players through a hall of test rooms (`mvn verify -Pit`).
 - A series of gameplay bugs were fixed along the way. Among them: the plugin's clock advanced
   once per player instead of once per tick, so every timed rule ran faster the more people were
-  online (fixed in 1.4.1); an angel's summoning never spent the food it was cast with; and a
-  player's power could arrive unbounded — or not even a number — from a hand-edited save file.
+  online (fixed in 1.4.1).
 - The first published build,
   [1.4.1](https://github.com/VampireAchao/mmSupernaturals/releases/tag/v1.4.1), is on the
   Releases page.

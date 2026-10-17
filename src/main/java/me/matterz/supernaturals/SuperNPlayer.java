@@ -216,6 +216,12 @@ public class SuperNPlayer implements Serializable {
 	// -------------------------------------------- //
 	// Limiting value of double //
 	// -------------------------------------------- //
+	/** The least power a player may hold: a cost may empty the bar, but not overdraw it. */
+	public static final double MIN_POWER = 0;
+
+	/** The most power a player may hold, whatever the race - ten thousand, since 2011. */
+	public static final double MAX_POWER = 10000;
+
 	/**
 	 * A number held between two bounds, which is where a player's power lives.
 	 *
@@ -239,6 +245,6 @@ public class SuperNPlayer implements Serializable {
 	}
 
 	public double limitDouble(double d) {
-		return this.limitDouble(d, 0, 10000);
+		return this.limitDouble(d, MIN_POWER, MAX_POWER);
 	}
 }

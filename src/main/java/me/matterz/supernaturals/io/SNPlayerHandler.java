@@ -48,17 +48,54 @@ public class SNPlayerHandler {
 
 		Yaml yaml = new Yaml(constructor);
 
-		try {
-			List<SuperNPlayer> supernaturals = (List<SuperNPlayer>) yaml.load(new FileReader(file));
+		try (FileReader reader = new FileReader(file)) {
+			List<SuperNPlayer> supernaturals = (List<SuperNPlayer>) yaml.load(reader);
 
 			if (supernaturals == null) {
 				return new ArrayList<SuperNPlayer>();
+			}
+
+			for (SuperNPlayer snplayer : supernaturals) {
+				holdPowerInsideItsBounds(snplayer);
 			}
 
 			return supernaturals;
 		} catch (FileNotFoundException e) {
 			SupernaturalsPlugin.log(Level.WARNING, "Player data not found!");
 			return null;
+		} catch (IOException e) {
+			// The reader is closed by the try-with-resources, which is the only way this can
+			// happen on the way out of it.
+			SupernaturalsPlugin.log(Level.WARNING, "Player data could not be read!");
+			e.printStackTrace();
+			return null;
+		}
+	}
+
+	/**
+	 * Puts a power that came out of a save file back between the bounds every race is given.
+	 *
+	 * <p>This file is the one input the plugin does not write, and a save carries the power twice:
+	 * {@code power}, which snakeyaml maps onto the getter/setter pair and so through the bound, and
+	 * {@code superPower}, the field behind them, which it writes onto the bean exactly as the file
+	 * has it. The keys are applied in the order the file lists them, so the unbounded one is the
+	 * one that lands last: a hand-edited {@code 999999999} stayed {@code 999999999}, and a
+	 * {@code .NaN} stayed a non-number, which is never greater than any price and so waives every
+	 * cost in the plugin at once. Writing the number back through the setter is what makes the
+	 * bound a rule about the save file rather than about the plugin's own arithmetic.
+	 *
+	 * <p>Said out loud when it changes anything, because a file that had to be corrected is a file
+	 * somebody should know about - the alternative is a server where one player quietly has a
+	 * number nobody can earn, which is the state this is here to end.
+	 */
+	private static void holdPowerInsideItsBounds(SuperNPlayer snplayer) {
+		double stored = snplayer.getPower();
+		snplayer.setPower(stored);
+		if (snplayer.getPower() != stored) {
+			SupernaturalsPlugin.log(Level.WARNING, "Power for " + snplayer.getName() + " was "
+					+ stored + " in the save file, which is not a power between "
+					+ SuperNPlayer.MIN_POWER + " and " + SuperNPlayer.MAX_POWER + "; it is "
+					+ snplayer.getPower() + " now.");
 		}
 	}
 
