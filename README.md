@@ -1,5 +1,7 @@
 # mmSupernaturals
 
+![mmSupernaturals cover art](docs/mmSupernaturals-cover-v3.png)
+
 A Paper plugin that adds eight supernatural races to Minecraft — Vampire, Ghoul, Werewolf,
 Demon, Priest, WitchHunter, Angel and EnderBorn — each with its own abilities, its own way of
 turning people, and its own counters. A player is an ordinary person until something turns them.
