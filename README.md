@@ -47,7 +47,7 @@ What that means for you:
 
 ## Installing
 
-1. Download `mmSupernaturals-1.4.1.jar` from the
+1. Download `mmSupernaturals-1.5.0.jar` from the
    [Releases](https://github.com/VampireAchao/mmSupernaturals/releases) page.
 2. Drop it into your server's `plugins/` directory.
 3. You need **Paper 26.3** and **Java 25**. WorldGuard is an optional soft dependency; a
@@ -196,6 +196,20 @@ mvn test          # unit tests
 mvn verify -Pit   # unit + scenario tests: boots a real Paper server and drives fake players
                   # through the test hall (slow — that is why they sit behind a profile)
 ```
+
+### Releasing
+
+A release is a tag. Set the version in `pom.xml`, commit, and push a tag that matches it:
+
+```bash
+# pom.xml: <version>1.5.1</version>
+git tag v1.5.1 && git push origin v1.5.1
+```
+
+GitHub builds the jar and publishes it with notes generated from the commits since the last tag.
+The workflow refuses a tag that disagrees with `pom.xml`, so the two cannot drift apart, and it runs
+the unit tests before it packages anything — the scenario tests need a server, so they stay a local
+step (`mvn verify -Pit`).
 
 ## Credits
 
