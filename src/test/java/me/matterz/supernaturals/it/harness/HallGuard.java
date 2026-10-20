@@ -1189,8 +1189,8 @@ final class HallGuard implements Listener {
         }
         List<Material> banned = bannedWeapons(race);
         if (banned.contains(wanted)) {
-            note(player, "§e" + Hall.title(race) + " 用不了 " + wanted.name()
-                    + "（在它的禁用名单里），所以只能空手出手");
+            note(player, "§e" + Hall.title(race) + " 拿着 " + wanted.name()
+                    + " 打不出伤害（这一族不吃这种材质），所以只能空手出手");
             return null;
         }
         return wanted;

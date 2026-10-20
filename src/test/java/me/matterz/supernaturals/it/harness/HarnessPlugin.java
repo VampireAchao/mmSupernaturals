@@ -443,8 +443,6 @@ public final class HarnessPlugin extends JavaPlugin {
                 return fall(rest);
             case "hurt":
                 return hurt(rest);
-            case "mine":
-                return mine(rest);
             case "step":
                 return step(rest);
             case "leftclick":
@@ -532,6 +530,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return kill(rest);
             case "respawn":
                 return respawn(rest);
+            case "mine":
+                return mine(rest);
             case "count":
                 return count(rest);
             case "fireticks":
