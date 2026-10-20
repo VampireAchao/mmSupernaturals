@@ -443,7 +443,21 @@ final class HallGuard implements Listener {
             return;
         }
         if (killer != null) {
-            note(player, "§7他杀完就退场了——你已经转化，想再试就再右键一次那块牌");
+            // Whether the kill actually turned anybody, which is not the same as the kill happening:
+            // for three of the races the conversion is a roll and for the demon it is a condition,
+            // so a kill that changed nothing is a normal outcome. Saying "you have been turned"
+            // whatever happened makes a working room read as a broken one - and it is exactly what
+            // a tester sees when a roll misses or when the room's condition was not met.
+            String before = raceBeforeKill.remove(name);
+            String now = SuperNManager.get(name).getType();
+            if (before != null && !before.equalsIgnoreCase(now)) {
+                note(player, "§a他杀完就退场了——你已经转化，现在是 " + now
+                        + "，想再试就再右键一次那块牌");
+            } else {
+                note(player, "§7他杀完就退场了——你现在还是 " + now + "，这次没转成："
+                        + "概率没过，或者这一族还有条件没满足。"
+                        + "这一间的牌上写着条件和办法（恶魔要条件，「必中开关」管的是概率）");
+            }
         }
         if (player.isDead()) {
             player.spigot().respawn();
@@ -988,6 +1002,15 @@ final class HallGuard implements Listener {
     }
 
     /**
+     * What each player was standing as when a room sent somebody to kill them.
+     *
+     * <p>Kept so the room can tell "the kill turned you" from "the kill happened": a roll can miss
+     * and the demon's kill has a condition of its own, so both facts have to be checkable, and the
+     * one that used to be announced was neither of them.
+     */
+    private final Map<String, String> raceBeforeKill = new HashMap<>();
+
+    /**
      * Sends a stand-in of a named race at the player until the player is dead.
      *
      * <p>This is the "I am the one being turned" half of every race's conversion. The plugin turns
@@ -1014,6 +1037,10 @@ final class HallGuard implements Listener {
             note(player, "§c他起不来，这个环节暂时不能用");
             return;
         }
+        // What the player was, so the room can say afterwards whether the kill turned them. The
+        // conversion is not certain for any of these races: three of them roll and the demon has a
+        // condition, so "he killed you" and "you are one of them now" are two different facts.
+        raceBeforeKill.put(player.getName(), SuperNManager.get(player).getType());
         fullPower(npc);
         revives.put(npc.getName(), npc.getLocation().clone());
         Bukkit.getScheduler().runTaskLater(plugin, () -> hunt(player, npc), 30L);
