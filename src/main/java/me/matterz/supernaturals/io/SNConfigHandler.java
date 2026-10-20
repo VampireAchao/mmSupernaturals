@@ -23,6 +23,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -36,6 +37,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.LivingEntity;
 
 public class SNConfigHandler {
 
@@ -811,14 +813,9 @@ public class SNConfigHandler {
 				config.set("Ghoul.Immunity", ghoulWeaponImmunityString);
 			}
 
-				// 僵尸家族（含巨型僵尸）
+			// 僵尸家族（含巨型僵尸）
 			if (ghoulTruceString.size() == 0) {
-				ghoulTruceString.add("ZOMBIE");
-				ghoulTruceString.add("ZOMBIE_VILLAGER");
-				ghoulTruceString.add("DROWNED");
-				ghoulTruceString.add("HUSK");
-				ghoulTruceString.add("ZOMBIFIED_PIGLIN");
-				ghoulTruceString.add("GIANT");
+				ghoulTruceString.addAll(graveMobs());
 				config.set("Ghoul.Truce.Creatures", ghoulTruceString);
 			}
 
@@ -1111,7 +1108,8 @@ public class SNConfigHandler {
 		ghoulDeathPowerPenalty = config.getInt("Ghoul.Power.DeathPenalty", 2000);
 		ghoulDamageReceivedFactor = config.getDouble("Ghoul.DamageFactor.DefenseBonus", 0.65);
 		ghoulWeaponsString = config.getStringList("Ghoul.Weapon.Restrictions");
-		ghoulTruceString = config.getStringList("Ghoul.Truce.Creatures");
+		ghoulTruceString = upgradeGhoulTruce(config,
+				config.getStringList("Ghoul.Truce.Creatures"));
 		ghoulDamageFactor = config.getDouble("Ghoul.DamageFactor.AttackBonus", 2);
 		ghoulDamageWater = config.getInt("Ghoul.WaterDamage", 4);
 		ghoulHealthGained = config.getDouble("Ghoul.Time.HealthGained", 0.1);
@@ -1218,22 +1216,13 @@ public class SNConfigHandler {
 			burnableBlocks.add(Material.getMaterial(block));
 		}
 
-		for (String creature : vampireTruceString) {
-			EntityType cType = EntityType.valueOf(creature);
-			if (cType != null) {
-				vampireTruce.add(cType);
-			}
-		}
+		// Assigned, not appended: these lists are rebuilt on every load, so /reload cannot double
+		// them, and truceTypes() is what makes an unknown name cost a log line instead of startup.
+		vampireTruce = truceTypes(vampireTruceString, "Vampire.Truce.Creatures");
+		ghoulTruce = truceTypes(ghoulTruceString, "Ghoul.Truce.Creatures");
 
 		for (String material : priestMaterialsString) {
 			priestSpellMaterials.add(Material.getMaterial(material));
-		}
-
-		for (String creature : ghoulTruceString) {
-			EntityType cType = EntityType.valueOf(creature);
-			if (cType != null) {
-				ghoulTruce.add(cType);
-			}
 		}
 
 		for (String weapon : ghoulWeaponsString) {
@@ -1515,6 +1504,123 @@ public class SNConfigHandler {
 		config.set("Priest.Church.Location.X", priestChurchLocationX);
 		config.set("Priest.Church.Location.Y", priestChurchLocationY);
 		config.set("Priest.Church.Location.Z", priestChurchLocationZ);
+	}
+
+	// -------------------------------------------- //
+	// Truces //
+	// -------------------------------------------- //
+
+	/**
+	 * The mobs a ghoul keeps the peace with, in the order the hall lays them out.
+	 *
+	 * <p>What the grave is, then: the zombie family, the skeleton family, the wraith of the
+	 * sleepless, and the two old companions this list has had since the first commit - a creeper is
+	 * not undead, but it is what a graveyard is made of at night, and it was here before netherite
+	 * was. Both families are complete on purpose: a grave that knows a zombie and not a husk, or a
+	 * skeleton and not a stray, is a rule with holes in it.
+	 *
+	 * <p>One list, used twice: a fresh config.yml is written with it, and an old one is upgraded to
+	 * it while it still holds the six-mob default from before the grave was widened. Two copies
+	 * would drift the first time either was edited.
+	 */
+	private static List<String> graveMobs() {
+		List<String> mobs = new ArrayList<>();
+		// 僵尸族：地上的、村子的、沙漠的、水里的、下界的，外加三只"兽"和巨人。
+		mobs.add("ZOMBIE");
+		mobs.add("ZOMBIE_VILLAGER");
+		mobs.add("HUSK");
+		mobs.add("DROWNED");
+		mobs.add("ZOMBIFIED_PIGLIN");
+		mobs.add("GIANT");
+		mobs.add("ZOGLIN");
+		mobs.add("ZOMBIE_HORSE");
+		mobs.add("ZOMBIE_NAUTILUS");
+		mobs.add("CAMEL_HUSK");
+		// 骷髅族：地上的、雪原的、沼泽的、枯的、下界的，外加骷髅马。
+		mobs.add("SKELETON");
+		mobs.add("STRAY");
+		mobs.add("BOGGED");
+		mobs.add("PARCHED");
+		mobs.add("WITHER_SKELETON");
+		mobs.add("SKELETON_HORSE");
+		// 亡灵里其余那位，以及两位原版就在表里的老邻居。
+		mobs.add("PHANTOM");
+		mobs.add("CREEPER");
+		mobs.add("ENDERMAN");
+		return mobs;
+	}
+
+	/** What {@link #graveMobs()} held before the grave was widened: six, all zombies. */
+	private static final Set<String> GHOUL_TRUCE_BEFORE_WIDENING = new LinkedHashSet<>(List.of(
+			"ZOMBIE", "ZOMBIE_VILLAGER", "DROWNED", "HUSK", "ZOMBIFIED_PIGLIN", "GIANT"));
+
+	/**
+	 * Widens a truce list that is still the old default, and leaves every other list alone.
+	 *
+	 * <p>The default is only written when config.yml does not exist, so a server that has had one
+	 * since before this change would keep the six-mob list for ever: the file is the truth, and
+	 * nothing else rewrites it. This upgrades exactly that file - while the list still says what the
+	 * old default said, it becomes the new default and the file is saved; if somebody has made the
+	 * list their own, it is theirs and stays. Idempotent without a marker, because the widened list
+	 * no longer equals the old one.
+	 */
+	private static List<String> upgradeGhoulTruce(Configuration config, List<String> listed) {
+		Set<String> asWritten = new LinkedHashSet<>();
+		for (String name : listed) {
+			if (name != null && !name.trim().isEmpty()) {
+				asWritten.add(name.trim().toUpperCase(Locale.ROOT));
+			}
+		}
+		List<String> widened = graveMobs();
+		// Already what this build writes - a fresh config, or one this has already upgraded. Saying
+		// anything here would be a line on every start about a list nobody touched.
+		if (asWritten.equals(new LinkedHashSet<>(widened))) {
+			return listed;
+		}
+		if (!asWritten.equals(GHOUL_TRUCE_BEFORE_WIDENING)) {
+			SupernaturalsPlugin.log("Ghoul.Truce.Creatures is a list of its own (" + asWritten.size()
+					+ " entries) - leaving it as it is.");
+			return listed;
+		}
+		config.set("Ghoul.Truce.Creatures", widened);
+		saveConfig();
+		SupernaturalsPlugin.log("Ghoul.Truce.Creatures was still the old six-mob default; it now"
+				+ " names " + widened.size() + " grave mobs. Edit config.yml to taste.");
+		return widened;
+	}
+
+	/**
+	 * The entity types a truce list names, with anything this version does not have left out and
+	 * reported.
+	 *
+	 * <p>A name that does not resolve used to throw out of the config load - {@code valueOf} has no
+	 * "not found" answer - so one typo, or a name a game update removed, took the whole plugin down
+	 * at startup instead of costing one line of a truce. A name that resolves to something that is
+	 * not a living thing is refused the same way: a truce with an arrow is not a truce.
+	 */
+	private static List<EntityType> truceTypes(List<String> names, String setting) {
+		Set<EntityType> types = new LinkedHashSet<>();
+		for (String name : names) {
+			if (name == null || name.trim().isEmpty()) {
+				continue;
+			}
+			EntityType type;
+			try {
+				type = EntityType.valueOf(name.trim().toUpperCase(Locale.ROOT));
+			} catch (IllegalArgumentException unknown) {
+				SupernaturalsPlugin.log(Level.WARNING, setting + " lists \"" + name
+						+ "\", which is not an entity in this version - it is left out.");
+				continue;
+			}
+			if (type.getEntityClass() == null
+					|| !LivingEntity.class.isAssignableFrom(type.getEntityClass())) {
+				SupernaturalsPlugin.log(Level.WARNING, setting + " lists \"" + name
+						+ "\", which is not a living entity - it is left out.");
+				continue;
+			}
+			types.add(type);
+		}
+		return new ArrayList<>(types);
 	}
 
 	/**
