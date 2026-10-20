@@ -468,6 +468,55 @@ final class Nms {
         }
     }
 
+    /**
+     * Right-clicks a block with whatever the player is holding, through the server's own item-use
+     * step.
+     *
+     * <p>There is no Bukkit call for this either, and the reason it matters is that firing a
+     * {@code PlayerInteractEvent} answers the wrong half of the question. An event that nobody
+     * cancels only means no plugin stopped the click on its way in; the item still has to survive
+     * the use-on-block step afterwards, and an item can be refused there without any event saying
+     * so. This walks the same path a real right-click walks - {@code ServerPlayerGameMode#useItemOn},
+     * which is what a client's click reaches - so the answer is not "the event was allowed" but
+     * "the log is now a stripped log".
+     */
+    static String useOn(org.bukkit.entity.Player player, org.bukkit.block.Block block) {
+        try {
+            Object handle = call(player, "getHandle");
+            Object level = call(block.getWorld(), "getHandle");
+            Object gameMode = fieldOf(handle, "gameMode");
+
+            Class<?> posClass = load("net.minecraft.core.BlockPos");
+            Object pos = posClass.getConstructor(int.class, int.class, int.class)
+                    .newInstance(block.getX(), block.getY(), block.getZ());
+            Class<?> vecClass = load("net.minecraft.world.phys.Vec3");
+            Object middle = vecClass.getConstructor(double.class, double.class, double.class)
+                    .newInstance(block.getX() + 0.5, block.getY() + 0.5, block.getZ() + 0.5);
+            Class<?> directionClass = load("net.minecraft.core.Direction");
+            Class<?> hitClass = load("net.minecraft.world.phys.BlockHitResult");
+            Object hit = hitClass.getConstructor(vecClass, directionClass, posClass, boolean.class)
+                    .newInstance(middle, enumConstant(directionClass, "UP"), pos, false);
+
+            Class<?> stackClass = load("net.minecraft.world.item.ItemStack");
+            Object stack = Class.forName("org.bukkit.craftbukkit.inventory.CraftItemStack")
+                    .getMethod("asNMSCopy", org.bukkit.inventory.ItemStack.class)
+                    .invoke(null, player.getInventory().getItemInMainHand());
+
+            Class<?> handClass = load("net.minecraft.world.InteractionHand");
+            Object hand = enumConstant(handClass, "MAIN_HAND");
+
+            Object result = gameMode.getClass()
+                    .getMethod("useItemOn",
+                            load("net.minecraft.server.level.ServerPlayer"),
+                            load("net.minecraft.world.level.Level"),
+                            stackClass, handClass, hitClass)
+                    .invoke(gameMode, handle, level, stack, hand, hit);
+            return String.valueOf(result);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("could not right-click " + block + " as " + player.getName(), e);
+        }
+    }
+
     private static Object call(Object target, String method) throws ReflectiveOperationException {
         Method found = target.getClass().getMethod(method);
         found.setAccessible(true);

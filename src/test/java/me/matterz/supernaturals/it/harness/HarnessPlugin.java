@@ -530,6 +530,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return kill(rest);
             case "respawn":
                 return respawn(rest);
+            case "use":
+                return use(rest);
             case "mine":
                 return mine(rest);
             case "count":
@@ -1268,6 +1270,27 @@ public final class HarnessPlugin extends JavaPlugin {
             }
         }
         return "none";
+    }
+
+    /**
+     * Right-clicks a block with what the player is holding, and says what the block became.
+     *
+     * <p>{@code mine} answers "did anything stop the break" by firing the event. The uses this
+     * exists to check - stripping a log, tilling soil, flattening grass into a path - are not
+     * events at all; they are what the server does after the click is allowed. So the only honest
+     * answer is the block afterwards.
+     */
+    private String use(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 4) {
+            return "err usage: use <name> <x> <y> <z>";
+        }
+        Player who = player(args[0]);
+        Block target = blockAt(rest);
+        Material before = target.getType();
+        String result = Nms.useOn(who, target);
+        return "ok result=" + result + " was=" + before + " now=" + target.getType()
+                + " holding=" + who.getInventory().getItemInMainHand().getType();
     }
 
     /** Breaks a block as a player would, and reports whether anything stopped it. */
