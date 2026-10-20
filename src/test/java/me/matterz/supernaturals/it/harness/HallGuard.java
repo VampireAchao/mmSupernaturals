@@ -746,12 +746,26 @@ final class HallGuard implements Listener {
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
         Hall hall = plugin.hallOrNull();
-        if (hall == null || event.getClickedBlock() == null
-                || event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+        if (hall == null || event.getClickedBlock() == null) {
             return;
         }
         Block block = event.getClickedBlock();
         Hall.Trigger trigger = hall.triggerAt(block.getLocation());
+        // A board is used by right-clicking it, and a swing at one used to fall through every check
+        // below and do nothing at all - no note, no cancel - so a room whose board was swung at
+        // instead of used read as broken, which is how it was reported. It was worse than quiet:
+        // nothing cancelled the swing either, so in creative it took the board the room is built
+        // on. Answered now, and still not acted on.
+        if (event.getAction() == Action.LEFT_CLICK_BLOCK) {
+            if (trigger != null || hall.inside(block.getLocation())) {
+                event.setCancelled(true);
+                note(event.getPlayer(), "§7这一面墙上都是告示牌：对着它按 §f右键§7，左键不算");
+            }
+            return;
+        }
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
         if (trigger == null) {
             if (block.getState() instanceof org.bukkit.block.Sign && hall.inside(block.getLocation())) {
                 event.setCancelled(true);
