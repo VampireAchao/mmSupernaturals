@@ -294,8 +294,12 @@ public class AngelManager extends ClassManager {
 	 * stayed on while the diamond one beside it was taken away. Naming tiers here means the next
 	 * material that belongs with them is a word in this list rather than four more conditions, and
 	 * the four slots cannot disagree with each other.
+	 *
+	 * <p>Public because it is asked rather than copied: a diagnostic that wants to say what an
+	 * angel will refuse should ask this method, not repeat the three names and drift from them the
+	 * next time this list changes.
 	 */
-	private static boolean forbiddenArmor(Material material) {
+	public static boolean forbiddenArmor(Material material) {
 		return MaterialTiers.isArmourOfTier(material, "GOLDEN", "DIAMOND", "NETHERITE");
 	}
 

@@ -97,21 +97,48 @@ public final class MaterialTiers {
 	}
 
 	/**
-	 * A weapon list with every kind of every tier it names, and every tier that stands in for one it
-	 * names.
+	 * A forbidden-weapon list, widened to every kind of every tier it names and to the tier that
+	 * stands in for each of them.
 	 *
 	 * <p>This is what makes an existing configuration obey the rule without being rewritten: a list
 	 * that names a diamond sword, written before any of this existed, means the diamond tier, and
 	 * therefore the netherite tier, in all six kinds. Nothing in the file has to be touched, and a
 	 * server that was configured years ago is corrected by the same code as a fresh one.
+	 *
+	 * <p>Widening is right here because the list says what a race may <em>not</em> hold: every item
+	 * it grows by is an item the rule was already meant to cover.
 	 */
 	public static List<Material> completeWeapons(Collection<Material> listed) {
 		return complete(listed, WEAPON_KINDS);
 	}
 
-	/** The same, for a list of armour. */
+	/**
+	 * An allowed-armour list, with the tier of every piece paired - and nothing else added.
+	 *
+	 * <p>Armour lists are the other way round: they say what a race <em>may</em> wear, and
+	 * everything else is taken off, so inventing a kind would hand out a slot the server never
+	 * handed out. What must not differ is the tier: a list that allows a diamond chestplate has to
+	 * allow the netherite one, or the upgrade is a way round the list. So each piece brings its own
+	 * counterpart and no other kind follows it.
+	 */
 	public static List<Material> completeArmour(Collection<Material> listed) {
-		return complete(listed, ARMOR_KINDS);
+		Set<Material> out = new LinkedHashSet<>();
+		for (Material material : listed) {
+			if (material == null) {
+				continue;
+			}
+			out.add(material);
+			if (!ARMOR_KINDS.contains(kindOf(material)) || !PAIRED_TIERS.contains(tierOf(material))) {
+				continue;
+			}
+			for (String tier : PAIRED_TIERS) {
+				Material counterpart = Material.matchMaterial(tier + "_" + kindOf(material));
+				if (counterpart != null) {
+					out.add(counterpart);
+				}
+			}
+		}
+		return new ArrayList<>(out);
 	}
 
 	private static List<Material> complete(Collection<Material> listed, List<String> kinds) {

@@ -3,6 +3,7 @@ package me.matterz.supernaturals.it.harness;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
+import me.matterz.supernaturals.manager.AngelManager;
 import me.matterz.supernaturals.manager.SuperNManager;
 import me.matterz.supernaturals.util.MaterialTiers;
 import org.bukkit.Bukkit;
@@ -633,7 +634,7 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " tier=" + MaterialTiers.tierOf(material)
                 + " kind=" + MaterialTiers.kindOf(material)
                 + " pairedWeapon=" + MaterialTiers.isPairedWeapon(material)
-                + " angelArmor=" + MaterialTiers.isArmourOfTier(material, "GOLDEN", "DIAMOND", "NETHERITE");
+                + " angelMayNotWear=" + AngelManager.forbiddenArmor(material);
     }
 
     private String perm(String rest) {
