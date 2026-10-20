@@ -72,11 +72,13 @@ public class GhoulManager extends ClassManager {
 				ItemStack item = pDamager.getItemInHand();
 
 				if (item != null) {
-					// By material, not by weapon: what cannot cut a ghoul is the substance, so a
-					// diamond spear, a diamond axe and a diamond block are the same answer. The
-					// tiers come from Ghoul.Immunity (see SNConfigHandler), which is a list of
-					// items only because that is the shape a server owner can edit.
-					if (MaterialTiers.isOfTier(item.getType(), SNConfigHandler.ghoulWeaponImmuneTiers)) {
+					// Two questions, in this order: is this a tool or a weapon at all, and is it made
+					// of a substance that cannot cut a ghoul. The tier is what a material rule is
+					// about, so a diamond spear, axe or pickaxe is the same answer as a diamond
+					// sword; the kind is what keeps the rule to the things that are actually swung -
+					// a diamond block is not judged, and it is not refused or confiscated either.
+					if (MaterialTiers.isToolOrWeaponOfTier(item.getType(),
+							SNConfigHandler.ghoulWeaponImmuneTiers)) {
 						damage = 0;
 						SuperNManager.sendMessage(snDamager, "Ghouls are immune to that material!");
 					} else {

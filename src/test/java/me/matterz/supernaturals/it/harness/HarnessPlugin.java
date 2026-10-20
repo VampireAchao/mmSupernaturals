@@ -635,7 +635,9 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " kind=" + MaterialTiers.kindOf(material)
                 + " pairedWeapon=" + MaterialTiers.isPairedWeapon(material)
                 + " angelMayNotWear=" + AngelManager.forbiddenArmor(material)
-                + " ghoulImmune=" + MaterialTiers.isOfTier(material, SNConfigHandler.ghoulWeaponImmuneTiers);
+                + " toolOrWeapon=" + MaterialTiers.isToolOrWeapon(material)
+                + " ghoulImmune=" + MaterialTiers.isToolOrWeaponOfTier(material,
+                        SNConfigHandler.ghoulWeaponImmuneTiers);
     }
 
     private String perm(String rest) {
@@ -893,8 +895,10 @@ public final class HarnessPlugin extends JavaPlugin {
         if (item == null || item.isAir()) {
             return " (empty-handed)";
         }
+        // "Illegal" was the wrong word for this: nothing takes the item away and nothing refuses it.
+        // Every tool and weapon is obtainable and holdable; what a race's list changes is the swing.
         return HallGuard.bannedWeapons(race).contains(item)
-                ? " ILLEGAL for " + race + " - it deals no damage"
+                ? " no damage for " + race + " (holding it is fine)"
                 : " legal";
     }
 

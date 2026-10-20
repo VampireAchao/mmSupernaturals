@@ -102,8 +102,12 @@ public final class MaterialTiers {
 	 * <p>This is the other way to read such a list, and the way a rule about a <em>substance</em>
 	 * wants it: not "these twelve items are the rule" but "these materials are". A rule that reads
 	 * its list this way cannot be argued with by changing the kind of the thing - a ghoul spared the
-	 * diamond sword is spared the diamond block, the diamond spear, and whatever kind the game adds
-	 * next, and naming diamond brings the netherite that stands in for it.
+	 * diamond sword is spared the diamond spear, the diamond pickaxe, and whatever kind the game adds
+	 * next - and naming diamond brings the netherite that stands in for it.
+	 *
+	 * <p>What a tier covers is settled by {@link #isToolOrWeaponOfTier}: tools and weapons, the two
+	 * kinds whose whole purpose is to be swung. A diamond block is made of diamond and is not a
+	 * gesture anybody would call a weapon, so it is out of scope - not refused, just not judged.
 	 */
 	public static Set<String> tiersOf(Collection<Material> materials) {
 		Set<String> tiers = new LinkedHashSet<>();
@@ -123,9 +127,27 @@ public final class MaterialTiers {
 		return tiers;
 	}
 
-	/** Whether an item is made of one of these tiers, whatever kind of item it is. */
-	public static boolean isOfTier(Material material, Collection<String> tiers) {
-		return material != null && !material.isAir() && tiers.contains(tierOf(material));
+	/**
+	 * Whether a material is a tool or a weapon - the two kinds a tier rule is about.
+	 *
+	 * <p>A sword, an axe, a pickaxe, a shovel, a hoe, a spear. Not a block, not a gem, not an ore,
+	 * not armour: a race is judged on what it can be hit with and what it can hit with, and the
+	 * difference between an iron ingot and an iron sword is not a material question.
+	 */
+	public static boolean isToolOrWeapon(Material material) {
+		return material != null && !material.isAir() && WEAPON_KINDS.contains(kindOf(material));
+	}
+
+	/**
+	 * Whether an item is a tool or a weapon made of one of these tiers.
+	 *
+	 * <p>The judgement a damage rule wants: the tier decides whether the substance can hurt, and the
+	 * kind decides whether this is a thing the rule speaks about at all. Nothing here decides whether
+	 * an item may be held, picked up or crafted - every tool and weapon stays obtainable, and the
+	 * only thing a race's list changes is whether the swing lands.
+	 */
+	public static boolean isToolOrWeaponOfTier(Material material, Collection<String> tiers) {
+		return isToolOrWeapon(material) && tiers.contains(tierOf(material));
 	}
 
 	/**

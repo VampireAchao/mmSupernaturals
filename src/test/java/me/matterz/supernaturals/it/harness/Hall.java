@@ -2078,22 +2078,25 @@ public final class Hall {
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SWORD"),
                             "§b挨一下钻石剑", "§7钻石族打不动");
                     switchpoint(w, y, x + 10, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_PICKAXE"),
+                            "§b挨一下钻石镐", "§7工具也算，一样打不动");
+                    switchpoint(w, y, x + 13, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SPEAR"),
                             "§5挨一下下界合金矛", "§7换一件也一样");
-                    switchpoint(w, y, x + 13, z + 3,
-                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_BLOCK"),
-                            "§b挨一下钻石块", "§7不是武器，也算钻石族");
                     switchpoint(w, y, x + 16, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_BLOCK"),
+                            "§b挨一下钻石块", "§7不是工具也不是武器，照样掉血");
+                    switchpoint(w, y, x + 19, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "IRON_SWORD"),
-                            "§f挨一下铁剑", "§7不是钻石族，真的掉血");
-                }, "验证食尸鬼对钻石这一种材质免疫",
-                        "免疫认的是材质，不是武器类型：钻石或下界合金做的任何东西——剑、斧、镐、"
-                                + "锹、锄、矛，甚至一块钻石块——打在身上都是 0 伤害。"
-                                + "钻石打不动，它的升级下界合金也一样；其他材质照常生效，"
-                                + "你另有 35% 减伤（配置 0.65 是减伤系数）",
-                        "钻石剑、下界合金矛、钻石块都是 0 伤害；铁剑照常掉血",
+                            "§f挨一下铁剑", "§7材质不对，照常掉血");
+                }, "验证食尸鬼只对「钻石做成的工具与武器」免疫",
+                        "判定只看两件事：是不是工具或武器、是什么材质。钻石与下界合金的工具武器"
+                                + "（剑斧镐锹锄矛）都打不动你；钻石块不是工具也不是武器，不在判定范围，"
+                                + "照样掉血。所有工具武器都能正常拿到、拿在手里——规则只改伤害，"
+                                + "不改你能不能拥有它",
+                        "钻石剑、钻石镐、下界合金矛都是 0 伤害；钻石块与铁剑照常掉血",
                         "点「叫陪练过来」让他站到你面前",
-                        "依次点「钻石剑」「下界合金矛」「钻石块」「铁剑」四块牌对比"));
+                        "依次点「钻石剑」「钻石镐」「下界合金矛」「钻石块」「铁剑」对比"));
                 sections.add(section("§7⑦ 武器禁令", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
