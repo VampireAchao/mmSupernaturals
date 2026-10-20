@@ -1571,12 +1571,17 @@ public class SNConfigHandler {
 				asWritten.add(name.trim().toUpperCase(Locale.ROOT));
 			}
 		}
+		List<String> widened = graveMobs();
+		// Already what this build writes - a fresh config, or one this has already upgraded. Saying
+		// anything here would be a line on every start about a list nobody touched.
+		if (asWritten.equals(new LinkedHashSet<>(widened))) {
+			return listed;
+		}
 		if (!asWritten.equals(GHOUL_TRUCE_BEFORE_WIDENING)) {
 			SupernaturalsPlugin.log("Ghoul.Truce.Creatures is a list of its own (" + asWritten.size()
 					+ " entries) - leaving it as it is.");
 			return listed;
 		}
-		List<String> widened = graveMobs();
 		config.set("Ghoul.Truce.Creatures", widened);
 		saveConfig();
 		SupernaturalsPlugin.log("Ghoul.Truce.Creatures was still the old six-mob default; it now"

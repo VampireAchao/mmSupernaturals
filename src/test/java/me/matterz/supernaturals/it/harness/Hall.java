@@ -4341,6 +4341,9 @@ public final class Hall {
      * a page holds twelve short lines and the grave now holds nineteen names.
      */
     private static String truceSentence(List<EntityType> truce, int named, String setting) {
+        if (truce.isEmpty()) {
+            return "现在不与任何生物停战（config.yml 的 " + setting + " 是空的）。";
+        }
         StringBuilder names = new StringBuilder();
         int shown = Math.min(truce.size(), named);
         for (int i = 0; i < shown; i++) {
