@@ -2066,24 +2066,30 @@ public final class Hall {
                         "先点「先被打掉血」，血量掉到一半",
                         "站到露天台→点「切换下雨」→等 20 秒，看血条不动",
                         "点「站到有顶处」再等 20 秒，看它开始回血（雨不用关）"));
-                sections.add(section("§b⑥ 钻石剑 伤害 0", 2, (w, y, x, z, width) -> {
+                sections.add(section("§b⑥ 钻石族 伤害 0", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
+                            new ItemStack(Material.NETHERITE_SPEAR, 1),
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
                             "§f叫陪练过来", "§7他手上先拿铁剑");
                     switchpoint(w, y, x + 9, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SWORD"),
-                            "§b挨一下钻石剑", "§7他的剑换成钻石剑，你不掉血");
+                            "§b挨一下钻石剑", "§7钻石族整套都打不动");
                     switchpoint(w, y, x + 12, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SPEAR"),
+                            "§5挨一下下界合金矛", "§7换一件也还是 0");
+                    switchpoint(w, y, x + 15, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "IRON_SWORD"),
-                            "§f挨一下铁剑", "§7他的剑换回铁剑，真的掉血");
-                }, "验证食尸鬼对钻石剑 / 下界合金剑免疫",
-                        "默认免疫名单是下界合金剑与钻石剑：打在身上 0 伤害。其他近战武器正常生效，"
-                                + "而且你还有 35% 的减伤（配置 0.65 是减伤系数）",
-                        "钻石剑打在身上是 0 伤害，铁剑是正常伤害",
+                            "§f挨一下铁剑", "§7不是钻石族，真的掉血");
+                }, "验证食尸鬼对钻石族整套工具免疫",
+                        "免疫名单认的是材质等级，不是某一件东西：钻石与下界合金是同一级，"
+                                + "所以这一级的全套——剑、斧、镐、锹、锄、矛——打在身上都是 0 伤害。"
+                                + "钻石打不动，它的升级下界合金也打不动；换成斧头、锹或者矛，一样打不动。"
+                                + "其他材质正常生效，而且你还有 35% 的减伤（配置 0.65 是减伤系数）",
+                        "钻石剑与下界合金矛都是 0 伤害；铁剑是正常伤害",
                         "点「叫陪练过来」让他站到你面前",
-                        "依次点「挨一下钻石剑」和「挨一下铁剑」对比"));
+                        "依次点「挨一下钻石剑」「挨一下下界合金矛」「挨一下铁剑」对比"));
                 sections.add(section("§7⑦ 武器禁令", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
@@ -2694,16 +2700,18 @@ public final class Hall {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
                             new ItemStack(Material.DIAMOND_PICKAXE, 1),
+                            new ItemStack(Material.NETHERITE_SPEAR, 1),
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
                             "§f放出陪练", "§7他会站在你面前给你打");
                     powerButton(w, y, x + 9, z, "enderborn");
                 }, "验证末影族的武器禁令只针对高级材质",
-                        "禁用清单是钻石 / 铜 / 下界合金的全套工具与剑（剑、镐、锹、斧、锄）："
-                                + "近战伤害直接判成 0。木、石、铁没被禁——这条禁令挑材质，不挑类型",
-                        "钻石剑和钻石镐打陪练都是 0 伤害；铁剑是正常伤害",
+                        "禁用清单是铜、钻石、下界合金三级的全套——剑、镐、锹、斧、锄、矛："
+                                + "近战伤害直接判成 0。钻石与下界合金算同一级，一件被禁，另一件也禁。"
+                                + "木、石、铁没被禁——这条禁令挑材质，不挑类型",
+                        "钻石剑、钻石镐、下界合金矛打陪练都是 0 伤害；铁剑是正常伤害",
                         "点「放出陪练」",
-                        "拿箱子里的钻石剑和钻石镐各打一下",
+                        "拿箱子里的钻石剑、钻石镐、下界合金矛各打一下",
                         "拿铁剑再打一下对照"));
                 sections.add(section("§5④ 死亡五次 恢复人类", 1, (w, y, x, z, width) -> {
                     switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.SELF_KILL),
@@ -2828,29 +2836,29 @@ public final class Hall {
                         "拿箱子里的三种肉，对着地面或空中左键一次",
                         "等十几秒再看一眼，召唤物必须还活着",
                         "两只手的物品栏都不一样的话，换一种肉再来一次"));
-                sections.add(section("§6④ 护甲 与 钻石剑", 2, (w, y, x, z, width) -> {
+                sections.add(section("§6④ 护甲 与 武器禁令", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.GOLDEN_HELMET, 1),
-                            new ItemStack(Material.GOLDEN_CHESTPLATE, 1),
                             new ItemStack(Material.DIAMOND_LEGGINGS, 1),
-                            new ItemStack(Material.DIAMOND_BOOTS, 1),
+                            new ItemStack(Material.NETHERITE_CHESTPLATE, 1),
                             new ItemStack(Material.LEATHER_CHESTPLATE, 1),
                             new ItemStack(Material.IRON_CHESTPLATE, 1),
                             new ItemStack(Material.DIAMOND_SWORD, 1),
+                            new ItemStack(Material.NETHERITE_AXE, 1),
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAWN_CHICKEN),
-                            "§a放出一只鸡", "§7拿它试钻石剑那条禁令");
+                            "§a放出一只鸡", "§7拿它试武器的禁令");
                     powerButton(w, y, x + 9, z, "angel");
-                }, "验证天使的护甲禁令，以及不能拿钻石剑砍动物",
-                        "护甲：金与钻石的头盔、胸甲、护腿、靴子四件都会被脱下来，"
-                                + "皮革、铁、锁链、铜、下界合金没有在禁用名单里（那条名单是硬编码的，"
-                                + "不走配置文件）。武器：拿钻石剑攻击动物会被直接拦下、伤害 0，"
-                                + "换别的武器就正常",
-                        "金/钻四件穿上就被脱；皮革和铁胸甲留得住；"
-                                + "拿钻石剑打鸡被拦，拿铁剑能打",
-                        "从箱子里拿四件金色/钻石护甲依次穿上，看它们是不是都被脱下",
+                }, "验证天使的护甲禁令，以及不能拿高级武器砍动物",
+                        "护甲：金、钻石、下界合金三级的头盔、胸甲、护腿、靴子都会被脱下来，"
+                                + "皮革、铁、锁链、铜、海龟壳留得住（这条名单是硬编码的，不走配置文件）。"
+                                + "武器：拿钻石或下界合金的工具武器攻击动物会被拦下、伤害 0——"
+                                + "两个材质算同一级，剑、斧、镐、锹、锄、矛都算；换别的材质就正常",
+                        "金/钻/下界合金的护甲穿上就被脱；皮革和铁胸甲留得住；"
+                                + "钻石剑、下界合金斧打鸡被拦，铁剑能打",
+                        "从箱子里拿金/钻/下界合金的护甲依次穿上，看它们是不是都被脱下",
                         "再穿一次皮革胸甲和铁胸甲，看它们留不留",
-                        "点「放出一只鸡」，先用钻石剑打它，再用铁剑打它"));
+                        "点「放出一只鸡」，先用钻石剑、再用下界合金斧打它，最后用铁剑打"));
                 sections.add(section("§e⑤ 净化 用纸", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.PAPER, 8)));

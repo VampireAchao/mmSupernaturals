@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.logging.Level;
 
 import me.matterz.supernaturals.SupernaturalsPlugin;
+import me.matterz.supernaturals.util.MaterialTiers;
 import me.matterz.supernaturals.util.Recipes;
 
 import org.bukkit.Location;
@@ -516,22 +517,10 @@ public class SNConfigHandler {
 			}
 
 			if (enderWeaponsString.size() == 0) {
-				enderWeaponsString.add("DIAMOND_SWORD");
-				enderWeaponsString.add("DIAMOND_PICKAXE");
-				enderWeaponsString.add("DIAMOND_AXE");
-				enderWeaponsString.add("DIAMOND_HOE");
-				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
-				enderWeaponsString.add("COPPER_SWORD");
-				enderWeaponsString.add("COPPER_PICKAXE");
-				enderWeaponsString.add("COPPER_SHOVEL");
-				enderWeaponsString.add("COPPER_AXE");
-				enderWeaponsString.add("COPPER_HOE");
-				enderWeaponsString.add("NETHERITE_SWORD");
-				enderWeaponsString.add("NETHERITE_PICKAXE");
-				enderWeaponsString.add("NETHERITE_SHOVEL");
-				enderWeaponsString.add("NETHERITE_AXE");
-				enderWeaponsString.add("NETHERITE_HOE");
-				enderWeaponsString.add("DIAMOND_SHOVEL");
+				// A tier, not an item: each of these brings every kind it makes, so a spear is
+				// covered by the same line as a sword, and diamond cannot be named without the
+				// netherite that stands in for it.
+				enderWeaponsString.addAll(weaponNames("COPPER", "DIAMOND", "NETHERITE"));
 				config.set("EnderBorn.Weapon.Restrictions", enderWeaponsString);
 			}
 
@@ -670,42 +659,8 @@ public class SNConfigHandler {
 			if (ghoulWeaponsString.size() == 0) {
 				ghoulWeaponsString.add("BOW");
 				ghoulWeaponsString.add("STICK");
-				ghoulWeaponsString.add("WOODEN_SWORD");
-				ghoulWeaponsString.add("WOODEN_PICKAXE");
-				ghoulWeaponsString.add("WOODEN_SHOVEL");
-				ghoulWeaponsString.add("WOODEN_AXE");
-				ghoulWeaponsString.add("WOODEN_HOE");
-				ghoulWeaponsString.add("STONE_SWORD");
-				ghoulWeaponsString.add("STONE_PICKAXE");
-				ghoulWeaponsString.add("STONE_SHOVEL");
-				ghoulWeaponsString.add("STONE_AXE");
-				ghoulWeaponsString.add("STONE_HOE");
-				ghoulWeaponsString.add("IRON_SWORD");
-				ghoulWeaponsString.add("IRON_PICKAXE");
-				ghoulWeaponsString.add("IRON_SHOVEL");
-				ghoulWeaponsString.add("IRON_AXE");
-				ghoulWeaponsString.add("IRON_HOE");
-				ghoulWeaponsString.add("GOLDEN_SWORD");
-				ghoulWeaponsString.add("GOLDEN_PICKAXE");
-				ghoulWeaponsString.add("GOLDEN_SHOVEL");
-				ghoulWeaponsString.add("GOLDEN_AXE");
-				ghoulWeaponsString.add("GOLDEN_HOE");
-				ghoulWeaponsString.add("DIAMOND_SWORD");
-				ghoulWeaponsString.add("DIAMOND_PICKAXE");
-				ghoulWeaponsString.add("DIAMOND_SHOVEL");
-				ghoulWeaponsString.add("DIAMOND_AXE");
-				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
-				ghoulWeaponsString.add("COPPER_SWORD");
-				ghoulWeaponsString.add("COPPER_PICKAXE");
-				ghoulWeaponsString.add("COPPER_SHOVEL");
-				ghoulWeaponsString.add("COPPER_AXE");
-				ghoulWeaponsString.add("COPPER_HOE");
-				ghoulWeaponsString.add("NETHERITE_SWORD");
-				ghoulWeaponsString.add("NETHERITE_PICKAXE");
-				ghoulWeaponsString.add("NETHERITE_SHOVEL");
-				ghoulWeaponsString.add("NETHERITE_AXE");
-				ghoulWeaponsString.add("NETHERITE_HOE");
-				ghoulWeaponsString.add("DIAMOND_HOE");
+				ghoulWeaponsString.addAll(weaponNames(
+						"WOODEN", "STONE", "IRON", "GOLDEN", "COPPER", "DIAMOND", "NETHERITE"));
 				config.set("Ghoul.Weapon.Restrictions", ghoulWeaponsString);
 			}
 
@@ -715,42 +670,8 @@ public class SNConfigHandler {
 			}
 
 			if (hunterWeaponsString.size() == 0) {
-				hunterWeaponsString.add("WOODEN_SWORD");
-				hunterWeaponsString.add("WOODEN_PICKAXE");
-				hunterWeaponsString.add("WOODEN_SHOVEL");
-				hunterWeaponsString.add("WOODEN_AXE");
-				hunterWeaponsString.add("WOODEN_HOE");
-				hunterWeaponsString.add("STONE_SWORD");
-				hunterWeaponsString.add("STONE_PICKAXE");
-				hunterWeaponsString.add("STONE_SHOVEL");
-				hunterWeaponsString.add("STONE_AXE");
-				hunterWeaponsString.add("STONE_HOE");
-				hunterWeaponsString.add("IRON_SWORD");
-				hunterWeaponsString.add("IRON_PICKAXE");
-				hunterWeaponsString.add("IRON_SHOVEL");
-				hunterWeaponsString.add("IRON_AXE");
-				hunterWeaponsString.add("IRON_HOE");
-				hunterWeaponsString.add("GOLDEN_SWORD");
-				hunterWeaponsString.add("GOLDEN_PICKAXE");
-				hunterWeaponsString.add("GOLDEN_SHOVEL");
-				hunterWeaponsString.add("GOLDEN_AXE");
-				hunterWeaponsString.add("GOLDEN_HOE");
-				hunterWeaponsString.add("DIAMOND_SWORD");
-				hunterWeaponsString.add("DIAMOND_PICKAXE");
-				hunterWeaponsString.add("DIAMOND_SHOVEL");
-				hunterWeaponsString.add("DIAMOND_AXE");
-				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
-				hunterWeaponsString.add("COPPER_SWORD");
-				hunterWeaponsString.add("COPPER_PICKAXE");
-				hunterWeaponsString.add("COPPER_SHOVEL");
-				hunterWeaponsString.add("COPPER_AXE");
-				hunterWeaponsString.add("COPPER_HOE");
-				hunterWeaponsString.add("NETHERITE_SWORD");
-				hunterWeaponsString.add("NETHERITE_PICKAXE");
-				hunterWeaponsString.add("NETHERITE_SHOVEL");
-				hunterWeaponsString.add("NETHERITE_AXE");
-				hunterWeaponsString.add("NETHERITE_HOE");
-				hunterWeaponsString.add("DIAMOND_HOE");
+				hunterWeaponsString.addAll(weaponNames(
+						"WOODEN", "STONE", "IRON", "GOLDEN", "COPPER", "DIAMOND", "NETHERITE"));
 				config.set("WitchHunter.Weapon.Restrictions", hunterWeaponsString);
 			}
 
@@ -767,49 +688,16 @@ public class SNConfigHandler {
 			if (wereWeaponsString.size() == 0) {
 				wereWeaponsString.add("BOW");
 				wereWeaponsString.add("STICK");
-				wereWeaponsString.add("WOODEN_SWORD");
-				wereWeaponsString.add("WOODEN_PICKAXE");
-				wereWeaponsString.add("WOODEN_SHOVEL");
-				wereWeaponsString.add("WOODEN_AXE");
-				wereWeaponsString.add("WOODEN_HOE");
-				wereWeaponsString.add("STONE_SWORD");
-				wereWeaponsString.add("STONE_PICKAXE");
-				wereWeaponsString.add("STONE_SHOVEL");
-				wereWeaponsString.add("STONE_AXE");
-				wereWeaponsString.add("STONE_HOE");
-				wereWeaponsString.add("IRON_SWORD");
-				wereWeaponsString.add("IRON_PICKAXE");
-				wereWeaponsString.add("IRON_SHOVEL");
-				wereWeaponsString.add("IRON_AXE");
-				wereWeaponsString.add("IRON_HOE");
-				wereWeaponsString.add("GOLDEN_SWORD");
-				wereWeaponsString.add("GOLDEN_PICKAXE");
-				wereWeaponsString.add("GOLDEN_SHOVEL");
-				wereWeaponsString.add("GOLDEN_AXE");
-				wereWeaponsString.add("GOLDEN_HOE");
-				wereWeaponsString.add("DIAMOND_SWORD");
-				wereWeaponsString.add("DIAMOND_PICKAXE");
-				wereWeaponsString.add("DIAMOND_SHOVEL");
-				wereWeaponsString.add("DIAMOND_AXE");
-				// 补齐 1.16+ 下界合金 / 1.21.9+ 铜制
-				wereWeaponsString.add("COPPER_SWORD");
-				wereWeaponsString.add("COPPER_PICKAXE");
-				wereWeaponsString.add("COPPER_SHOVEL");
-				wereWeaponsString.add("COPPER_AXE");
-				wereWeaponsString.add("COPPER_HOE");
-				wereWeaponsString.add("NETHERITE_SWORD");
-				wereWeaponsString.add("NETHERITE_PICKAXE");
-				wereWeaponsString.add("NETHERITE_SHOVEL");
-				wereWeaponsString.add("NETHERITE_AXE");
-				wereWeaponsString.add("NETHERITE_HOE");
-				wereWeaponsString.add("DIAMOND_HOE");
+				wereWeaponsString.addAll(weaponNames(
+						"WOODEN", "STONE", "IRON", "GOLDEN", "COPPER", "DIAMOND", "NETHERITE"));
 				config.set("Were.Weapon.Restrictions", wereWeaponsString);
 			}
 
 			if (ghoulWeaponImmunityString.size() == 0) {
-				// 补齐下界合金剑
-				ghoulWeaponImmunityString.add("NETHERITE_SWORD");
-				ghoulWeaponImmunityString.add("DIAMOND_SWORD");
+				// What cannot cut a ghoul at all. Two swords used to be the whole list, which made
+				// a ghoul immune to a diamond sword and cuttable by a diamond spear - and by a
+				// netherite axe, the tier diamond turns into.
+				ghoulWeaponImmunityString.addAll(weaponNames("DIAMOND", "NETHERITE"));
 				config.set("Ghoul.Immunity", ghoulWeaponImmunityString);
 			}
 
@@ -864,37 +752,12 @@ public class SNConfigHandler {
 			}
 
 			if (ghoulArmorString.size() == 0) {
+				// What a ghoul may wear, listed by tier for the same reason the bans are: the
+				// diamond set and the netherite set are one decision, not two.
 				ghoulArmorString.add("AIR");
-				ghoulArmorString.add("LEATHER_HELMET");
-				ghoulArmorString.add("LEATHER_CHESTPLATE");
-				ghoulArmorString.add("LEATHER_LEGGINGS");
-				ghoulArmorString.add("LEATHER_BOOTS");
-				ghoulArmorString.add("IRON_HELMET");
-				ghoulArmorString.add("IRON_CHESTPLATE");
-				ghoulArmorString.add("IRON_LEGGINGS");
-				ghoulArmorString.add("IRON_BOOTS");
-				ghoulArmorString.add("GOLDEN_HELMET");
-				ghoulArmorString.add("GOLDEN_CHESTPLATE");
-				ghoulArmorString.add("GOLDEN_LEGGINGS");
-				ghoulArmorString.add("GOLDEN_BOOTS");
-				ghoulArmorString.add("DIAMOND_HELMET");
-				ghoulArmorString.add("DIAMOND_CHESTPLATE");
-				ghoulArmorString.add("DIAMOND_LEGGINGS");
-				ghoulArmorString.add("DIAMOND_BOOTS");
-				ghoulArmorString.add("CHAINMAIL_HELMET");
-				ghoulArmorString.add("CHAINMAIL_CHESTPLATE");
-				ghoulArmorString.add("CHAINMAIL_LEGGINGS");
-				// 补齐下界合金 / 铜制 / 海龟壳
-				ghoulArmorString.add("COPPER_HELMET");
-				ghoulArmorString.add("COPPER_CHESTPLATE");
-				ghoulArmorString.add("COPPER_LEGGINGS");
-				ghoulArmorString.add("COPPER_BOOTS");
-				ghoulArmorString.add("NETHERITE_HELMET");
-				ghoulArmorString.add("NETHERITE_CHESTPLATE");
-				ghoulArmorString.add("NETHERITE_LEGGINGS");
-				ghoulArmorString.add("NETHERITE_BOOTS");
+				ghoulArmorString.addAll(armourNames(
+						"LEATHER", "IRON", "GOLDEN", "CHAINMAIL", "COPPER", "DIAMOND", "NETHERITE"));
 				ghoulArmorString.add("TURTLE_HELMET");
-				ghoulArmorString.add("CHAINMAIL_BOOTS");
 				config.set("Ghoul.Armor", ghoulArmorString);
 			}
 
@@ -910,71 +773,17 @@ public class SNConfigHandler {
 
 			if (vampireArmorString.size() == 0) {
 				vampireArmorString.add("AIR");
-				vampireArmorString.add("LEATHER_HELMET");
-				vampireArmorString.add("LEATHER_CHESTPLATE");
-				vampireArmorString.add("LEATHER_LEGGINGS");
-				vampireArmorString.add("LEATHER_BOOTS");
-				vampireArmorString.add("IRON_HELMET");
-				vampireArmorString.add("IRON_CHESTPLATE");
-				vampireArmorString.add("IRON_LEGGINGS");
-				vampireArmorString.add("IRON_BOOTS");
-				vampireArmorString.add("GOLDEN_HELMET");
-				vampireArmorString.add("GOLDEN_CHESTPLATE");
-				vampireArmorString.add("GOLDEN_LEGGINGS");
-				vampireArmorString.add("GOLDEN_BOOTS");
-				vampireArmorString.add("DIAMOND_HELMET");
-				vampireArmorString.add("DIAMOND_CHESTPLATE");
-				vampireArmorString.add("DIAMOND_LEGGINGS");
-				vampireArmorString.add("DIAMOND_BOOTS");
-				vampireArmorString.add("CHAINMAIL_HELMET");
-				vampireArmorString.add("CHAINMAIL_CHESTPLATE");
-				vampireArmorString.add("CHAINMAIL_LEGGINGS");
-				// 补齐下界合金 / 铜制 / 海龟壳
-				vampireArmorString.add("COPPER_HELMET");
-				vampireArmorString.add("COPPER_CHESTPLATE");
-				vampireArmorString.add("COPPER_LEGGINGS");
-				vampireArmorString.add("COPPER_BOOTS");
-				vampireArmorString.add("NETHERITE_HELMET");
-				vampireArmorString.add("NETHERITE_CHESTPLATE");
-				vampireArmorString.add("NETHERITE_LEGGINGS");
-				vampireArmorString.add("NETHERITE_BOOTS");
+				vampireArmorString.addAll(armourNames(
+						"LEATHER", "IRON", "GOLDEN", "CHAINMAIL", "COPPER", "DIAMOND", "NETHERITE"));
 				vampireArmorString.add("TURTLE_HELMET");
-				vampireArmorString.add("CHAINMAIL_BOOTS");
 				config.set("Vampire.Armor", vampireArmorString);
 			}
 
 			if (wereArmorString.size() == 0) {
 				wereArmorString.add("AIR");
-				wereArmorString.add("LEATHER_HELMET");
-				wereArmorString.add("LEATHER_CHESTPLATE");
-				wereArmorString.add("LEATHER_LEGGINGS");
-				wereArmorString.add("LEATHER_BOOTS");
-				wereArmorString.add("IRON_HELMET");
-				wereArmorString.add("IRON_CHESTPLATE");
-				wereArmorString.add("IRON_LEGGINGS");
-				wereArmorString.add("IRON_BOOTS");
-				wereArmorString.add("GOLDEN_HELMET");
-				wereArmorString.add("GOLDEN_CHESTPLATE");
-				wereArmorString.add("GOLDEN_LEGGINGS");
-				wereArmorString.add("GOLDEN_BOOTS");
-				wereArmorString.add("DIAMOND_HELMET");
-				wereArmorString.add("DIAMOND_CHESTPLATE");
-				wereArmorString.add("DIAMOND_LEGGINGS");
-				wereArmorString.add("DIAMOND_BOOTS");
-				wereArmorString.add("CHAINMAIL_HELMET");
-				wereArmorString.add("CHAINMAIL_CHESTPLATE");
-				wereArmorString.add("CHAINMAIL_LEGGINGS");
-				// 补齐下界合金 / 铜制 / 海龟壳
-				wereArmorString.add("COPPER_HELMET");
-				wereArmorString.add("COPPER_CHESTPLATE");
-				wereArmorString.add("COPPER_LEGGINGS");
-				wereArmorString.add("COPPER_BOOTS");
-				wereArmorString.add("NETHERITE_HELMET");
-				wereArmorString.add("NETHERITE_CHESTPLATE");
-				wereArmorString.add("NETHERITE_LEGGINGS");
-				wereArmorString.add("NETHERITE_BOOTS");
+				wereArmorString.addAll(armourNames(
+						"LEATHER", "IRON", "GOLDEN", "CHAINMAIL", "COPPER", "DIAMOND", "NETHERITE"));
 				wereArmorString.add("TURTLE_HELMET");
-				wereArmorString.add("CHAINMAIL_BOOTS");
 				config.set("Were.Armor", wereArmorString);
 			}
 
@@ -1225,61 +1034,24 @@ public class SNConfigHandler {
 			priestSpellMaterials.add(Material.getMaterial(material));
 		}
 
-		for (String weapon : ghoulWeaponsString) {
-			ghoulWeapons.add(Material.getMaterial(weapon));
-		}
+		// Read as written, then completed rather than trusted: a rule about one member of a tier is
+		// a rule about the tier (see MaterialTiers). This is also what corrects a config.yml that
+		// was written before the rule was complete - the file does not have to be touched.
+		ghoulWeapons = MaterialTiers.completeWeapons(materialsOf(ghoulWeaponsString));
+		demonWeapons = MaterialTiers.completeWeapons(materialsOf(demonWeaponsString));
+		hunterWeapons = MaterialTiers.completeWeapons(materialsOf(hunterWeaponsString));
+		priestWeapons = MaterialTiers.completeWeapons(materialsOf(priestWeaponsString));
+		vampireWeapons = MaterialTiers.completeWeapons(materialsOf(vampireWeaponsString));
+		wereWeapons = MaterialTiers.completeWeapons(materialsOf(wereWeaponsString));
+		ghoulWeaponImmunity = MaterialTiers.completeWeapons(materialsOf(ghoulWeaponImmunityString));
+		enderWeapons = MaterialTiers.completeWeapons(materialsOf(enderWeaponsString));
 
-		for (String weapon : demonWeaponsString) {
-			demonWeapons.add(Material.getMaterial(weapon));
-		}
-
-		for (String weapon : hunterWeaponsString) {
-			hunterWeapons.add(Material.getMaterial(weapon));
-		}
-
-		for (String weapon : priestWeaponsString) {
-			priestWeapons.add(Material.getMaterial(weapon));
-		}
-
-		for (String weapon : vampireWeaponsString) {
-			vampireWeapons.add(Material.getMaterial(weapon));
-		}
-
-		for (String weapon : wereWeaponsString) {
-			wereWeapons.add(Material.getMaterial(weapon));
-		}
-
-		for (String weapon : ghoulWeaponImmunityString) {
-			ghoulWeaponImmunity.add(Material.getMaterial(weapon));
-		}
-
-		for (String armor : hunterArmorString) {
-			hunterArmor.add(Material.getMaterial(armor));
-		}
-
-		for (String weapon : enderWeaponsString) {
-			enderWeapons.add(Material.getMaterial(weapon));
-		}
-
-		for (String armor : ghoulArmorString) {
-			ghoulArmor.add(Material.getMaterial(armor));
-		}
-
-		for (String armor : demonArmorString) {
-			demonArmor.add(Material.getMaterial(armor));
-		}
-
-		for (String armor : priestArmorString) {
-			priestArmor.add(Material.getMaterial(armor));
-		}
-
-		for (String armor : vampireArmorString) {
-			vampireArmor.add(Material.getMaterial(armor));
-		}
-
-		for (String armor : wereArmorString) {
-			wereArmor.add(Material.getMaterial(armor));
-		}
+		hunterArmor = MaterialTiers.completeArmour(materialsOf(hunterArmorString));
+		ghoulArmor = MaterialTiers.completeArmour(materialsOf(ghoulArmorString));
+		demonArmor = MaterialTiers.completeArmour(materialsOf(demonArmorString));
+		priestArmor = MaterialTiers.completeArmour(materialsOf(priestArmorString));
+		vampireArmor = MaterialTiers.completeArmour(materialsOf(vampireArmorString));
+		wereArmor = MaterialTiers.completeArmour(materialsOf(wereArmorString));
 
 		for (int i = 0; i < vampireAltarInfectMaterialsString.size(); i++) {
 			Material material = Material.getMaterial(vampireAltarInfectMaterialsString.get(i));
@@ -1621,6 +1393,46 @@ public class SNConfigHandler {
 			types.add(type);
 		}
 		return new ArrayList<>(types);
+	}
+
+	/**
+	 * The names of every weapon and tool the named tiers make, for a default list.
+	 *
+	 * <p>Written from the tiers rather than one item at a time so that a default can never be half a
+	 * tier again: the kinds and the tiers are decided in {@link MaterialTiers}, and a list that
+	 * names them cannot leave out the spear that the same tier makes as the sword.
+	 */
+	private static List<String> weaponNames(String... tiers) {
+		List<String> names = new ArrayList<>();
+		for (String tier : tiers) {
+			for (Material material : MaterialTiers.weapons(tier)) {
+				names.add(material.name());
+			}
+		}
+		return names;
+	}
+
+	/** The names of every armour piece the named tiers make, for a default list. */
+	private static List<String> armourNames(String... tiers) {
+		List<String> names = new ArrayList<>();
+		for (String tier : tiers) {
+			for (Material material : MaterialTiers.armour(tier)) {
+				names.add(material.name());
+			}
+		}
+		return names;
+	}
+
+	/** The materials a list of names resolves to, with the names this version does not have left out. */
+	private static List<Material> materialsOf(List<String> names) {
+		List<Material> materials = new ArrayList<>();
+		for (String name : names) {
+			Material material = Material.matchMaterial(name);
+			if (material != null) {
+				materials.add(material);
+			}
+		}
+		return materials;
 	}
 
 	/**

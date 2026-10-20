@@ -4,6 +4,7 @@ import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
 import me.matterz.supernaturals.manager.SuperNManager;
+import me.matterz.supernaturals.util.MaterialTiers;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -363,6 +364,12 @@ public final class HarnessPlugin extends JavaPlugin {
                 // first would leave every enderborn kill turning its victim, for ever, silently.
                 return "ok spread=" + SNConfigHandler.spreadChance
                         + " enderborn=" + SNConfigHandler.enderSpreadChance;
+            case "tier":
+                // What the plugin's material rules see when they look at an item. Every rule that
+                // picks a material by its quality asks MaterialTiers, so one item is enough to
+                // say how all of them will treat it: the tier it belongs to, the kind of thing it
+                // is, and whether a rule about its tier covers it.
+                return tier(rest);
             case "tp":
                 return teleport(rest);
             case "interact":
@@ -610,6 +617,23 @@ public final class HarnessPlugin extends JavaPlugin {
             player.getInventory().addItem(new ItemStack(material, Math.min(stackSize, left)));
         }
         return "ok gave " + count + " " + material + " to " + player.getName();
+    }
+
+    /**
+     * How one item reads to the plugin's material rules: its tier, its kind, and whether the rules
+     * that speak about tiers cover it.
+     */
+    private String tier(String rest) {
+        String name = rest.trim();
+        Material material = Material.matchMaterial(name);
+        if (material == null) {
+            return "err unknown material: " + name;
+        }
+        return "ok " + material.name()
+                + " tier=" + MaterialTiers.tierOf(material)
+                + " kind=" + MaterialTiers.kindOf(material)
+                + " pairedWeapon=" + MaterialTiers.isPairedWeapon(material)
+                + " angelArmor=" + MaterialTiers.isArmourOfTier(material, "GOLDEN", "DIAMOND", "NETHERITE");
     }
 
     private String perm(String rest) {
