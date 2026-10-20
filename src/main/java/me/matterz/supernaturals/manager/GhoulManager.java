@@ -24,6 +24,7 @@ import java.util.HashMap;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
+import me.matterz.supernaturals.util.MaterialTiers;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -71,9 +72,13 @@ public class GhoulManager extends ClassManager {
 				ItemStack item = pDamager.getItemInHand();
 
 				if (item != null) {
-					if (SNConfigHandler.ghoulWeaponImmunity.contains(item.getType())) {
+					// By material, not by weapon: what cannot cut a ghoul is the substance, so a
+					// diamond spear, a diamond axe and a diamond block are the same answer. The
+					// tiers come from Ghoul.Immunity (see SNConfigHandler), which is a list of
+					// items only because that is the shape a server owner can edit.
+					if (MaterialTiers.isOfTier(item.getType(), SNConfigHandler.ghoulWeaponImmuneTiers)) {
 						damage = 0;
-						SuperNManager.sendMessage(snDamager, "Ghouls are immune to that weapon!");
+						SuperNManager.sendMessage(snDamager, "Ghouls are immune to that material!");
 					} else {
 						damage -= damage
 								* snVictim.scale(1 - SNConfigHandler.ghoulDamageReceivedFactor);

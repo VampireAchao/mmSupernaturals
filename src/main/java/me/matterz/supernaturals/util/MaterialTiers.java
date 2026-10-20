@@ -97,6 +97,38 @@ public final class MaterialTiers {
 	}
 
 	/**
+	 * The tiers a list of materials names, with the tier that stands in for each of them.
+	 *
+	 * <p>This is the other way to read such a list, and the way a rule about a <em>substance</em>
+	 * wants it: not "these twelve items are the rule" but "these materials are". A rule that reads
+	 * its list this way cannot be argued with by changing the kind of the thing - a ghoul spared the
+	 * diamond sword is spared the diamond block, the diamond spear, and whatever kind the game adds
+	 * next, and naming diamond brings the netherite that stands in for it.
+	 */
+	public static Set<String> tiersOf(Collection<Material> materials) {
+		Set<String> tiers = new LinkedHashSet<>();
+		for (Material material : materials) {
+			if (material == null || material.isAir()) {
+				continue;
+			}
+			String tier = tierOf(material);
+			if (tier.isEmpty()) {
+				continue;
+			}
+			tiers.add(tier);
+			if (PAIRED_TIERS.contains(tier)) {
+				tiers.addAll(PAIRED_TIERS);
+			}
+		}
+		return tiers;
+	}
+
+	/** Whether an item is made of one of these tiers, whatever kind of item it is. */
+	public static boolean isOfTier(Material material, Collection<String> tiers) {
+		return material != null && !material.isAir() && tiers.contains(tierOf(material));
+	}
+
+	/**
 	 * A forbidden-weapon list, widened to every kind of every tier it names and to the tier that
 	 * stands in for each of them.
 	 *

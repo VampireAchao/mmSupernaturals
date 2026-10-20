@@ -634,7 +634,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 + " tier=" + MaterialTiers.tierOf(material)
                 + " kind=" + MaterialTiers.kindOf(material)
                 + " pairedWeapon=" + MaterialTiers.isPairedWeapon(material)
-                + " angelMayNotWear=" + AngelManager.forbiddenArmor(material);
+                + " angelMayNotWear=" + AngelManager.forbiddenArmor(material)
+                + " ghoulImmune=" + MaterialTiers.isOfTier(material, SNConfigHandler.ghoulWeaponImmuneTiers);
     }
 
     private String perm(String rest) {

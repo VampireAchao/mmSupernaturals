@@ -191,7 +191,14 @@ public class SNConfigHandler {
 	public static List<Material> vampireWeapons = new ArrayList<Material>();
 	public static List<Material> hunterWeapons = new ArrayList<Material>();
 	public static List<Material> wereWeapons = new ArrayList<Material>();
-	public static List<Material> ghoulWeaponImmunity = new ArrayList<Material>();
+	/**
+	 * The material tiers a ghoul cannot be cut by, worked out from {@code Ghoul.Immunity}.
+	 *
+	 * <p>A set of tiers rather than a list of items, because the rule is about a substance: naming
+	 * one diamond thing in the file means diamond - every kind of it, and the netherite that stands
+	 * in for it. The list of items it is read from is still what the server owner edits.
+	 */
+	public static Set<String> ghoulWeaponImmuneTiers = new LinkedHashSet<String>();
 	public static List<EntityType> ghoulTruce = new ArrayList<EntityType>();
 	public static List<Material> priestSpellMaterials = new ArrayList<Material>();
 	public static HashMap<Material, Integer> priestDonationMap = new HashMap<Material, Integer>();
@@ -696,7 +703,9 @@ public class SNConfigHandler {
 			if (ghoulWeaponImmunityString.size() == 0) {
 				// What cannot cut a ghoul at all. Two swords used to be the whole list, which made
 				// a ghoul immune to a diamond sword and cuttable by a diamond spear - and by a
-				// netherite axe, the tier diamond turns into.
+				// netherite axe, the tier diamond turns into. The rule reads these as materials
+				// rather than as twelve items: any diamond thing is refused, and naming diamond
+				// brings netherite with it, whatever kind the thing is.
 				ghoulWeaponImmunityString.addAll(weaponNames("DIAMOND", "NETHERITE"));
 				config.set("Ghoul.Immunity", ghoulWeaponImmunityString);
 			}
@@ -1043,7 +1052,7 @@ public class SNConfigHandler {
 		priestWeapons = MaterialTiers.completeWeapons(materialsOf(priestWeaponsString));
 		vampireWeapons = MaterialTiers.completeWeapons(materialsOf(vampireWeaponsString));
 		wereWeapons = MaterialTiers.completeWeapons(materialsOf(wereWeaponsString));
-		ghoulWeaponImmunity = MaterialTiers.completeWeapons(materialsOf(ghoulWeaponImmunityString));
+		ghoulWeaponImmuneTiers = MaterialTiers.tiersOf(materialsOf(ghoulWeaponImmunityString));
 		enderWeapons = MaterialTiers.completeWeapons(materialsOf(enderWeaponsString));
 
 		hunterArmor = MaterialTiers.completeArmour(materialsOf(hunterArmorString));

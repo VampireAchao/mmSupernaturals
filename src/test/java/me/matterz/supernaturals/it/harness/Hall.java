@@ -2070,26 +2070,30 @@ public final class Hall {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
                             new ItemStack(Material.NETHERITE_SPEAR, 1),
+                            new ItemStack(Material.DIAMOND_BLOCK, 4),
                             new ItemStack(Material.IRON_SWORD, 1)));
-                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
+                    switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAR),
                             "§f叫陪练过来", "§7他手上先拿铁剑");
-                    switchpoint(w, y, x + 9, z + 3,
+                    switchpoint(w, y, x + 7, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SWORD"),
-                            "§b挨一下钻石剑", "§7钻石族整套都打不动");
-                    switchpoint(w, y, x + 12, z + 3,
+                            "§b挨一下钻石剑", "§7钻石族打不动");
+                    switchpoint(w, y, x + 10, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SPEAR"),
-                            "§5挨一下下界合金矛", "§7换一件也还是 0");
-                    switchpoint(w, y, x + 15, z + 3,
+                            "§5挨一下下界合金矛", "§7换一件也一样");
+                    switchpoint(w, y, x + 13, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_BLOCK"),
+                            "§b挨一下钻石块", "§7不是武器，也算钻石族");
+                    switchpoint(w, y, x + 16, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "IRON_SWORD"),
                             "§f挨一下铁剑", "§7不是钻石族，真的掉血");
-                }, "验证食尸鬼对钻石族整套工具免疫",
-                        "免疫名单认的是材质等级，不是某一件东西：钻石与下界合金是同一级，"
-                                + "所以这一级的全套——剑、斧、镐、锹、锄、矛——打在身上都是 0 伤害。"
-                                + "钻石打不动，它的升级下界合金也打不动；换成斧头、锹或者矛，一样打不动。"
-                                + "其他材质正常生效，而且你还有 35% 的减伤（配置 0.65 是减伤系数）",
-                        "钻石剑与下界合金矛都是 0 伤害；铁剑是正常伤害",
+                }, "验证食尸鬼对钻石这一种材质免疫",
+                        "免疫认的是材质，不是武器类型：钻石或下界合金做的任何东西——剑、斧、镐、"
+                                + "锹、锄、矛，甚至一块钻石块——打在身上都是 0 伤害。"
+                                + "钻石打不动，它的升级下界合金也一样；其他材质照常生效，"
+                                + "你另有 35% 减伤（配置 0.65 是减伤系数）",
+                        "钻石剑、下界合金矛、钻石块都是 0 伤害；铁剑照常掉血",
                         "点「叫陪练过来」让他站到你面前",
-                        "依次点「挨一下钻石剑」「挨一下下界合金矛」「挨一下铁剑」对比"));
+                        "依次点「钻石剑」「下界合金矛」「钻石块」「铁剑」四块牌对比"));
                 sections.add(section("§7⑦ 武器禁令", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
