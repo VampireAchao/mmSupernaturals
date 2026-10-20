@@ -1728,11 +1728,23 @@ public final class Hall {
         // a demon, four of them with conditions of their own - which is five experiments behind one
         // wall of switches. It is the room about the other way in, so it shows that one way.
         List<String> killers = killersFor(race);
+        // A room whose conversion is a condition rather than a roll has nothing for the switch to
+        // change. Drawing it anyway promises a hundred percent beside a rule that does not roll,
+        // which is the room lying about itself - and the demon's is the one room where pressing it
+        // changes a number nobody reads.
+        boolean rolls = killers.stream().anyMatch(killer -> !killer.equals("demon"));
+        String odds = rolls
+                ? "「必中开关」把这两个数一起改成 100%，末影族也不例外。"
+                : "这一间没有「必中开关」：恶魔不看概率，只看你死的那一刻手里有没有拿着地狱岩。";
         return section("§c被杀 转化", 2, 1, CHAMBER_HEAD, (w, y, x, z, width) -> {
             switchpoint(w, y, x + 1, z + 3, Trigger.of(Kind.RESET_HUMAN, race),
                     "§a先变回人类", "§7被杀死只对人类算");
-            switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.SPREAD),
-                    "§c必中开关", "§7本房概率改 100%");
+            if (rolls) {
+                switchpoint(w, y, x + 5, z + 3, Trigger.of(Kind.SPREAD),
+                        "§c必中开关", race.equals("werewolf")
+                                ? "§7本房概率改 100%，夜里才算"
+                                : "§7本房概率改 100%");
+            }
             int column = x + 9;
             for (String killer : killers) {
                 // What he holds, and what the roll is worth. A ghoul and a werewolf have no weapon
@@ -1741,6 +1753,11 @@ public final class Hall {
                 // the demon's netherrack rule at 100%.
                 String hand = switch (killer) {
                     case "ghoul", "werewolf" -> "";
+                    // The demon does not turn a corpse. It turns the body it strikes, and only
+                    // while both of them are holding netherrack - so a demon sent in with a sword
+                    // could never convert anybody, which is why this room never worked in that
+                    // hall at all.
+                    case "demon" -> "NETHERRACK";
                     default -> "IRON_SWORD";
                 };
                 String roll = switch (killer) {
@@ -1750,7 +1767,12 @@ public final class Hall {
                 };
                 switchpoint(w, y, column, z + 3,
                         Trigger.with(Kind.NPC_KILL_ME, race, killer + ":" + hand),
-                        "§c被" + title(killer) + "杀死", "§7默认 " + roll + " 变成" + title(killer));
+                        killer.equals("demon")
+                                ? "§4被他用地狱岩打一下"
+                                : "§c被" + title(killer) + "杀死",
+                        killer.equals("demon")
+                                ? "§7你手里也要有地狱岩，挨一下就变"
+                                : "§7默认 " + roll + " 变成" + title(killer));
                 column += SWITCH_PITCH;
             }
             if (killers.contains("werewolf")) {
@@ -1768,17 +1790,21 @@ public final class Hall {
                         + "四个族的击杀转化是概率：吸血鬼、食尸鬼、狼人各 35%"
                         + "（Supernatural.SpreadChance 默认 0.35），末影族 10%"
                         + "（EnderBorn.Convert.Chance 默认 0.10，是它自己的那个数）。"
-                        + "「必中开关」把这两个数"
-                        + "一起改成 100%，末影族也不例外。"
-                        + "恶魔不走概率，走条件：打你的人得是恶魔，而你死的那一刻手上要拿着地狱岩，这样是 100%。"
+                        + odds
+                        + "恶魔连死都不等：他手里拿着地狱岩打你一下，而你挨打那一刻手里也得拿着地狱岩，"
+                        + "这样是 100%（他为此花 2000 能量）。"
                         + "狼人还多一个条件：只在他杀你的那一刻是夜晚才算。",
                 "你会死一次，然后变成那个种族的身份；聊天栏有提示，头顶和 tab 里的标签也跟着改。"
                         + "本厅的房间还是那些房间，想变回来就回还原房",
                 "先点「先变回人类」——被杀死这条只对人类阵营算数",
-                "不想等概率就再点「必中开关」，本房两个数（含末影族那个）一起改成 100%，"
-                        + "离开这间自动恢复",
-                "点「被本族杀死」：他从远处走过来，真的把你打死",
-                "看他杀完那一刻你的种族；还不对就再点一次，概率的东西要多试",
+                rolls
+                        ? "不想等概率就再点「必中开关」，本房两个数（含末影族那个）一起改成 100%，"
+                                + "离开这间自动恢复"
+                        : "这一间没有概率可改，但要先点「手上拿地狱岩」：你也得拿着它，挨一下就是 100%",
+                rolls
+                        ? "点「被本族杀死」：他从远处走过来，真的把你打死"
+                        : "点那块牌：他从远处走过来，用地狱岩打你一下",
+                "看他杀完那一刻你的种族；没转成他会告诉你还是原来那个，概率的东西要多试",
                 "这一间只放这一族——想试别的族，去那一族的大厅");
     }
 

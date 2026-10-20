@@ -646,17 +646,20 @@ public final class HarnessPlugin extends JavaPlugin {
     private String interact(String rest) {
         String[] args = rest.split("\\s+");
         if (args.length < 4) {
-            return "err usage: interact <name> <x> <y> <z>";
+            return "err usage: interact <name> <x> <y> <z> [left]";
         }
+        Action action = args.length > 4 && args[4].equalsIgnoreCase("left")
+                ? Action.LEFT_CLICK_BLOCK
+                : Action.RIGHT_CLICK_BLOCK;
         Player player = player(args[0]);
-        Block target = blockAt(rest);
+        Block target = blockAt(String.join(" ", args[0], args[1], args[2], args[3]));
         // A player who clicks a block is looking at it, and one trigger in the plugin asks
         // what the player is looking at rather than what was clicked - so aim first.
         aimAt(player, target);
-        PlayerInteractEvent event = new PlayerInteractEvent(player, Action.RIGHT_CLICK_BLOCK,
+        PlayerInteractEvent event = new PlayerInteractEvent(player, action,
                 player.getInventory().getItemInMainHand(), target, BlockFace.UP);
         Bukkit.getPluginManager().callEvent(event);
-        return "ok cancelled=" + event.isCancelled() + " block=" + target.getType();
+        return "ok action=" + action + " cancelled=" + event.isCancelled() + " block=" + target.getType();
     }
 
     /** Turns a player to face the middle of a block, the way a person about to click it is. */
