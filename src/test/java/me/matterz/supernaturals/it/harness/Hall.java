@@ -28,6 +28,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -1863,7 +1864,7 @@ public final class Hall {
                                 + "这是替代吃饭的那条路",
                         "杀掉鸡以后饱食度上升 2 点，能量 +100",
                         "右键那块牌放出一只鸡（旧的会被清掉）", "把它杀掉，回头看饱食度"));
-                sections.add(section("§5⑥ 休战 敌对怪物", 4, true, 4, (w, y, x, z, width) -> {
+                sections.add(section("§5⑥ 休战 敌对怪物", 4, false, 4, (w, y, x, z, width) -> {
                     // The arena floor, across the room rather than the strip a small room's middle
                     // would be: the monsters are laid out in rings around the middle of the room,
                     // and a ring drawn on two different floors reads as two different rooms.
@@ -1873,9 +1874,9 @@ public final class Hall {
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "vampire"),
                             "§a清空怪物", "§7离开测试也会自动清");
                 }, "验证休战契约：未破约时敌对怪物不该主动攻击吸血鬼",
-                        "默认与苦力怕、骷髅、僵尸、末影人、蜘蛛停战：它们既不主动选你做目标，"
-                                + "打出去的伤害也会被拒绝。你打它们任意一下就算破约，"
-                                + "破约后 120 秒（2 分钟）自动恢复",
+                        truceSentence(SNConfigHandler.vampireTruce, 5, "Vampire.Truce.Creatures")
+                                + "它们既不主动选你做目标，打出去的伤害也会被拒绝；"
+                                + "你打它们任意一下就算破约，破约后 120 秒（2 分钟）自动恢复",
                         "全部怪物站在原地不追你；你打它们任意一下，它们立刻开始还手",
                         "点「召唤全部敌对怪物」，站着别动，观察它们是否追你",
                         "打其中一只一下，再站着不动，看它是否开始反击",
@@ -1984,25 +1985,25 @@ public final class Hall {
                         "先点一次「能量 +1000」",
                         "拿猪排左键空气，看有没有僵尸出现",
                         "骨头和铁剑收进背包，后面几节要用"));
-                sections.add(section("§5④ 休战 僵尸系怪物", 4, true, 4, (w, y, x, z, width) -> {
-                    // Forty-one monsters in rings around the middle of the room - exactly the step
-                    // the vampire hall has, on exactly the same list, and it takes four cells for
-                    // exactly the same reason: the outermost ring is sixteen blocks out, and a
-                    // twenty-one wide room has eight to give. What that looked like was a room whose
-                    // monsters were stacked in its walls, and, for the ones the clamp pushed past
-                    // the wall entirely, monsters standing in the rooms next door before anybody
-                    // had called them.
+                sections.add(section("§5④ 休战 墓地亡灵", 4, false, 4, (w, y, x, z, width) -> {
+                    // The whole grave, in rings around the middle of the room - the same step the
+                    // vampire hall has, on its own list, and it takes four cells for the same
+                    // reason: the outermost ring is sixteen blocks out, and a twenty-one wide room
+                    // has eight to give. What that looked like was a room whose monsters were
+                    // stacked in its walls, and, for the ones the clamp pushed past the wall
+                    // entirely, monsters standing in the rooms next door before anybody had called
+                    // them.
                     box(w, Material.MOSS_BLOCK, x + 2, y, z + 2, x + width - 3, y, z + width - 3);
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAWN_MONSTERS, "ghoul"),
-                            "§c召唤僵尸系怪物", "§7看它们打不打你");
+                            "§c召唤墓地亡灵", "§7看它们打不打你");
                     switchpoint(w, y, x + 8, z + 3, Trigger.of(Kind.CLEAR_MONSTERS, "ghoul"),
                             "§a清空怪物", "§7离开测试也会自动清");
-                }, "验证食尸鬼与僵尸家族的休战契约",
-                        "默认与僵尸、僵尸村民、溺尸、尸壳、僵尸猪人、巨人停战：它们既不主动选你"
-                                + "做目标，打出去的伤害也会被拒绝。打任意一只一下就算破约，"
-                                + "120 秒后自动恢复",
+                }, "验证食尸鬼与墓地里那些亡灵的休战契约",
+                        truceSentence(SNConfigHandler.ghoulTruce, 6, "Ghoul.Truce.Creatures")
+                                + "它们既不主动选你做目标，打出去的伤害也会被拒绝；"
+                                + "打任意一只一下就算破约，120 秒后自动恢复",
                         "它们都不主动攻击；你打任意一只立刻破约，它开始还手",
-                        "点「召唤僵尸系怪物」，站着不动观察",
+                        "点「召唤墓地亡灵」，站着不动观察",
                         "打其中一只一下，看它是否立刻反击",
                         "打完点「清空怪物」收尾"));
                 sections.add(section("§9⑤ 露天 阳光与下雨", 2, true, (w, y, x, z, width) -> {
@@ -4277,6 +4278,76 @@ public final class Hall {
 
     private static Location blockKey(Location at) {
         return at.getBlock().getLocation();
+    }
+
+    /**
+     * What the mobs a truce can name are called on a board.
+     *
+     * <p>A small table rather than a generated one: the game has no Chinese name for a mob to ask
+     * for, and a board is read at arm's length. Anything not in here falls back to its constant,
+     * which is ugly but honest.
+     */
+    private static final Map<EntityType, String> MOB_NAMES = mobNames();
+
+    private static Map<EntityType, String> mobNames() {
+        Map<EntityType, String> names = new EnumMap<>(EntityType.class);
+        names.put(EntityType.ZOMBIE, "僵尸");
+        names.put(EntityType.ZOMBIE_VILLAGER, "僵尸村民");
+        names.put(EntityType.HUSK, "尸壳");
+        names.put(EntityType.DROWNED, "溺尸");
+        names.put(EntityType.ZOMBIFIED_PIGLIN, "僵尸猪人");
+        names.put(EntityType.GIANT, "巨人");
+        names.put(EntityType.ZOGLIN, "僵尸疣兽");
+        names.put(EntityType.ZOMBIE_HORSE, "僵尸马");
+        names.put(EntityType.ZOMBIE_NAUTILUS, "僵尸鹦鹉螺");
+        names.put(EntityType.CAMEL_HUSK, "骆驼尸壳");
+        names.put(EntityType.SKELETON, "骷髅");
+        names.put(EntityType.STRAY, "流浪者");
+        names.put(EntityType.BOGGED, "沼泽骷髅");
+        names.put(EntityType.PARCHED, "枯骸");
+        names.put(EntityType.WITHER_SKELETON, "凋灵骷髅");
+        names.put(EntityType.SKELETON_HORSE, "骷髅马");
+        names.put(EntityType.PHANTOM, "幻翼");
+        names.put(EntityType.CREEPER, "苦力怕");
+        names.put(EntityType.ENDERMAN, "末影人");
+        names.put(EntityType.SPIDER, "蜘蛛");
+        names.put(EntityType.CAVE_SPIDER, "洞穴蜘蛛");
+        names.put(EntityType.SLIME, "史莱姆");
+        names.put(EntityType.MAGMA_CUBE, "岩浆怪");
+        names.put(EntityType.WITCH, "女巫");
+        names.put(EntityType.BAT, "蝙蝠");
+        names.put(EntityType.GHAST, "恶魂");
+        names.put(EntityType.WARDEN, "监守者");
+        names.put(EntityType.WITHER, "凋灵");
+        names.put(EntityType.VEX, "恼鬼");
+        names.put(EntityType.PILLAGER, "掠夺者");
+        names.put(EntityType.VINDICATOR, "卫道士");
+        names.put(EntityType.EVOKER, "唤魔者");
+        names.put(EntityType.ILLUSIONER, "幻术师");
+        names.put(EntityType.RAVAGER, "劫掠兽");
+        return names;
+    }
+
+    private static String mobName(EntityType type) {
+        return MOB_NAMES.getOrDefault(type, type.name());
+    }
+
+    /**
+     * A truce, as the board that demonstrates it should say it.
+     *
+     * <p>Read from the plugin's own list rather than written out by hand: this board used to name
+     * six mobs, and a list is exactly the kind of thing that grows - a board that lags behind it
+     * describes a rule nobody is running. The first few are named and the rest are a count, because
+     * a page holds twelve short lines and the grave now holds nineteen names.
+     */
+    private static String truceSentence(List<EntityType> truce, int named, String setting) {
+        StringBuilder names = new StringBuilder();
+        int shown = Math.min(truce.size(), named);
+        for (int i = 0; i < shown; i++) {
+            names.append(i == 0 ? "" : "、").append(mobName(truce.get(i)));
+        }
+        return "现在与 " + truce.size() + " 种停战：" + names + (truce.size() > shown ? " 等" : "")
+                + "（完整名单见 config.yml 的 " + setting + "）。";
     }
 
     /** What a race is called on a sign. */
