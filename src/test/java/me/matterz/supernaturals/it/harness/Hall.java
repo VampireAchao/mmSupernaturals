@@ -2066,53 +2066,101 @@ public final class Hall {
                         "先点「先被打掉血」，血量掉到一半",
                         "站到露天台→点「切换下雨」→等 20 秒，看血条不动",
                         "点「站到有顶处」再等 20 秒，看它开始回血（雨不用关）"));
-                sections.add(section("§b⑥ 钻石族 伤害 0", 2, (w, y, x, z, width) -> {
-                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                            new ItemStack(Material.DIAMOND_SWORD, 1),
-                            new ItemStack(Material.NETHERITE_SPEAR, 1),
-                            new ItemStack(Material.DIAMOND_BLOCK, 4),
-                            new ItemStack(Material.IRON_SWORD, 1)));
-                    switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.SPAR),
-                            "§f叫陪练过来", "§7他手上先拿铁剑");
-                    switchpoint(w, y, x + 7, z + 3,
+                sections.add(section("§b⑥ 免疫 · 钻石族", 2, (w, y, x, z, width) -> {
+                    // One board per kind, because the rule is about the kind as much as the tier:
+                    // a player who tests the sword and finds it harmless has tested a sixth of the
+                    // answer, and the five boards that used to be missing are exactly the gap this
+                    // room exists to make visible. Every board brings its own sparring, so the
+                    // cases do not depend on the order they are pressed in.
+                    switchpoint(w, y, x + 4, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SWORD"),
-                            "§b挨一下钻石剑", "§7钻石族打不动");
-                    switchpoint(w, y, x + 10, z + 3,
+                            "§b① 挨一下钻石剑", "§7武器");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_AXE"),
+                            "§b② 挨一下钻石斧", "§7武器，也是工具");
+                    switchpoint(w, y, x + 12, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_PICKAXE"),
-                            "§b挨一下钻石镐", "§7工具也算，一样打不动");
-                    switchpoint(w, y, x + 13, z + 3,
-                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SPEAR"),
-                            "§5挨一下下界合金矛", "§7换一件也一样");
+                            "§b③ 挨一下钻石镐", "§7工具");
                     switchpoint(w, y, x + 16, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SHOVEL"),
+                            "§b④ 挨一下钻石锹", "§7工具");
+                    switchpoint(w, y, x + 20, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_HOE"),
+                            "§b⑤ 挨一下钻石锄", "§7工具");
+                    switchpoint(w, y, x + 24, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SPEAR"),
+                            "§b⑥ 挨一下钻石矛", "§7六种里的最后一种");
+                    switchpoint(w, y, x + 28, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_BLOCK"),
-                            "§b挨一下钻石块", "§7不是工具也不是武器，照样掉血");
-                    switchpoint(w, y, x + 19, z + 3,
+                            "§f⑦ 对照 钻石块", "§7不是工具也不是武器");
+                }, "验证食尸鬼对钻石族「工具与武器」免疫",
+                        "判定只问两件事，按这个顺序问：① 它是不是工具或武器——剑、斧、镐、锹、锄、"
+                                + "矛，六种；② 它的材质是不是钻石这一级——钻石与下界合金算同一级。"
+                                + "所以前六块牌（六种各一件）打在你身上都该是 0 伤害，并提示 "
+                                + "Ghouls are immune to that material!。最后一块钻石块不是工具也不是"
+                                + "武器，不在这条规则的判定范围里，会照常掉血——那不是漏洞，是边界。"
+                                + "这条规则只改伤害：这六件你照样能捡、能拿在手里、能拿去挖方块",
+                        "①②③④⑤⑥ 血条一点不动（0 伤害）；⑦ 钻石块正常掉血",
+                        "六块挨打牌各点一次：陪练会拿着那件东西从远处走过来，砍你一下",
+                        "每一下都看血条与聊天栏：0 伤害时会有 Ghouls are immune to that material!",
+                        "最后点「⑦ 对照 钻石块」：这不是工具也不是武器，血条会真的少"));
+                sections.add(section("§5⑦ 免疫 · 下界合金族", 2, (w, y, x, z, width) -> {
+                    // The same six kinds again, one tier up, because "diamond" was the whole of
+                    // the old rule and netherite is what a diamond thing becomes. The last board
+                    // is the control that matters: iron is a real weapon of the wrong tier, so a
+                    // hit that lands there is the proof that the six above were judged, not
+                    // ignored.
+                    switchpoint(w, y, x + 4, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SWORD"),
+                            "§5① 挨一下下界合金剑", "§7武器");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_AXE"),
+                            "§5② 挨一下下界合金斧", "§7武器，也是工具");
+                    switchpoint(w, y, x + 12, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_PICKAXE"),
+                            "§5③ 挨一下下界合金镐", "§7工具");
+                    switchpoint(w, y, x + 16, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SHOVEL"),
+                            "§5④ 挨一下下界合金锹", "§7工具");
+                    switchpoint(w, y, x + 20, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_HOE"),
+                            "§5⑤ 挨一下下界合金锄", "§7工具");
+                    switchpoint(w, y, x + 24, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SPEAR"),
+                            "§5⑥ 挨一下下界合金矛", "§7六种里的最后一种");
+                    switchpoint(w, y, x + 28, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "IRON_SWORD"),
-                            "§f挨一下铁剑", "§7材质不对，照常掉血");
-                }, "验证食尸鬼只对「钻石做成的工具与武器」免疫",
-                        "判定只看两件事：是不是工具或武器、是什么材质。钻石与下界合金的工具武器"
-                                + "（剑斧镐锹锄矛）都打不动你；钻石块不是工具也不是武器，不在判定范围，"
-                                + "照样掉血。所有工具武器都能正常拿到、拿在手里——规则只改伤害，"
-                                + "不改你能不能拥有它",
-                        "钻石剑、钻石镐、下界合金矛都是 0 伤害；钻石块与铁剑照常掉血",
-                        "点「叫陪练过来」让他站到你面前",
-                        "依次点「钻石剑」「钻石镐」「下界合金矛」「钻石块」「铁剑」对比"));
-                sections.add(section("§7⑦ 武器禁令", 1, (w, y, x, z, width) -> {
+                            "§f⑦ 对照 铁剑", "§7真武器，但材质不对");
+                }, "验证食尸鬼对下界合金族「工具与武器」免疫",
+                        "下界合金是钻石的升级，插件的规则把两者算作同一级，所以这一节是上一节的"
+                                + "另一半：同样是六种工具武器，同样应该 0 伤害。最后一块是铁剑——"
+                                + "它是一件真正的武器，只是材质不在钻石这一级，所以它砍下来会掉血。"
+                                + "有这一块，前面六块的 0 才不是「什么都没发生」",
+                        "①②③④⑤⑥ 血条一点不动（0 伤害）；⑦ 铁剑正常掉血",
+                        "六块挨打牌各点一次，等陪练走过来砍你",
+                        "最后点「⑦ 对照 铁剑」：同一间房、同一种判定，只有材质换了，血条就动了",
+                        "两节看完，结论是「等级对、类型对」才免疫，缺一样都不算"));
+                sections.add(section("§7⑧ 武器禁令", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
                             new ItemStack(Material.GOLDEN_AXE, 1),
-                            new ItemStack(Material.DIAMOND_PICKAXE, 1)));
+                            new ItemStack(Material.DIAMOND_PICKAXE, 1),
+                            new ItemStack(Material.STONE_HOE, 1),
+                            new ItemStack(Material.NETHERITE_SPEAR, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
                             "§f放出陪练", "§7他会站在你面前给你打");
                     powerButton(w, y, x + 9, z, "ghoul");
                 }, "验证食尸鬼不能用常规武器",
-                        "默认禁用清单：弓、木棍，以及木 / 石 / 铁 / 金 / 钻 / 铜 / 下界合金的剑、斧、镐、"
-                                + "锹、锄。拿着它们攻击，伤害直接被判成 0；空手不受限制",
-                        "拿这三样武器打陪练，伤害数字全是 0",
+                        "默认禁用清单现在是 44 条：木 / 石 / 铁 / 金 / 钻 / 铜 / 下界合金七个等级的"
+                                + "剑、斧、镐、锹、锄、矛（六种 × 七级 = 42），加上弓与木棍。"
+                                + "拿着它们攻击，伤害直接被判成 0；空手不受限制。"
+                                + "这一条与上一节方向相反：上一节是「别人打你」，这一节是「你打别人」。"
+                                + "两节都在说同一件事——清单只改伤害，不改你能不能拿",
+                        "拿这五样武器打陪练，伤害数字全是 0",
                         "点「放出陪练」",
-                        "拿箱子里的剑 / 斧 / 镐分别打他一下，看伤害数字",
+                        "拿箱子里的剑 / 斧 / 镐 / 锄 / 矛分别打他一下，看伤害数字",
                         "空手再打一下对照：正常伤害"));
-                sections.add(section("§9⑧ 水里 持续掉血", 3, (w, y, x, z, width) -> {
+                sections.add(section("§9⑨ 水里 持续掉血", 3, (w, y, x, z, width) -> {
                     box(w, Material.MOSSY_STONE_BRICKS, x + 7, y - 2, z + 6,
                             x + 15, y, z + 12);
                     box(w, Material.WATER, x + 9, y - 1, z + 8, x + 13, y, z + 10);
@@ -2159,7 +2207,7 @@ public final class Hall {
                         "右键池子里那条船坐上去（对着船点，不是对着水面——对着水面是又放一条），"
                                 + "再泡 10 秒，确认血条一点不动",
                         "下船再泡一次，几秒就会被「溶解」死"));
-                sections.add(section("§2⑨ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
+                sections.add(section("§2⑩ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BONE, 6),
                             new ItemStack(Material.IRON_SWORD, 1)));

@@ -5,6 +5,7 @@ import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
 import me.matterz.supernaturals.manager.HunterManager;
 import me.matterz.supernaturals.manager.SuperNManager;
+import me.matterz.supernaturals.util.MaterialTiers;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -3113,18 +3114,39 @@ final class HallGuard implements Listener {
         }
     }
 
-    /** What a weapon is called in the messages a tester reads. */
+    /**
+     * What a weapon is called in the messages a tester reads.
+     *
+     * <p>Named from the material, not from a list of swords. The list it used to be knew six swords
+     * and one bow and called everything else "sword" - so a board about a diamond pickaxe said the
+     * sparring's sword had landed, and the one thing the tester needed to read (which of the six
+     * kinds just hit him) was the one word it did not say.
+     */
     private static String bladeName(Material type) {
-        return switch (type) {
-            case WOODEN_SWORD -> "木剑";
-            case STONE_SWORD -> "石剑";
-            case IRON_SWORD -> "铁剑";
-            case GOLDEN_SWORD -> "金剑";
-            case DIAMOND_SWORD -> "钻石剑";
-            case NETHERITE_SWORD -> "下界合金剑";
-            case BOW -> "弓";
-            default -> "剑";
+        String tier = switch (MaterialTiers.tierOf(type)) {
+            case "WOODEN" -> "木";
+            case "STONE" -> "石";
+            case "IRON" -> "铁";
+            case "GOLDEN" -> "金";
+            case "COPPER" -> "铜";
+            case "DIAMOND" -> "钻石";
+            case "NETHERITE" -> "下界合金";
+            default -> "";
         };
+        String kind = switch (MaterialTiers.kindOf(type)) {
+            case "SWORD" -> "剑";
+            case "AXE" -> "斧";
+            case "PICKAXE" -> "镐";
+            case "SHOVEL" -> "锹";
+            case "HOE" -> "锄";
+            case "SPEAR" -> "矛";
+            case "BLOCK" -> "块";
+            default -> "";
+        };
+        if (!kind.isEmpty()) {
+            return tier + kind;
+        }
+        return type == Material.BOW ? "弓" : "剑";
     }
 
     /** He puts the sword away when the test is over, so he is not left holding a weapon. */
