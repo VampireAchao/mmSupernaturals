@@ -2465,16 +2465,30 @@ public final class Hall {
                         "点一次「查看能量」，把数字记住",
                         "原地等一分钟，再点一次，看掉了多少",
                         "想让它停下来，就回下界（①节有传送）或者站进岩浆"));
-                sections.add(section("§4⑧ 护甲 只能裸装", 1, (w, y, x, z, width) ->
+                sections.add(section("§4⑧ 护甲 四个部位 四个档", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.LEATHER_CHESTPLATE, 1),
-                                new ItemStack(Material.IRON_CHESTPLATE, 1),
-                                new ItemStack(Material.DIAMOND_CHESTPLATE, 1))),
-                        "验证恶魔不能穿任何护甲",
+                            new ItemStack(Material.LEATHER_HELMET, 1),
+                            new ItemStack(Material.IRON_HELMET, 1),
+                            new ItemStack(Material.DIAMOND_HELMET, 1),
+                            new ItemStack(Material.NETHERITE_HELMET, 1),
+                            new ItemStack(Material.LEATHER_CHESTPLATE, 1),
+                            new ItemStack(Material.IRON_CHESTPLATE, 1),
+                            new ItemStack(Material.DIAMOND_CHESTPLATE, 1),
+                            new ItemStack(Material.NETHERITE_CHESTPLATE, 1),
+                            new ItemStack(Material.LEATHER_LEGGINGS, 1),
+                            new ItemStack(Material.IRON_LEGGINGS, 1),
+                            new ItemStack(Material.DIAMOND_LEGGINGS, 1),
+                            new ItemStack(Material.NETHERITE_LEGGINGS, 1),
+                            new ItemStack(Material.LEATHER_BOOTS, 1),
+                            new ItemStack(Material.IRON_BOOTS, 1),
+                            new ItemStack(Material.DIAMOND_BOOTS, 1),
+                            new ItemStack(Material.NETHERITE_BOOTS, 1))),
+                        "验证恶魔不能穿任何护甲：四个部位、四个材质各一件",
                         "护甲白名单里只有空气：皮革、铁、金、钻、锁链、铜、下界合金的头盔、胸甲、"
-                                + "护腿、靴子，穿上都会被脱下来掉在地上。恶魔靠免疫和回血活着，不靠甲",
-                        "三件胸甲一件都留不住，全被脱下来",
-                        "从箱子里拿三件胸甲",
+                                + "护腿、靴子，穿上都会被脱下来掉在地上——不分部位，也不分材质。"
+                                + "恶魔靠免疫和回血活着，不靠甲。箱子里 4 个部位 × 4 个材质共 16 件",
+                        "16 件全部被脱下来，身上一格都留不住",
+                        "从箱子里拿任意几件（帽子、胸甲、护腿、鞋子都试试）",
                         "依次穿上，看它们是不是都被脱掉"));
             }
             case "priest" -> {
@@ -2495,29 +2509,42 @@ public final class Hall {
                         "材料被收走，你变成牧师（初始 10000 能量），聊天栏出现提示",
                         "在箱子里拿齐四样材料（关箱自动补满）",
                         "右键中间的钻石块"));
-                sections.add(section("§6② 献祭 教会捐赠", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.APPLE, 8),
-                                new ItemStack(Material.COD, 8),
-                                new ItemStack(Material.COOKED_COD, 8),
-                                new ItemStack(Material.COOKED_PORKCHOP, 8),
-                                new ItemStack(Material.BREAD, 8))),
-                        "验证牧师向教会捐献换能量",
+                sections.add(section("§6② 献祭 教会捐赠", 1, (w, y, x, z, width) -> {
+                    // The altar, not only the food. The board says "right-click the diamond block",
+                    // and a room that builds no diamond block is a room whose one action cannot be
+                    // performed: the food is here, the altar is a door away, and what a player
+                    // reports is that donating does not work.
+                    Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
+                    priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.APPLE, 8),
+                            new ItemStack(Material.COD, 8),
+                            new ItemStack(Material.COOKED_COD, 8),
+                            new ItemStack(Material.COOKED_PORKCHOP, 8),
+                            new ItemStack(Material.BREAD, 8)));
+                }, "验证牧师向教会捐献换能量",
                         "牧师右键祭坛会把背包里所有可捐物一次收走，按单价换算能量："
                                 + "苹果 9000、生鳕鱼 510、熟鳕鱼 500、熟猪排 210、面包 80。"
-                                + "箱子里五种各 8 个，够你把每一条都试到",
+                                + "箱子里五种各 8 个，够你把每一条都试到。"
+                                + "祭坛就在这间房里——不必回上一间去右键那一座",
                         "聊天栏列出收到的能量数值，对应物品全部被收走",
                         "成为牧师后再回到这一格",
-                        "拿走箱子里的食物，右键钻石块，看聊天栏报的数值"));
-                sections.add(section("§8③ 逐出 恢复人类", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.COAL, 4))),
-                        "验证牧师手持煤炭右键祭坛会被逐出教会",
+                        "拿走箱子里的食物，右键房间中间的钻石块，看聊天栏报的数值"));
+                sections.add(section("§8③ 逐出 恢复人类", 1, (w, y, x, z, width) -> {
+                    // Same room, same missing altar: the coal is in the chest and the thing to hold
+                    // it against was next door, so the one action this room is about could not be
+                    // performed at all.
+                    Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
+                    priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.COAL, 4)));
+                }, "验证牧师手持煤炭右键祭坛会被逐出教会",
                         "牧师拿煤炭右键祭坛，等于自己退会：身份立刻清空、变回人类，"
-                                + "能量归 0。这是牧师唯一不需要别人帮忙的退出方式",
+                                + "能量归 0。这是牧师唯一不需要别人帮忙的退出方式。"
+                                + "祭坛在这间房里，煤炭在箱子里——两样都在，才试得成",
                         "右键后立刻恢复人类，牧师身份清空",
                         "确保自己还是牧师",
-                        "拿箱子里的煤炭右键钻石块"));
+                        "拿箱子里的煤炭右键房间中间的钻石块"));
                 sections.add(section("§b④ 法术 净化与治疗", 3, (w, y, x, z, width) -> {
                     spellBench(w, y, x, z, Material.FEATHER, Material.SUGAR, Material.FLINT,
                             Material.PAPER);
@@ -2563,18 +2590,37 @@ public final class Hall {
                                 + "远程捐赠按半价给你能量",
                         "先点「叫陪练过来」当靶子（守护天使要人类，陪练默认是人类）",
                         "依次用书 / 羊毛 / 碗打他，注意聊天栏的回报"));
-                sections.add(section("§8⑥ 护甲 只能裸装", 1, (w, y, x, z, width) -> {
+                sections.add(section("§8⑥ 护甲 四个部位 四个档", 1, (w, y, x, z, width) -> {
+                    // Four slots and four tiers, because "only air" is a rule with no exceptions
+                    // and a chest of three chestplates cannot show that: a player who tries those
+                    // three has tested one slot, and the two questions this rule answers - does the
+                    // slot matter, and does the material matter - are both still open.
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.LEATHER_HELMET, 1),
+                            new ItemStack(Material.IRON_HELMET, 1),
+                            new ItemStack(Material.DIAMOND_HELMET, 1),
+                            new ItemStack(Material.NETHERITE_HELMET, 1),
                             new ItemStack(Material.LEATHER_CHESTPLATE, 1),
                             new ItemStack(Material.IRON_CHESTPLATE, 1),
-                            new ItemStack(Material.DIAMOND_CHESTPLATE, 1)));
+                            new ItemStack(Material.DIAMOND_CHESTPLATE, 1),
+                            new ItemStack(Material.NETHERITE_CHESTPLATE, 1),
+                            new ItemStack(Material.LEATHER_LEGGINGS, 1),
+                            new ItemStack(Material.IRON_LEGGINGS, 1),
+                            new ItemStack(Material.DIAMOND_LEGGINGS, 1),
+                            new ItemStack(Material.NETHERITE_LEGGINGS, 1),
+                            new ItemStack(Material.LEATHER_BOOTS, 1),
+                            new ItemStack(Material.IRON_BOOTS, 1),
+                            new ItemStack(Material.DIAMOND_BOOTS, 1),
+                            new ItemStack(Material.NETHERITE_BOOTS, 1)));
                     powerButton(w, y, x + 7, z, "priest");
-                }, "验证牧师不能穿任何护甲",
-                        "牧师的护甲白名单里只有空气：不分材质，任何头盔、胸甲、护腿、靴子"
-                                + "在穿上后都会被立刻脱下并掉在地上。这不是「只禁高级护甲」，"
-                                + "皮革一样会被脱",
-                        "三件胸甲一件都留不住，都会被脱下来掉在地上",
-                        "从箱子里拿三件胸甲",
+                }, "验证牧师不能穿任何护甲：四个部位、四个材质各一件",
+                        "牧师的护甲白名单里只有空气：不分材质、不分部位，任何头盔、胸甲、护腿、"
+                                + "靴子在穿上后都会被立刻脱下并掉在地上。箱子里是 4 个部位 × 4 个"
+                                + "材质（皮革 / 铁 / 钻石 / 下界合金）共 16 件，一件都留不住——"
+                                + "这不是「只禁高级护甲」，皮革一样会被脱；也不是「只禁胸甲」，"
+                                + "帽子、护腿、鞋子一样会被脱",
+                        "16 件全部被脱下来掉在地上，身上一格都留不住",
+                        "从箱子里拿任意几件护甲（帽子、胸甲、护腿、鞋子都试试）",
                         "依次穿上，看每一件是不是都被立刻脱下"));
                 sections.add(section("§8⑦ 动物 与 点火", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
@@ -2699,15 +2745,27 @@ public final class Hall {
                         "名单不满时会自动补一个（全服公告）"));
                 sections.add(section("§7⑤ 护甲限制", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                                // The four leather pieces are the half that was missing: this is an
+                                // allow-list, and a chest of three chestplates showed only what the
+                                // rule refuses. The other half - that leather in all four slots is
+                                // the thing it permits - is what a hunter is supposed to be able to
+                                // wear, and it was not on the wall.
+                                new ItemStack(Material.LEATHER_HELMET, 1),
                                 new ItemStack(Material.LEATHER_CHESTPLATE, 1),
-                                new ItemStack(Material.IRON_CHESTPLATE, 1),
-                                new ItemStack(Material.DIAMOND_CHESTPLATE, 1))),
-                        "验证猎巫人只能穿皮革护甲",
+                                new ItemStack(Material.LEATHER_LEGGINGS, 1),
+                                new ItemStack(Material.LEATHER_BOOTS, 1),
+                                new ItemStack(Material.IRON_HELMET, 1),
+                                new ItemStack(Material.GOLDEN_LEGGINGS, 1),
+                                new ItemStack(Material.DIAMOND_BOOTS, 1),
+                                new ItemStack(Material.NETHERITE_CHESTPLATE, 1))),
+                        "验证猎巫人只能穿皮革护甲：四个部位都试",
                         "护甲白名单只有空气和皮革：铁、金、钻、锁链、铜、下界合金的头盔、胸甲、"
-                                + "护腿、靴子都不能穿，穿上就被脱下来掉在地上",
-                        "穿上皮革没事；穿铁或钻石的会被立刻脱下并掉落",
-                        "从箱子里拿三件胸甲",
-                        "依次穿上，看哪两件被脱下来"));
+                                + "护腿、靴子都不能穿，穿上就被脱下来掉在地上。箱子里前四件是皮革"
+                                + "的帽子、胸甲、护腿、鞋子——四件都留得住；后四件是铁 / 金 / 钻 / "
+                                + "下界合金各一件，分别在四个不同部位上，会全部被脱下",
+                        "四件皮革全部留在身上；铁盔、金护腿、钻靴、下界合金胸甲全部被脱下",
+                        "先穿齐四件皮革，确认一件都没被脱",
+                        "再依次穿后四件，看每一件都被脱下来"));
                 sections.add(section("§7⑥ 武器限制", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
@@ -2893,9 +2951,17 @@ public final class Hall {
                         "两只手的物品栏都不一样的话，换一种肉再来一次"));
                 sections.add(section("§6④ 护甲 与 武器禁令", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            // Four slots, not three: the room used to offer a helmet, a chestplate
+                            // and a pair of leggings, so a tester could not tell a rule about the
+                            // four slots from a rule about the three that happen to be in the
+                            // chest - and boots, the slot every armour set has and nobody thinks
+                            // about, were the one thing never tried.
                             new ItemStack(Material.GOLDEN_HELMET, 1),
+                            new ItemStack(Material.GOLDEN_BOOTS, 1),
+                            new ItemStack(Material.DIAMOND_HELMET, 1),
                             new ItemStack(Material.DIAMOND_LEGGINGS, 1),
                             new ItemStack(Material.NETHERITE_CHESTPLATE, 1),
+                            new ItemStack(Material.NETHERITE_BOOTS, 1),
                             new ItemStack(Material.LEATHER_CHESTPLATE, 1),
                             new ItemStack(Material.IRON_CHESTPLATE, 1),
                             new ItemStack(Material.DIAMOND_SWORD, 1),
@@ -2905,14 +2971,16 @@ public final class Hall {
                             "§a放出一只鸡", "§7拿它试武器的禁令");
                     powerButton(w, y, x + 9, z, "angel");
                 }, "验证天使的护甲禁令，以及不能拿高级武器砍动物",
-                        "护甲：金、钻石、下界合金三级的护甲穿上就被脱——四个部位走的是同一条规则，"
-                                + "箱子里每个等级放一件给你试；皮革、铁、锁链、铜、海龟壳留得住"
+                        "护甲：金、钻石、下界合金三级的护甲穿上就被脱——帽子、胸甲、护腿、鞋子"
+                                + "四个部位走的是同一条规则，箱子里这三级各放了两件、四个部位都有；"
+                                + "皮革、铁、锁链、铜、海龟壳留得住"
                                 + "（这条名单是硬编码的，不走配置文件）。"
                                 + "武器：拿钻石或下界合金的工具武器攻击动物会被拦下、伤害 0——"
                                 + "两个材质算同一级，剑、斧、镐、锹、锄、矛都算；换别的材质就正常",
                         "金/钻/下界合金的护甲穿上就被脱；皮革和铁胸甲留得住；"
                                 + "钻石剑、下界合金斧打鸡被拦，铁剑能打",
-                        "从箱子里拿金、钻、下界合金的三件护甲依次穿上，看是不是都被脱下",
+                        "从箱子里拿金 / 钻 / 下界合金的六件护甲（帽子、胸甲、护腿、鞋子都有）"
+                                + "依次穿上，看是不是都被脱下",
                         "再穿一次皮革胸甲和铁胸甲，看它们留不留",
                         "点「放出一只鸡」，先用钻石剑、再用下界合金斧打它，最后用铁剑打"));
                 sections.add(section("§e⑤ 净化 用纸", 1, (w, y, x, z, width) -> {
