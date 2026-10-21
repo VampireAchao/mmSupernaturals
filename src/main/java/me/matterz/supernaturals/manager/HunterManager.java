@@ -701,8 +701,9 @@ public class HunterManager extends HumanManager {
 
 	public void stopGrappling(final Player player) {
 		if (isGrappling(player)) {
-			Vector v = new Vector(0, 0, 0);
-			player.setVelocity(v);
+			player.setVelocity(new Vector(0, 0, 0));
+			player.setFallDistance(0);
+			softenLanding(player, 60);
 			SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(SupernaturalsPlugin.instance, new Runnable() {
 				@Override
 				public void run() {
@@ -710,5 +711,31 @@ public class HunterManager extends HumanManager {
 				}
 			}, 20 * 2);
 		}
+	}
+
+	/**
+	 * Keeps a player who has just been pulled out of the air from paying for it on the way down.
+	 *
+	 * <p>The pull ends three blocks short of what it caught, which for a ledge is three blocks of
+	 * air, so the last part of the ride is a fall. Zeroing the distance each tick during the pull
+	 * was not enough: the moment it releases, the fall starts counting again and the ability reads
+	 * as hurting the person who used it. This keeps it at zero until he is back on the ground, or
+	 * for three seconds, whichever comes first.
+	 */
+	private void softenLanding(final Player player, final int ticksLeft) {
+		if (ticksLeft <= 0 || player == null || !player.isOnline()) {
+			return;
+		}
+		player.setFallDistance(0);
+		if (player.isOnGround()) {
+			return;
+		}
+		SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(
+				SupernaturalsPlugin.instance, new Runnable() {
+					@Override
+					public void run() {
+						softenLanding(player, ticksLeft - 1);
+					}
+				});
 	}
 }

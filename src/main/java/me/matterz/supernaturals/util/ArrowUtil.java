@@ -59,6 +59,10 @@ public class ArrowUtil implements Runnable {
 
 	@Override
 	public void run() {
+		if (arrow == null && !player.isOnline()) {
+			SupernaturalsPlugin.instance.getHunterManager().stopGrappling(player);
+			return;
+		}
 		if (arrow != null) {
 			SupernaturalsPlugin.instance.getHunterManager().splitArrow(player, arrow);
 			return;
@@ -100,14 +104,45 @@ public class ArrowUtil implements Runnable {
 				return;
 			}
 
-			Vector travelVector = targetLocation.toVector().subtract(player.getLocation().toVector()).normalize();
+			// The pull is a move, not a push.
+			//
+			// Velocity was the whole of this once, and it never moved anybody: a player's position
+			// is the client's to report, so a speed set on the server is overwritten by the next
+			// movement packet - and by the server's own ground physics - before the motion update
+			// it sends can mean anything. It also cannot be checked here at all: a stand-in with
+			// no client keeps the speed in a field and stands still, so "the pull ran" and "the
+			// pull did nothing" look identical from inside the hall. That is why this read as a
+			// working ability for as long as it has.
+			//
+			// A teleport is the server's own statement about where somebody is, and both sides of
+			// the wire accept it. One block a tick, which is the speed the old multiplier asked
+			// for and the speed the time budget above is sized for.
+			Vector travelVector = targetLocation.toVector()
+					.subtract(player.getLocation().toVector()).normalize();
 
 			// Always move slightly upwards to combat the evil force of gravity!
 			travelVector = travelVector.setY(travelVector.getY() + 0.2).normalize();
 
-			// set travel speed
-			travelVector = travelVector.multiply(1.0);
-			player.setVelocity(travelVector);
+			Location next = player.getLocation().clone().add(travelVector);
+			// A teleport keeps the place it is given and nothing else, so the way he is looking
+			// has to be carried across - otherwise the pull turns the player round every tick.
+			next.setYaw(player.getLocation().getYaw());
+			next.setPitch(player.getLocation().getPitch());
+			if (!player.teleport(next)) {
+				// Something else refused the move - a region plugin, a world border. Asking again
+				// next tick would be refused again, and the pull has nowhere to put him.
+				if (SNConfigHandler.debugMode) {
+					SupernaturalsPlugin.log("grapple for " + player.getName()
+							+ " stopped: the move to " + next.getBlockX() + "," + next.getBlockY()
+							+ "," + next.getBlockZ() + " was refused");
+				}
+				SupernaturalsPlugin.instance.getHunterManager().stopGrappling(player);
+				return;
+			}
+			// A little speed the same way, so the ride reads as one pull rather than as a row of
+			// one-block steps, and so the client's own prediction agrees with where it has just
+			// been put. It is not what moves him.
+			player.setVelocity(travelVector.clone().multiply(0.4));
 			// Pulled through the air and let go at the end of it: without this the fall damage
 			// arrives the moment the grapple releases, and the ability reads as hurting the
 			// person who used it.
