@@ -468,7 +468,7 @@ public final class HarnessPlugin extends JavaPlugin {
             case "food":
                 return "ok " + player(rest.trim()).getFoodLevel();
             case "power":
-                return "ok " + (int) SuperNManager.get(player(rest.trim())).getPower();
+                return power(rest);
             case "spar":
             case "dummies":
                 return dummies();
@@ -499,6 +499,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return race(rest);
             case "loot":
                 return loot(rest);
+            case "offhand":
+                return offhand(rest);
             case "hold":
                 return hold(rest);
             case "slay":
@@ -2098,6 +2100,48 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok took " + stacks + " stacks from " + block.getType();
     }
 
+    /**
+     * Reads a player's power, or sets it when a second number is given.
+     *
+     * <p>Setting it is what anything gated on a threshold needs: the enderborn's pearl guard only
+     * fires above 500, and the only way to get a stand-in above one from the console is a race's
+     * own board. Reading stays the one-argument form every other probe uses.
+     */
+    private String power(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        SuperNPlayer snplayer = SuperNManager.get(player(args[0]));
+        if (args.length < 2) {
+            return "ok " + (int) snplayer.getPower();
+        }
+        snplayer.setPower(Double.parseDouble(args[1]));
+        return "ok set " + (int) snplayer.getPower();
+    }
+
+    /**
+     * Puts a material in the player's off hand, or empties it.
+     *
+     * <p>Some of what a race does is decided by what it is carrying rather than by what it swings,
+     * and a player carries a guard in the hand the weapon is not in. Without this the off hand can
+     * only be filled by a vanilla command whose slot name changes between versions, and the one
+     * question worth asking - "does the other hand count?" - has no way to be asked.
+     */
+    private String offhand(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: offhand <name> <material>";
+        }
+        Player player = player(args[0]);
+        Material material = Material.matchMaterial(args[1]);
+        if (material == null) {
+            return "err not a material: " + args[1];
+        }
+        player.getInventory().setItemInOffHand(
+                material == Material.AIR ? null : new ItemStack(material, 1));
+        player.updateInventory();
+        return "ok offhand=" + player.getInventory().getItemInOffHand().getType()
+                + " main=" + player.getInventory().getItemInMainHand().getType();
+    }
+
     /** Puts a material in the player's main hand, which is what several races react to. */
     private String hold(String rest) {
         String[] args = rest.split("\\s+");
@@ -2110,6 +2154,15 @@ public final class HarnessPlugin extends JavaPlugin {
             return "err not a material: " + args[1];
         }
         PlayerInventory inventory = player.getInventory();
+        if (material == Material.AIR) {
+            // Emptying the hand is one of the cases worth probing - "no pearl in either hand" is
+            // the control for every guard rule - and the loop below cannot do it, because an empty
+            // slot holds no item to find. It answered "no AIR" and left the pearl where it was,
+            // which is a probe that lies about the thing it was asked to do.
+            inventory.setItem(inventory.getHeldItemSlot(), null);
+            player.updateInventory();
+            return "ok holding AIR (slot " + inventory.getHeldItemSlot() + ")";
+        }
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             ItemStack item = inventory.getItem(slot);
             if (item == null || item.getType() != material) {

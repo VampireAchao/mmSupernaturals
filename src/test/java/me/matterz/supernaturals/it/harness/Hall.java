@@ -2806,16 +2806,24 @@ public final class Hall {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.ENDER_PEARL, 16)));
                     powerButton(w, y, x + 5, z, "enderborn");
+                    // A blow to test the guard with. The guard reads what you are carrying rather
+                    // than what you swing, and "carrying" includes the hand that is not swinging -
+                    // which is the half this board exists to show.
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "enderborn", "IRON_SWORD"),
+                            "§c挨一下铁剑", "§7副手拿珍珠也算护身");
                 }, "验证末影族珍珠的两种用法",
                         "右键＝不传送，改换 100 能量并消耗 1 颗珍珠；左键＝切换「珍珠是否真的传送」"
-                                + "这个开关（默认开着）。另外手持珍珠被攻击时，只要能量超过 500，"
-                                + "就减伤一半并扣 500 能量。"
+                                + "这个开关（默认开着）。另外带着珍珠被攻击时，只要能量超过 500，"
+                                + "就减伤一半并扣 500 能量；珍珠在主手或副手都算——右手拿剑、"
+                                + "左手（副手）拿珍珠，正是玩家真实的拿法，也算护身。"
                                 + "末影族的死亡代价很低：每死一次只扣 300 能量",
                         "右键能量 +100、珍珠少一颗；左键聊天栏报出开关状态；"
-                                + "开关关掉时右键不再传送、改为换能量",
+                                + "珍珠放副手时挨打，照样只掉一半血（能量同样扣 500）",
                         "先变成末影族，回到这一格",
                         "拿珍珠右键一次（加能量），再左键切换模式",
-                        "再右键一次，看行为随开关变了"));
+                        "点「挨一下铁剑」：主手拿珍珠时只掉一半血",
+                        "把珍珠换到副手（按 F），再点一次：照样只掉一半血"));
                 sections.add(section("§d③ 武器限制", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
