@@ -20,6 +20,7 @@
 package me.matterz.supernaturals.manager;
 
 import java.util.HashMap;
+import java.util.UUID;
 
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
@@ -209,6 +210,21 @@ public class GhoulManager extends ClassManager {
 	// Water Damage //
 	// -------------------------------------------- //
 
+	/**
+	 * When each ghoul was last told it is dissolving, as a moment it may be told again.
+	 *
+	 * <p>The call above runs once a second for as long as the player stands in the water, so the
+	 * line used to be said sixty times a minute - and it was the only thing in the chat window by
+	 * the time the player had been in there half a minute. The damage already says it every
+	 * second; the words are worth one time, and then worth a reminder only after a pause long
+	 * enough to be a reminder. Kept as a moment rather than a list of players, so it cannot hold
+	 * anybody who has logged out.
+	 */
+	private final HashMap<UUID, Long> waterWarned = new HashMap<UUID, Long>();
+
+	/** How long a ghoul in water is left to read the warning before it is said again. */
+	private static final long WATER_WARNING_MILLIS = 5000L;
+
 	public void waterAdvanceTime(Player player) {
 		if (player.isDead()) {
 			return;
@@ -232,7 +248,15 @@ public class GhoulManager extends ClassManager {
 			player.setHealth(health);
 			EntityDamageEvent event = new EntityDamageEvent(player, DamageCause.DROWNING, SNConfigHandler.ghoulDamageWater);
 			player.setLastDamageCause(event);
-			SuperNManager.sendMessage(SuperNManager.get(player), "Ghouls disintegrate in water!  Get Out Quick!");
+			long now = System.currentTimeMillis();
+			Long toldAgainAt = waterWarned.get(player.getUniqueId());
+			if (toldAgainAt == null || now >= toldAgainAt.longValue()) {
+				waterWarned.put(player.getUniqueId(), Long.valueOf(now + WATER_WARNING_MILLIS));
+				SuperNManager.sendMessage(SuperNManager.get(player), "Ghouls disintegrate in water!  Get Out Quick!");
+			}
+		} else {
+			// Out of the water, so the next dip is a new warning rather than the remains of this one.
+			waterWarned.remove(player.getUniqueId());
 		}
 	}
 

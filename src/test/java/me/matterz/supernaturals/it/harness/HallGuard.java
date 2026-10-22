@@ -285,6 +285,40 @@ final class HallGuard implements Listener {
     private final Map<String, Integer> toldAt = new HashMap<>();
 
     /**
+     * How long a hint about a gesture is left unsaid after it has been said once.
+     *
+     * <p>Ten seconds. This is the opposite case to the guide's teaching: that one is asked for and
+     * can be asked again whenever the player likes, while a hint answers a gesture - a swing at a
+     * board, a bucket emptied on a shrine - and the same gesture is made over and over by anybody
+     * walking around the building. Said once, and then left alone.
+     */
+    private static final int HINT_GAP = 200;
+
+    /** When each player was last given each hint, so a repeated gesture is not a repeated line. */
+    private final Map<String, Integer> hintedAt = new HashMap<>();
+
+    /**
+     * Whether a hint is due for this player, and books it if so.
+     *
+     * <p>Keyed by the hint as well as by the player: two hints are two different answers, and
+     * having been told one of them is no reason to swallow the other.
+     */
+    private boolean hintDue(String player, String hint) {
+        return hintDue(player, hint, HINT_GAP);
+    }
+
+    /** The same, with a gap of its own for hints that are worth saying again sooner. */
+    private boolean hintDue(String player, String hint, int gap) {
+        String key = hint + "/" + player;
+        Integer said = hintedAt.get(key);
+        if (said != null && ticks - said < gap) {
+            return false;
+        }
+        hintedAt.put(key, ticks);
+        return true;
+    }
+
+    /**
      * Where a player fell, and what killed them, from the death to the moment they get up.
      *
      * <p>Both keys are names, and both are cleared the moment they are used. The place is a snapshot
@@ -753,14 +787,27 @@ final class HallGuard implements Listener {
         Block block = event.getClickedBlock();
         Hall.Trigger trigger = hall.triggerAt(block.getLocation());
         // A board is used by right-clicking it, and a swing at one used to fall through every check
-        // below and do nothing at all - no note, no cancel - so a room whose board was swung at
+        // below and do nothing at all - no answer, no cancel - so a room whose board was swung at
         // instead of used read as broken, which is how it was reported. It was worse than quiet:
         // nothing cancelled the swing either, so in creative it took the board the room is built
-        // on. Answered now, and still not acted on.
+        // on.
+        //
+        // The answer to that was a line on every swing of every block in the hall - and the walls
+        // are boards from the floor to the ceiling, so a player walking past one, or swinging at
+        // the floor, was told the same sentence again with every click. That is the report this
+        // comes from. A swing now says nothing at all; the board it lands on is still protected,
+        // because a swing is the one way a board can be taken, and the only place worth a word is
+        // a board that is a switch - there, one line is the difference between "this room is
+        // broken" and "I pressed the wrong button" - and only once in a while, because the player
+        // who is swinging at it is going to swing at it again.
         if (event.getAction() == Action.LEFT_CLICK_BLOCK) {
-            if (trigger != null || hall.inside(block.getLocation())) {
+            if (trigger != null
+                    || (block.getState() instanceof org.bukkit.block.Sign
+                            && hall.inside(block.getLocation()))) {
                 event.setCancelled(true);
-                note(event.getPlayer(), "§7这一面墙上都是告示牌：对着它按 §f右键§7，左键不算");
+            }
+            if (trigger != null && hintDue(event.getPlayer().getName(), "leftclick")) {
+                note(event.getPlayer(), "§7这块牌要按 §f右键§7才算数——左键只是砍了一下");
             }
             return;
         }
@@ -793,9 +840,13 @@ final class HallGuard implements Listener {
                     "§a已离开测试大厅，右键返回垫上那块牌可以回来");
             case ENTER_AREA -> enter(player, hall, trigger.race());
             case RESET_HUMAN -> {
-                restore(player);
+                // One answer, not two: this used to say "you are already human" and then "you have
+                // been restored to human" on the same press.
+                boolean wasSupernatural = restore(player);
                 resetVitals(player);
-                note(player, "§a已恢复人类，状态和血量也一并清好了，可以留在本区继续试");
+                note(player, wasSupernatural
+                        ? "§a已恢复人类，状态和血量也一并清好了，可以留在本区继续试"
+                        : "§7你本来就是人类，状态和血量已经清好了，可以留在本区继续试");
             }
             case EXIT_TEST -> backToHuman(player, hall, hall.lobbySpawn(),
                     "§a已回到大厅，种族已恢复人类");
@@ -1498,10 +1549,17 @@ final class HallGuard implements Listener {
                 + (cold ? " §a✓ 可以按寒冷溺水恢复人类" : " §c✗ 不够冷，插件不会认"));
     }
 
+    /**
+     * Makes a player human again, and says nothing about it.
+     *
+     * <p>It is the caller that knows why - a switch that is about restoring humanity, a door that
+     * is about leaving the hall - and it has a line of its own to say. This used to add "you are
+     * already human" on top of it, so walking into the hall or pressing "back to the lobby" as a
+     * human printed that sentence and then the sentence that was asked for.
+     */
     private boolean restore(Player player) {
         SuperNPlayer snplayer = SuperNManager.get(player);
         if (snplayer.isHuman()) {
-            note(player, "§7你本来就是人类");
             return false;
         }
         SuperNManager.cure(snplayer);
@@ -2732,6 +2790,11 @@ final class HallGuard implements Listener {
                 continue;
             }
             labelRace(npc, now);
+            // Booked, and not only to keep the books tidy: this is a sweep, and without the new
+            // race written down the same difference is found again on the next one - which said
+            // the same sentence twice a second, for as long as the stand-in stood there, to the
+            // player who had just cast the spell.
+            preyRace.put(name, now);
             String who = preyOwner.get(name);
             Player owner = who == null ? null : Bukkit.getPlayerExact(who);
             if (owner != null) {
@@ -2755,6 +2818,10 @@ final class HallGuard implements Listener {
                 gone.remove();
             }
         }
+        // The hints are keyed by name too, and a name comes back as somebody else's: a hint left
+        // behind would be one the next person to use that account never hears.
+        hintedAt.keySet().removeIf(key -> Bukkit.getPlayerExact(
+                key.substring(key.indexOf('/') + 1)) == null);
     }
 
     /**
@@ -3450,12 +3517,19 @@ final class HallGuard implements Listener {
      * A bucket is not a block place. Emptying one fires its own event and no
      * {@link BlockPlaceEvent}, which is how a player got water into a shrine room and washed the
      * room's way out off the wall.
+     *
+     * <p>Told once a second at most, and told what was actually in the bucket: the event fires
+     * once per hand, a player emptying a bucket at a shrine is emptying it again a moment later,
+     * and the line used to say "water" whatever was poured.
      */
     @EventHandler
     public void onBucketEmpty(PlayerBucketEmptyEvent event) {
         if (guard(bucketTarget(event))) {
             event.setCancelled(true);
-            event.getPlayer().sendMessage("§7测试大厅里不能倒水");
+            if (hintDue(event.getPlayer().getName(), "bucket", 20)) {
+                event.getPlayer().sendMessage("§7测试大厅里不能倒"
+                        + (event.getBucket() == Material.LAVA_BUCKET ? "岩浆" : "水"));
+            }
         }
     }
 
