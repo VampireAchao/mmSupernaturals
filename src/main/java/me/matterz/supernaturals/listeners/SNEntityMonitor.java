@@ -83,6 +83,9 @@ public class SNEntityMonitor implements Listener {
 								plugin.getHunterManager().takeGrappleCost(arrow), false,
 								"this world is not one the ability works in");
 					}
+					// The arrow has landed; it was refused rather than handled, and leaving it in
+					// the map would keep it there for good.
+					plugin.getHunterManager().removeArrow(arrow);
 					return;
 				}
 				if (arrowType.equalsIgnoreCase("grapple")) {

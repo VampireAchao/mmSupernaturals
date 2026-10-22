@@ -581,6 +581,12 @@ public class HunterManager extends HumanManager {
 
 		final SuperNPlayer snplayer = SuperNManager.get(player);
 
+		// An arrow that flies off and never lands is never reported as having hit anything, so no
+		// handler ever takes it out of the map it was put in - a slow leak of arrow objects, and of
+		// the power each grapple shot recorded. Swept here, on a shot, which is the only moment
+		// these maps can grow.
+		forgetArrowsThatAreGone();
+
 		if (!player.getInventory().contains(Material.ARROW)) {
 			// Said out loud. Every other way shooting can fail here says something - no power, wrong
 			// zone, still recovering - and this one said nothing at all: a bow that draws and looses
@@ -712,6 +718,19 @@ public class HunterManager extends HumanManager {
 		} else {
 			arrowMap.remove(arrow);
 		}
+	}
+
+	/**
+	 * Drops whatever the maps still hold for arrows that no longer exist.
+	 *
+	 * <p>Two maps are keyed by the arrow itself, and both are only ever emptied by the hit handler -
+	 * which never runs for an arrow that simply stopped existing in the air. This is the one place
+	 * that can tell the difference without an event: an arrow that is no longer valid is gone,
+	 * whether it landed, was picked up or timed out.
+	 */
+	private void forgetArrowsThatAreGone() {
+		arrowMap.keySet().removeIf(arrow -> !arrow.isValid());
+		grappleSpent.keySet().removeIf(arrow -> !arrow.isValid());
 	}
 
 	/** Whether the power arrow's own cooldown is still running. */
@@ -877,7 +896,10 @@ public class HunterManager extends HumanManager {
 	 */
 	public int takeGrappleCost(Arrow arrow) {
 		Integer spent = grappleSpent.remove(arrow);
-		return spent == null ? SNConfigHandler.hunterPowerArrowGrapple : spent.intValue();
+		// Nothing recorded means nothing was charged: either the entry was already taken by this
+		// arrow's first hit, or the shot never got as far as being recorded. Answering the setting
+		// instead would hand back money that was never taken.
+		return spent == null ? 0 : spent.intValue();
 	}
 
 	/**

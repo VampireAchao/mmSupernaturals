@@ -191,7 +191,7 @@ public class ArrowUtil implements Runnable {
 		// Pulled through the air and let go at the end of it: without this the fall damage arrives
 		// the moment the grapple releases, and the ability reads as hurting the person who used it.
 		player.setFallDistance(0);
-		renew(hunter, true);
+		renew();
 	}
 
 	/**
@@ -204,9 +204,9 @@ public class ArrowUtil implements Runnable {
 	 * it. One tick is the speed the ability is written to move at, and the speed the ride reads
 	 * as a ride at.
 	 */
-	private void renew(HunterManager hunter, boolean hasMoved) {
+	private void renew() {
 		ArrowUtil next = new ArrowUtil(player, targetLocation, startTime, grappleDistance, token,
-				spentPower, hasMoved);
+				spentPower, true);
 		SupernaturalsPlugin.instance.getServer().getScheduler()
 				.scheduleSyncDelayedTask(SupernaturalsPlugin.instance, next, 1L);
 	}
