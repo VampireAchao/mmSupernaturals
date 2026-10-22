@@ -22,7 +22,9 @@ package me.matterz.supernaturals.manager;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.logging.Level;
 
 import me.matterz.supernaturals.SuperNPlayer;
@@ -60,7 +62,16 @@ public class HunterManager extends HumanManager {
 	private HashMap<Arrow, String> arrowMap = new HashMap<Arrow, String>();
 	private HashMap<SuperNPlayer, String> hunterMap = new HashMap<SuperNPlayer, String>();
 	private ArrayList<Player> grapplingPlayers = new ArrayList<Player>();
-	private ArrayList<Player> drainedPlayers = new ArrayList<Player>();
+	/**
+	 * When a hunter may fire a power arrow again, by player id.
+	 *
+	 * <p>A time rather than a list of players: the cooldown belongs to the shot, not to the
+	 * object that took it. Held as a player it was removed by a scheduled task that could
+	 * outlive the player - one who logged out before it ran left his entry behind for ever -
+	 * and it made the ability un-shootable after a relogin, because the new player object
+	 * is not the one in the list.
+	 */
+	private final Map<UUID, Long> powerReadyAt = new HashMap<UUID, Long>();
 	private ArrayList<Location> hallDoors = new ArrayList<Location>();
 	private ArrayList<SuperNPlayer> playerInvites = new ArrayList<SuperNPlayer>();
 	private static ArrayList<SuperNPlayer> bountyList = new ArrayList<SuperNPlayer>();
@@ -576,12 +587,6 @@ public class HunterManager extends HumanManager {
 			return false;
 		}
 
-		if (drainedPlayers.contains(player)) {
-			player.getWorld().dropItem(player.getLocation(), new ItemStack(Material.ARROW, 1));
-			SuperNManager.sendMessage(snplayer, "You are still recovering from Power Shot.");
-			return true;
-		}
-
 		String arrowType = hunterMap.get(snplayer);
 		if (arrowType == null) {
 			arrowType = "normal";
@@ -624,25 +629,26 @@ public class HunterManager extends HumanManager {
 				return false;
 			}
 		} else if (arrowType.equalsIgnoreCase("power")) {
+			// The cooldown is this arrow's, and only this arrow's. It used to be checked before
+			// the type was even read, so a hunter who fired one power shot could not shoot a
+			// normal, fire, triple or grapple arrow for fifteen seconds - the other four arrows
+			// inherited a recovery that was never theirs, and the boards that hand them out
+			// looked broken for the whole quarter of a minute after somebody tried power.
+			if (powerRecovering(player)) {
+				SuperNManager.sendMessage(snplayer, "You are still recovering from Power Shot ("
+						+ powerRecoverySeconds(player) + "s). Switch arrow type to shoot something else.");
+				return true;
+			}
 			if (snplayer.getPower() > SNConfigHandler.hunterPowerArrowPower) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.hunterPowerArrowPower, "Power Arrow!");
 				Arrow arrow = player.launchProjectile(Arrow.class);
 				arrowMap.put(arrow, arrowType);
-				drainedPlayers.add(player);
+				powerReadyAt.put(player.getUniqueId(),
+						System.currentTimeMillis() + SNConfigHandler.hunterCooldown);
 				if (SNConfigHandler.debugMode) {
-					SupernaturalsPlugin.log(snplayer.getName() + " is drained.");
+					SupernaturalsPlugin.log(snplayer.getName() + " is drained for "
+							+ SNConfigHandler.hunterCooldown + "ms.");
 				}
-				SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(SupernaturalsPlugin.instance, new Runnable() {
-					@Override
-					public void run() {
-						drainedPlayers.remove(player);
-						if (player.isOnline()) {
-							SuperNManager.sendMessage(snplayer, "You can shoot again!");
-						}
-						SupernaturalsPlugin.log(snplayer.getName()
-								+ " is no longer drained.");
-					}
-				}, SNConfigHandler.hunterCooldown / 50);
 				return true;
 			} else {
 				SuperNManager.sendMessage(snplayer, "Not enough power to shoot Power Arrows!");
@@ -684,6 +690,29 @@ public class HunterManager extends HumanManager {
 		} else {
 			arrowMap.remove(arrow);
 		}
+	}
+
+	/** Whether the power arrow's own cooldown is still running. */
+	private boolean powerRecovering(Player player) {
+		Long ready = powerReadyAt.get(player.getUniqueId());
+		if (ready == null) {
+			return false;
+		}
+		if (System.currentTimeMillis() >= ready) {
+			powerReadyAt.remove(player.getUniqueId());
+			return false;
+		}
+		return true;
+	}
+
+	/** Whole seconds left of that cooldown, rounded up so it never reads 0 while still refusing. */
+	private int powerRecoverySeconds(Player player) {
+		Long ready = powerReadyAt.get(player.getUniqueId());
+		if (ready == null) {
+			return 0;
+		}
+		long left = ready - System.currentTimeMillis();
+		return (int) Math.max(0, (left + 999) / 1000);
 	}
 
 	public boolean isGrappling(Player player) {
