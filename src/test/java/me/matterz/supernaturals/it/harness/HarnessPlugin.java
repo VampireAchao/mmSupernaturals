@@ -453,6 +453,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return arrows();
             case "motion":
                 return motion(rest);
+            case "watch":
+                return watch(rest);
             case "grapple":
                 return grapple(rest);
             case "strike":
@@ -1615,6 +1617,37 @@ public final class HarnessPlugin extends JavaPlugin {
     /** A number to two places, for a probe reply that has to stay readable. */
     private static String round(double value) {
         return String.valueOf(Math.round(value * 100.0) / 100.0);
+    }
+
+    /**
+     * Samples a player's place once a tick, for the probe.
+     *
+     * <p>"The pull moved him" and "the pull moved him twice as fast" are the same reading unless
+     * the samples are a tick apart: a console reply takes seconds to come back, and by then the
+     * ride is over and the only thing left to read is where he ended up. One line a tick is what
+     * a step of one block can actually be checked against - and what two pulls running at once
+     * would double.
+     */
+    private String watch(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = player(args[0]);
+        int ticks = 20;
+        if (args.length > 1) {
+            ticks = Math.min(200, Math.max(1, Integer.parseInt(args[1])));
+        }
+        for (int i = 1; i <= ticks; i++) {
+            final int after = i;
+            Bukkit.getScheduler().runTaskLater(SupernaturalsPlugin.instance, () -> {
+                var at = player.getLocation();
+                getLogger().info("[watch] +" + after + "t tick=" + Bukkit.getCurrentTick()
+                        + " x=" + round(at.getX())
+                        + " y=" + round(at.getY()) + " z=" + round(at.getZ())
+                        + " grappling="
+                        + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                        + " power=" + (int) SuperNManager.get(player).getPower());
+            }, i);
+        }
+        return "ok watching " + player.getName() + " for " + ticks + " ticks";
     }
 
     /**

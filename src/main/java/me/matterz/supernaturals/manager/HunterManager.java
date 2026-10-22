@@ -61,7 +61,23 @@ public class HunterManager extends HumanManager {
 
 	private HashMap<Arrow, String> arrowMap = new HashMap<Arrow, String>();
 	private HashMap<SuperNPlayer, String> hunterMap = new HashMap<SuperNPlayer, String>();
-	private ArrayList<Player> grapplingPlayers = new ArrayList<Player>();
+	/**
+	 * Which pull owns each player right now, by player id, and the number that names it.
+	 *
+	 * <p>A pull is a thing with an owner, not a flag on a player. Held as "this list contains
+	 * him", it had two faults that only showed up when a hunter shot twice. A pull removed itself
+	 * from the list two seconds after it ended, so a shot that landed inside that window - and any
+	 * shot fired while a pull was still running - spent its power and then found itself refused,
+	 * with nothing said. And a pull that ended without removing itself kept him flagged for the
+	 * rest of the session, so every later shot was refused too. Naming the pull means a new shot
+	 * takes the player over instead of being turned away, and a pull that has been taken over can
+	 * see that it has, and go quietly.
+	 */
+	private final Map<UUID, Long> grappleOwners = new HashMap<UUID, Long>();
+	private long nextGrappleToken = 1L;
+
+	/** What each grapple arrow cost, so a pull that moves nobody can hand it back. */
+	private final Map<Arrow, Integer> grappleSpent = new HashMap<Arrow, Integer>();
 	/**
 	 * When a hunter may fire a power arrow again, by player id.
 	 *
@@ -658,9 +674,15 @@ public class HunterManager extends HumanManager {
 			}
 		} else if (arrowType.equalsIgnoreCase("grapple")) {
 			if (snplayer.getPower() > SNConfigHandler.hunterPowerArrowGrapple) {
+				// What it actually cost, measured rather than assumed: with free power nothing is
+				// taken, and a refund has to give back what was taken.
+				double before = snplayer.getPower();
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.hunterPowerArrowGrapple, "Grapple Arrow!");
 				Arrow arrow = player.launchProjectile(Arrow.class);
+				int spent = (int) Math.round(before - snplayer.getPower());
 				arrowMap.put(arrow, arrowType);
+				grappleSpent.put(arrow, Integer.valueOf(spent));
+				confirmItFlew(player, arrow, arrow.getLocation().clone());
 				return true;
 			} else {
 				SuperNManager.sendMessage(snplayer, "Not enough power to shoot Grapple Arrow!");
@@ -716,30 +738,146 @@ public class HunterManager extends HumanManager {
 	}
 
 	public boolean isGrappling(Player player) {
-		return grapplingPlayers.contains(player);
+		return player != null && grappleOwners.containsKey(player.getUniqueId());
+	}
+
+	/**
+	 * Whether the pull named by this token is still the one that owns the player.
+	 *
+	 * <p>The one question a task in flight has to ask before every step, and the reason two pulls
+	 * can never both move somebody. A pull that has been taken over answers false here and does
+	 * nothing more: no step, no speed, no fall distance, and no ending of the pull that replaced
+	 * it.
+	 */
+	public boolean ownsGrapple(Player player, long token) {
+		if (player == null) {
+			return false;
+		}
+		Long current = grappleOwners.get(player.getUniqueId());
+		return current != null && current.longValue() == token;
 	}
 
 	public void startGrappling(Player player, Location targetLocation) {
-		if (isGrappling(player)) {
-			return;
-		}
-		ArrowUtil gh = new ArrowUtil(player, targetLocation);
-		grapplingPlayers.add(player);
-		SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(SupernaturalsPlugin.instance, gh);
+		startGrappling(player, targetLocation, 0);
 	}
 
-	public void stopGrappling(final Player player) {
-		if (isGrappling(player)) {
-			player.setVelocity(new Vector(0, 0, 0));
-			player.setFallDistance(0);
-			softenLanding(player, 60);
-			SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(SupernaturalsPlugin.instance, new Runnable() {
-				@Override
-				public void run() {
-					grapplingPlayers.remove(player);
-				}
-			}, 20 * 2);
+	/**
+	 * Starts a pull, or takes the player over from one that is still running.
+	 *
+	 * <p>Taking over rather than refusing, because the shot was already paid for: a hunter who
+	 * fires while a pull is in flight has bought another pull, and the only two honest answers are
+	 * to give him one or to give the power back. This gives him one. The pull it replaces finds
+	 * out at its next tick, by its token, and steps aside without touching him.
+	 *
+	 * @param spentPower what the shot cost, so a pull that moves him nowhere can refund it
+	 */
+	public void startGrappling(Player player, Location targetLocation, int spentPower) {
+		if (player == null || targetLocation == null) {
+			return;
 		}
+		long token = nextGrappleToken++;
+		grappleOwners.put(player.getUniqueId(), token);
+		// A tick later, not "as soon as possible": a task scheduled with no delay from inside a
+		// task runs in the same tick on this server, and a pull whose steps all happen in one tick
+		// is a teleport - see ArrowUtil#renew.
+		ArrowUtil gh = new ArrowUtil(player, targetLocation, token, spentPower);
+		SupernaturalsPlugin.instance.getServer().getScheduler()
+				.scheduleSyncDelayedTask(SupernaturalsPlugin.instance, gh, 1L);
+	}
+
+	/**
+	 * Ends a pull - but only the pull that still owns him.
+	 *
+	 * <p>A pull that was taken over must not call this: it would end the pull that replaced it and
+	 * zero the speed the newer one just set. Ownership is cleared here and now, which is what makes
+	 * the next shot able to start a pull of its own: the two-second delay this used to have was the
+	 * window in which every shot was silently refused.
+	 */
+	public void stopGrappling(Player player, long token) {
+		if (!ownsGrapple(player, token)) {
+			return;
+		}
+		grappleOwners.remove(player.getUniqueId());
+		if (!player.isOnline()) {
+			return;
+		}
+		player.setVelocity(new Vector(0, 0, 0));
+		player.setFallDistance(0);
+		softenLanding(player, 60);
+	}
+
+	/**
+	 * Gives back what a shot cost when the pull it bought moved the player nowhere.
+	 *
+	 * <p>The other half of "a shot that was paid for does something": if there was nothing to pull
+	 * him to - the arrow landed two blocks away, the move was refused, he was in another world
+	 * before the first step - the power goes back and he is told why, instead of the shot
+	 * disappearing with the power. Nothing is given back once the pull has moved him: a ride that
+	 * ended early still happened.
+	 */
+	public void refundGrapple(Player player, int spentPower, boolean moved, String why) {
+		if (moved || spentPower <= 0 || player == null || !player.isOnline()) {
+			return;
+		}
+		SuperNPlayer snplayer = SuperNManager.get(player);
+		SuperNManager.alterPower(snplayer, spentPower, "Grapple Arrow refunded!");
+		SuperNManager.sendMessage(snplayer, "Nothing to pull you to (" + why + ") - "
+				+ spentPower + " power returned.");
+	}
+
+	/**
+	 * Checks, one tick after the shot, that the arrow actually left the bow.
+	 *
+	 * <p>An arrow loosed into the block in front of the hunter - a wall he is standing against, the
+	 * underside of a ledge, the block his own head is in - is inside a block from the moment it
+	 * exists, and an arrow that is inside a block is never reported as having hit one. So the hit
+	 * that should have started the pull never arrives: the shot keeps its power, moves nobody, and
+	 * leaves the arrow in the map for good. That is the report this is about, in its purest form.
+	 *
+	 * <p>The spent-power entry is the proof a shot was never handled, because the hit takes it out
+	 * before it does anything else. One tick later a real arrow is either in the air or has already
+	 * reported its hit, so anything still holding its entry and not flying caught nothing, and is
+	 * paid back like a pull that could not move him.
+	 */
+	private void confirmItFlew(final Player player, final Arrow arrow, final Location launch) {
+		SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(
+				SupernaturalsPlugin.instance, new Runnable() {
+					@Override
+					public void run() {
+						Integer spent = grappleSpent.get(arrow);
+						if (spent == null) {
+							return;
+						}
+						// Two ticks, and three ways to be a shot that never flew: gone, inside a
+						// block, or still standing where it was loosed from. The last one does not
+						// depend on when the server decides to call an arrow "in a block", which is
+						// a tick later than it looks.
+						boolean flew = arrow.isValid() && !arrow.isInBlock()
+								&& arrow.getLocation().distanceSquared(launch) >= 1.0D;
+						if (flew) {
+							return;
+						}
+						arrowMap.remove(arrow);
+						grappleSpent.remove(arrow);
+						refundGrapple(player, spent.intValue(), false,
+								"the arrow never left the block it was fired into");
+						if (arrow.isValid()) {
+							arrow.remove();
+						}
+					}
+				}, 2L);
+	}
+
+	/**
+	 * What this arrow's shot cost, taken out of the record.
+	 *
+	 * <p>Asked once, by whoever handles the hit. The number is what was actually charged, not what
+	 * the setting says: an admin with free power is charged nothing, and giving that back as if it
+	 * had been paid would mint power.
+	 */
+	public int takeGrappleCost(Arrow arrow) {
+		Integer spent = grappleSpent.remove(arrow);
+		return spent == null ? SNConfigHandler.hunterPowerArrowGrapple : spent.intValue();
 	}
 
 	/**
@@ -759,12 +897,14 @@ public class HunterManager extends HumanManager {
 		if (player.isOnGround()) {
 			return;
 		}
+		// One tick at a time: without a delay this counts itself down inside a single tick and the
+		// guard is over before the fall it was guarding against has begun.
 		SupernaturalsPlugin.instance.getServer().getScheduler().scheduleSyncDelayedTask(
 				SupernaturalsPlugin.instance, new Runnable() {
 					@Override
 					public void run() {
 						softenLanding(player, ticksLeft - 1);
 					}
-				});
+				}, 1L);
 	}
 }
