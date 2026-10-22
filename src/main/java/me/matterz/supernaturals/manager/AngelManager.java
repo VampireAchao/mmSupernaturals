@@ -59,7 +59,7 @@ public class AngelManager extends ClassManager {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		SuperNPlayer sntarget = SuperNManager.get(target);
 		if (player.getItemInHand().getType().equals(Material.FEATHER)) {
-			if (snplayer.getPower() > SNConfigHandler.angelHealPowerCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.angelHealPowerCost)) {
 				// Healing adds to whatever the target has, so a target that is already full gets
 				// asked for more than its bar can hold. The server clamps that, but the plugin
 				// should not be the one asking for an impossible number.
@@ -74,7 +74,7 @@ public class AngelManager extends ClassManager {
 			}
 		}
 		if (player.getItemInHand().getType().equals(Material.PAPER)) {
-			if (snplayer.getPower() > SNConfigHandler.angelCurePowerCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.angelCurePowerCost)) {
 				if (sntarget.isSuper()) {
 					SuperNManager.cure(sntarget);
 					target.sendMessage(ChatColor.RED + "Cured by "
@@ -101,7 +101,7 @@ public class AngelManager extends ClassManager {
 			return false;
 		}
 		if (itemInHandMaterial.equals(Material.DANDELION)) {
-			if (snplayer.getPower() > SNConfigHandler.angelJumpPowerCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.angelJumpPowerCost)) {
 				jump(player, SNConfigHandler.angelJumpDeltaSpeed);
 			} else {
 				SuperNManager.sendMessage(snplayer, "Not enough power to jump!");
@@ -123,7 +123,7 @@ public class AngelManager extends ClassManager {
 				&& !itemInHandMaterial.equals(Material.PORKCHOP)) {
 			return false;
 		}
-		if (snplayer.getPower() <= SNConfigHandler.angelSummonPowerCost) {
+		if (!SuperNManager.canPay(snplayer, SNConfigHandler.angelSummonPowerCost)) {
 			SuperNManager.sendMessage(snplayer, "Not enough power to summon!");
 			return false;
 		}
@@ -242,7 +242,7 @@ public class AngelManager extends ClassManager {
 	public static boolean jump(Player player, double deltaSpeed) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 
-		if (snplayer.getPower() < SNConfigHandler.angelJumpPowerCost) {
+		if (!SuperNManager.canPay(snplayer, SNConfigHandler.angelJumpPowerCost)) {
 			SuperNManager.sendMessage(snplayer, "Not enough Power to jump.");
 			return false;
 		} else {

@@ -388,7 +388,7 @@ public class GhoulManager extends ClassManager {
 			return false;
 		}
 
-		if (snplayer.getPower() > SNConfigHandler.ghoulPowerBond) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.ghoulPowerBond)) {
 			if (SNConfigHandler.debugMode) {
 				SupernaturalsPlugin.log("Unholy Bond activated for "
 						+ snplayer.getName() + " with " + snvictim.getName());
@@ -422,7 +422,7 @@ public class GhoulManager extends ClassManager {
 			SuperNManager.sendMessage(snplayer, "You cannot summon here.");
 			return false;
 		}
-		if (snplayer.getPower() > SNConfigHandler.ghoulPowerSummonCost) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.ghoulPowerSummonCost)) {
 			player.getWorld().spawnEntity(player.getLocation(), EntityType.ZOMBIE);
 			SuperNManager.alterPower(snplayer, -SNConfigHandler.ghoulPowerSummonCost, "Summoning a Zombie!");
 			if (SNConfigHandler.debugMode) {

@@ -303,7 +303,7 @@ public class WereManager extends ClassManager {
 			return false;
 		}
 		if (SuperNManager.worldTimeIsNight(player)) {
-			if (snplayer.getPower() >= SNConfigHandler.werePowerSummonCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.werePowerSummonCost)) {
 				int i = 0;
 				for (Wolf wolf : new ArrayList<Wolf>(wolvesMap.keySet())) {
 					if (!wolvesMap.get(wolf).equals(snplayer)) {

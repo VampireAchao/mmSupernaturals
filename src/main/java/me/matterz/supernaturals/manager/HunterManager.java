@@ -614,7 +614,7 @@ public class HunterManager extends HumanManager {
 		}
 
 		if (arrowType.equalsIgnoreCase("fire")) {
-			if (snplayer.getPower() > SNConfigHandler.hunterPowerArrowFire) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.hunterPowerArrowFire)) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.hunterPowerArrowFire, "Fire Arrow!");
 				Arrow arrow = player.launchProjectile(Arrow.class);
 				arrowMap.put(arrow, arrowType);
@@ -627,7 +627,7 @@ public class HunterManager extends HumanManager {
 				return false;
 			}
 		} else if (arrowType.equalsIgnoreCase("triple")) {
-			if (snplayer.getPower() > SNConfigHandler.hunterPowerArrowTriple) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.hunterPowerArrowTriple)) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.hunterPowerArrowTriple, "Triple Arrow!");
 				final Arrow arrow = player.launchProjectile(Arrow.class);
 				arrowMap.put(arrow, arrowType);
@@ -655,7 +655,7 @@ public class HunterManager extends HumanManager {
 						+ powerRecoverySeconds(player) + "s). Switch arrow type to shoot something else.");
 				return true;
 			}
-			if (snplayer.getPower() > SNConfigHandler.hunterPowerArrowPower) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.hunterPowerArrowPower)) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.hunterPowerArrowPower, "Power Arrow!");
 				Arrow arrow = player.launchProjectile(Arrow.class);
 				arrowMap.put(arrow, arrowType);
@@ -673,7 +673,7 @@ public class HunterManager extends HumanManager {
 				return false;
 			}
 		} else if (arrowType.equalsIgnoreCase("grapple")) {
-			if (snplayer.getPower() > SNConfigHandler.hunterPowerArrowGrapple) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.hunterPowerArrowGrapple)) {
 				// What it actually cost, measured rather than assumed: with free power nothing is
 				// taken, and a refund has to give back what was taken.
 				double before = snplayer.getPower();

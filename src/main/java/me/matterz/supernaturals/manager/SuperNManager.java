@@ -301,6 +301,23 @@ public class SuperNManager {
 		return true;
 	}
 
+	/**
+	 * Whether a player can pay a power cost.
+	 *
+	 * <p>"At least", not "more than". Every gate of this shape used to read {@code power > cost},
+	 * which refused a player standing on exactly the number: an ability that costs five thousand
+	 * was the one thing a bar holding five thousand could not buy, and that is the report this
+	 * comes from. The comparison lives in one place now, so the boundary can only be wrong here.
+	 *
+	 * <p>It does not pay anything - the caller still spends with {@link #alterPower}. Kept separate
+	 * because several abilities have to refuse for their own reasons before spending (a banish with
+	 * nowhere to send anybody, a heal on a target already at full health), and "can he afford it"
+	 * is the question they all ask first.
+	 */
+	public static boolean canPay(SuperNPlayer snplayer, double cost) {
+		return snplayer != null && snplayer.getPower() >= cost;
+	}
+
 	public static void alterPower(SuperNPlayer snplayer, double delta) {
 		if (delta < 0 && powerIsFree(snplayer)) {
 			return;
@@ -326,7 +343,7 @@ public class SuperNManager {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 
 		if (upOnly) {
-			if (snplayer.getPower() - SNConfigHandler.jumpBloodCost <= 0) {
+			if (!canPay(snplayer, SNConfigHandler.jumpBloodCost)) {
 				SuperNManager.sendMessage(snplayer, "Not enough Power to jump.");
 				return false;
 			} else {
@@ -461,7 +478,7 @@ public class SuperNManager {
 		double deltaHeal;
 
 		if (snplayer.isVampire()) {
-			if (snplayer.getPower() <= SNConfigHandler.vampireHealthCost) {
+			if (!canPay(snplayer, SNConfigHandler.vampireHealthCost)) {
 				if (SNConfigHandler.debugMode) {
 					SupernaturalsPlugin.log("Regen Event: Vampire player "
 							+ player.getName() + " not enough power!");

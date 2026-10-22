@@ -363,7 +363,7 @@ public class PriestManager extends HumanManager {
 			SuperNManager.sendMessage(snplayer, "Cannot cast in a non-PvP zone.");
 			return false;
 		}
-		if (snplayer.getPower() > SNConfigHandler.priestPowerBanish) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.priestPowerBanish)) {
 			if (snvictim.isSuper()) {
 				// Asked before the power is spent rather than after: a banish with nowhere to send
 				// anybody is not a banish, and taking the power for it would be charging for a
@@ -427,7 +427,7 @@ public class PriestManager extends HumanManager {
 	public boolean heal(Player player, Player victim) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		SuperNPlayer snvictim = SuperNManager.get(victim);
-		if (snplayer.getPower() > SNConfigHandler.priestPowerHeal) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.priestPowerHeal)) {
 			if (!snvictim.isSuper() && victim.getHealth() < 20
 					&& !victim.isDead()) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.priestPowerHeal, "Healed "
@@ -465,7 +465,7 @@ public class PriestManager extends HumanManager {
 			SuperNManager.sendMessage(snplayer, "Cannot cast in a non-PvP zone.");
 			return false;
 		}
-		if (snplayer.getPower() > SNConfigHandler.priestPowerExorcise) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.priestPowerExorcise)) {
 			if (snvictim.isSuper()) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.priestPowerExorcise, "Exorcised "
 						+ victim.getName());
@@ -493,7 +493,7 @@ public class PriestManager extends HumanManager {
 	public boolean cure(Player player, Player victim, Material material) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		SuperNPlayer snvictim = SuperNManager.get(victim);
-		if (snplayer.getPower() > SNConfigHandler.priestPowerCure) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.priestPowerCure)) {
 			if (snvictim.isSuper()) {
 				if (victim.getItemInHand().getType().equals(material)) {
 					SuperNManager.alterPower(snplayer, -SNConfigHandler.priestPowerCure, "Cured "
@@ -539,7 +539,7 @@ public class PriestManager extends HumanManager {
 			SuperNManager.sendMessage(snplayer, "Cannot cast in a non-PvP zone.");
 			return false;
 		}
-		if (snplayer.getPower() > SNConfigHandler.priestPowerDrain) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.priestPowerDrain)) {
 			if (snvictim.isSuper()) {
 				double power = snvictim.getPower();
 				power *= SNConfigHandler.priestDrainFactor;
@@ -568,7 +568,7 @@ public class PriestManager extends HumanManager {
 		SuperNPlayer priest = SuperNManager.get(player);
 		SuperNPlayer snvictim = SuperNManager.get(victim);
 
-		if (priest.getPower() > SNConfigHandler.priestPowerGuardianAngel) {
+		if (SuperNManager.canPay(priest, SNConfigHandler.priestPowerGuardianAngel)) {
 			if (!snvictim.isSuper()) {
 				if (SupernaturalsPlugin.instance.getDataHandler().hasAngel(priest)) {
 					SuperNManager.sendMessage(priest, "Removed Guardian Angel from "

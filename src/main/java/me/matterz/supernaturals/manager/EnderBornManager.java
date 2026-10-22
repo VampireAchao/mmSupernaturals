@@ -118,7 +118,7 @@ public class EnderBornManager extends ClassManager {
 				SuperNPlayer snVictim = SuperNManager.get(pVictim);
 
 				if (holdsPearl(pVictim)
-						&& snVictim.getPower() > SNConfigHandler.enderProtectPower) {
+						&& SuperNManager.canPay(snVictim, SNConfigHandler.enderProtectPower)) {
 					damage -= damage
 							* snVictim.scale(1 - SNConfigHandler.enderDamageReceivedFactor);
 					SuperNManager.alterPower(snVictim, -SNConfigHandler.enderProtectPower, "Protected by Pearl!");
