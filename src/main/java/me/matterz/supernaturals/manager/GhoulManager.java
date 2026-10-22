@@ -24,6 +24,7 @@ import java.util.HashMap;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
+import me.matterz.supernaturals.util.MaterialTiers;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -71,9 +72,15 @@ public class GhoulManager extends ClassManager {
 				ItemStack item = pDamager.getItemInHand();
 
 				if (item != null) {
-					if (SNConfigHandler.ghoulWeaponImmunity.contains(item.getType())) {
+					// Two questions, in this order: is this a tool or a weapon at all, and is it made
+					// of a substance that cannot cut a ghoul. The tier is what a material rule is
+					// about, so a diamond spear, axe or pickaxe is the same answer as a diamond
+					// sword; the kind is what keeps the rule to the things that are actually swung -
+					// a diamond block is not judged, and it is not refused or confiscated either.
+					if (MaterialTiers.isToolOrWeaponOfTier(item.getType(),
+							SNConfigHandler.ghoulWeaponImmuneTiers)) {
 						damage = 0;
-						SuperNManager.sendMessage(snDamager, "Ghouls are immune to that weapon!");
+						SuperNManager.sendMessage(snDamager, "Ghouls are immune to that material!");
 					} else {
 						damage -= damage
 								* snVictim.scale(1 - SNConfigHandler.ghoulDamageReceivedFactor);
@@ -381,7 +388,7 @@ public class GhoulManager extends ClassManager {
 			return false;
 		}
 
-		if (snplayer.getPower() > SNConfigHandler.ghoulPowerBond) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.ghoulPowerBond)) {
 			if (SNConfigHandler.debugMode) {
 				SupernaturalsPlugin.log("Unholy Bond activated for "
 						+ snplayer.getName() + " with " + snvictim.getName());
@@ -415,7 +422,7 @@ public class GhoulManager extends ClassManager {
 			SuperNManager.sendMessage(snplayer, "You cannot summon here.");
 			return false;
 		}
-		if (snplayer.getPower() > SNConfigHandler.ghoulPowerSummonCost) {
+		if (SuperNManager.canPay(snplayer, SNConfigHandler.ghoulPowerSummonCost)) {
 			player.getWorld().spawnEntity(player.getLocation(), EntityType.ZOMBIE);
 			SuperNManager.alterPower(snplayer, -SNConfigHandler.ghoulPowerSummonCost, "Summoning a Zombie!");
 			if (SNConfigHandler.debugMode) {

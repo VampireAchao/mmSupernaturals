@@ -2066,40 +2066,101 @@ public final class Hall {
                         "先点「先被打掉血」，血量掉到一半",
                         "站到露天台→点「切换下雨」→等 20 秒，看血条不动",
                         "点「站到有顶处」再等 20 秒，看它开始回血（雨不用关）"));
-                sections.add(section("§b⑥ 钻石剑 伤害 0", 2, (w, y, x, z, width) -> {
-                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                            new ItemStack(Material.DIAMOND_SWORD, 1),
-                            new ItemStack(Material.IRON_SWORD, 1)));
-                    switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
-                            "§f叫陪练过来", "§7他手上先拿铁剑");
-                    switchpoint(w, y, x + 9, z + 3,
+                sections.add(section("§b⑥ 免疫 · 钻石族", 2, (w, y, x, z, width) -> {
+                    // One board per kind, because the rule is about the kind as much as the tier:
+                    // a player who tests the sword and finds it harmless has tested a sixth of the
+                    // answer, and the five boards that used to be missing are exactly the gap this
+                    // room exists to make visible. Every board brings its own sparring, so the
+                    // cases do not depend on the order they are pressed in.
+                    switchpoint(w, y, x + 4, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SWORD"),
-                            "§b挨一下钻石剑", "§7他的剑换成钻石剑，你不掉血");
+                            "§b① 挨一下钻石剑", "§7武器");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_AXE"),
+                            "§b② 挨一下钻石斧", "§7武器，也是工具");
                     switchpoint(w, y, x + 12, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_PICKAXE"),
+                            "§b③ 挨一下钻石镐", "§7工具");
+                    switchpoint(w, y, x + 16, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SHOVEL"),
+                            "§b④ 挨一下钻石锹", "§7工具");
+                    switchpoint(w, y, x + 20, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_HOE"),
+                            "§b⑤ 挨一下钻石锄", "§7工具");
+                    switchpoint(w, y, x + 24, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_SPEAR"),
+                            "§b⑥ 挨一下钻石矛", "§7六种里的最后一种");
+                    switchpoint(w, y, x + 28, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "DIAMOND_BLOCK"),
+                            "§f⑦ 对照 钻石块", "§7不是工具也不是武器");
+                }, "验证食尸鬼对钻石族「工具与武器」免疫",
+                        "判定只问两件事，按这个顺序问：① 它是不是工具或武器——剑、斧、镐、锹、锄、"
+                                + "矛，六种；② 它的材质是不是钻石这一级——钻石与下界合金算同一级。"
+                                + "所以前六块牌（六种各一件）打在你身上都该是 0 伤害，并提示 "
+                                + "Ghouls are immune to that material!。最后一块钻石块不是工具也不是"
+                                + "武器，不在这条规则的判定范围里，会照常掉血——那不是漏洞，是边界。"
+                                + "这条规则只改伤害：这六件你照样能捡、能拿在手里、能拿去挖方块",
+                        "①②③④⑤⑥ 血条一点不动（0 伤害）；⑦ 钻石块正常掉血",
+                        "六块挨打牌各点一次：陪练会拿着那件东西从远处走过来，砍你一下",
+                        "每一下都看血条与聊天栏：0 伤害时会有 Ghouls are immune to that material!",
+                        "最后点「⑦ 对照 钻石块」：这不是工具也不是武器，血条会真的少"));
+                sections.add(section("§5⑦ 免疫 · 下界合金族", 2, (w, y, x, z, width) -> {
+                    // The same six kinds again, one tier up, because "diamond" was the whole of
+                    // the old rule and netherite is what a diamond thing becomes. The last board
+                    // is the control that matters: iron is a real weapon of the wrong tier, so a
+                    // hit that lands there is the proof that the six above were judged, not
+                    // ignored.
+                    switchpoint(w, y, x + 4, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SWORD"),
+                            "§5① 挨一下下界合金剑", "§7武器");
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_AXE"),
+                            "§5② 挨一下下界合金斧", "§7武器，也是工具");
+                    switchpoint(w, y, x + 12, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_PICKAXE"),
+                            "§5③ 挨一下下界合金镐", "§7工具");
+                    switchpoint(w, y, x + 16, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SHOVEL"),
+                            "§5④ 挨一下下界合金锹", "§7工具");
+                    switchpoint(w, y, x + 20, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_HOE"),
+                            "§5⑤ 挨一下下界合金锄", "§7工具");
+                    switchpoint(w, y, x + 24, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "ghoul", "NETHERITE_SPEAR"),
+                            "§5⑥ 挨一下下界合金矛", "§7六种里的最后一种");
+                    switchpoint(w, y, x + 28, z + 3,
                             Trigger.with(Kind.TEST_HIT, "ghoul", "IRON_SWORD"),
-                            "§f挨一下铁剑", "§7他的剑换回铁剑，真的掉血");
-                }, "验证食尸鬼对钻石剑 / 下界合金剑免疫",
-                        "默认免疫名单是下界合金剑与钻石剑：打在身上 0 伤害。其他近战武器正常生效，"
-                                + "而且你还有 35% 的减伤（配置 0.65 是减伤系数）",
-                        "钻石剑打在身上是 0 伤害，铁剑是正常伤害",
-                        "点「叫陪练过来」让他站到你面前",
-                        "依次点「挨一下钻石剑」和「挨一下铁剑」对比"));
-                sections.add(section("§7⑦ 武器禁令", 1, (w, y, x, z, width) -> {
+                            "§f⑦ 对照 铁剑", "§7真武器，但材质不对");
+                }, "验证食尸鬼对下界合金族「工具与武器」免疫",
+                        "下界合金是钻石的升级，插件的规则把两者算作同一级，所以这一节是上一节的"
+                                + "另一半：同样是六种工具武器，同样应该 0 伤害。最后一块是铁剑——"
+                                + "它是一件真正的武器，只是材质不在钻石这一级，所以它砍下来会掉血。"
+                                + "有这一块，前面六块的 0 才不是「什么都没发生」",
+                        "①②③④⑤⑥ 血条一点不动（0 伤害）；⑦ 铁剑正常掉血",
+                        "六块挨打牌各点一次，等陪练走过来砍你",
+                        "最后点「⑦ 对照 铁剑」：同一间房、同一种判定，只有材质换了，血条就动了",
+                        "两节看完，结论是「等级对、类型对」才免疫，缺一样都不算"));
+                sections.add(section("§7⑧ 武器禁令", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
                             new ItemStack(Material.GOLDEN_AXE, 1),
-                            new ItemStack(Material.DIAMOND_PICKAXE, 1)));
+                            new ItemStack(Material.DIAMOND_PICKAXE, 1),
+                            new ItemStack(Material.STONE_HOE, 1),
+                            new ItemStack(Material.NETHERITE_SPEAR, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
                             "§f放出陪练", "§7他会站在你面前给你打");
                     powerButton(w, y, x + 9, z, "ghoul");
                 }, "验证食尸鬼不能用常规武器",
-                        "默认禁用清单：弓、木棍，以及木 / 石 / 铁 / 金 / 钻 / 铜 / 下界合金的剑、斧、镐、"
-                                + "锹、锄。拿着它们攻击，伤害直接被判成 0；空手不受限制",
-                        "拿这三样武器打陪练，伤害数字全是 0",
+                        "默认禁用清单现在是 44 条：木 / 石 / 铁 / 金 / 钻 / 铜 / 下界合金七个等级的"
+                                + "剑、斧、镐、锹、锄、矛（六种 × 七级 = 42），加上弓与木棍。"
+                                + "拿着它们攻击，伤害直接被判成 0；空手不受限制。"
+                                + "这一条与上一节方向相反：上一节是「别人打你」，这一节是「你打别人」。"
+                                + "两节都在说同一件事——清单只改伤害，不改你能不能拿",
+                        "拿这五样武器打陪练，伤害数字全是 0",
                         "点「放出陪练」",
-                        "拿箱子里的剑 / 斧 / 镐分别打他一下，看伤害数字",
+                        "拿箱子里的剑 / 斧 / 镐 / 锄 / 矛分别打他一下，看伤害数字",
                         "空手再打一下对照：正常伤害"));
-                sections.add(section("§9⑧ 水里 持续掉血", 3, (w, y, x, z, width) -> {
+                sections.add(section("§9⑨ 水里 持续掉血", 3, (w, y, x, z, width) -> {
                     box(w, Material.MOSSY_STONE_BRICKS, x + 7, y - 2, z + 6,
                             x + 15, y, z + 12);
                     box(w, Material.WATER, x + 9, y - 1, z + 8, x + 13, y, z + 10);
@@ -2146,7 +2207,7 @@ public final class Hall {
                         "右键池子里那条船坐上去（对着船点，不是对着水面——对着水面是又放一条），"
                                 + "再泡 10 秒，确认血条一点不动",
                         "下船再泡一次，几秒就会被「溶解」死"));
-                sections.add(section("§2⑨ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
+                sections.add(section("§2⑩ 纽带 伤害分担", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.BONE, 6),
                             new ItemStack(Material.IRON_SWORD, 1)));
@@ -2404,16 +2465,30 @@ public final class Hall {
                         "点一次「查看能量」，把数字记住",
                         "原地等一分钟，再点一次，看掉了多少",
                         "想让它停下来，就回下界（①节有传送）或者站进岩浆"));
-                sections.add(section("§4⑧ 护甲 只能裸装", 1, (w, y, x, z, width) ->
+                sections.add(section("§4⑧ 护甲 四个部位 四个档", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.LEATHER_CHESTPLATE, 1),
-                                new ItemStack(Material.IRON_CHESTPLATE, 1),
-                                new ItemStack(Material.DIAMOND_CHESTPLATE, 1))),
-                        "验证恶魔不能穿任何护甲",
+                            new ItemStack(Material.LEATHER_HELMET, 1),
+                            new ItemStack(Material.IRON_HELMET, 1),
+                            new ItemStack(Material.DIAMOND_HELMET, 1),
+                            new ItemStack(Material.NETHERITE_HELMET, 1),
+                            new ItemStack(Material.LEATHER_CHESTPLATE, 1),
+                            new ItemStack(Material.IRON_CHESTPLATE, 1),
+                            new ItemStack(Material.DIAMOND_CHESTPLATE, 1),
+                            new ItemStack(Material.NETHERITE_CHESTPLATE, 1),
+                            new ItemStack(Material.LEATHER_LEGGINGS, 1),
+                            new ItemStack(Material.IRON_LEGGINGS, 1),
+                            new ItemStack(Material.DIAMOND_LEGGINGS, 1),
+                            new ItemStack(Material.NETHERITE_LEGGINGS, 1),
+                            new ItemStack(Material.LEATHER_BOOTS, 1),
+                            new ItemStack(Material.IRON_BOOTS, 1),
+                            new ItemStack(Material.DIAMOND_BOOTS, 1),
+                            new ItemStack(Material.NETHERITE_BOOTS, 1))),
+                        "验证恶魔不能穿任何护甲：四个部位、四个材质各一件",
                         "护甲白名单里只有空气：皮革、铁、金、钻、锁链、铜、下界合金的头盔、胸甲、"
-                                + "护腿、靴子，穿上都会被脱下来掉在地上。恶魔靠免疫和回血活着，不靠甲",
-                        "三件胸甲一件都留不住，全被脱下来",
-                        "从箱子里拿三件胸甲",
+                                + "护腿、靴子，穿上都会被脱下来掉在地上——不分部位，也不分材质。"
+                                + "恶魔靠免疫和回血活着，不靠甲。箱子里 4 个部位 × 4 个材质共 16 件",
+                        "16 件全部被脱下来，身上一格都留不住",
+                        "从箱子里拿任意几件（帽子、胸甲、护腿、鞋子都试试）",
                         "依次穿上，看它们是不是都被脱掉"));
             }
             case "priest" -> {
@@ -2434,29 +2509,42 @@ public final class Hall {
                         "材料被收走，你变成牧师（初始 10000 能量），聊天栏出现提示",
                         "在箱子里拿齐四样材料（关箱自动补满）",
                         "右键中间的钻石块"));
-                sections.add(section("§6② 献祭 教会捐赠", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.APPLE, 8),
-                                new ItemStack(Material.COD, 8),
-                                new ItemStack(Material.COOKED_COD, 8),
-                                new ItemStack(Material.COOKED_PORKCHOP, 8),
-                                new ItemStack(Material.BREAD, 8))),
-                        "验证牧师向教会捐献换能量",
+                sections.add(section("§6② 献祭 教会捐赠", 1, (w, y, x, z, width) -> {
+                    // The altar, not only the food. The board says "right-click the diamond block",
+                    // and a room that builds no diamond block is a room whose one action cannot be
+                    // performed: the food is here, the altar is a door away, and what a player
+                    // reports is that donating does not work.
+                    Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
+                    priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.APPLE, 8),
+                            new ItemStack(Material.COD, 8),
+                            new ItemStack(Material.COOKED_COD, 8),
+                            new ItemStack(Material.COOKED_PORKCHOP, 8),
+                            new ItemStack(Material.BREAD, 8)));
+                }, "验证牧师向教会捐献换能量",
                         "牧师右键祭坛会把背包里所有可捐物一次收走，按单价换算能量："
                                 + "苹果 9000、生鳕鱼 510、熟鳕鱼 500、熟猪排 210、面包 80。"
-                                + "箱子里五种各 8 个，够你把每一条都试到",
+                                + "箱子里五种各 8 个，够你把每一条都试到。"
+                                + "祭坛就在这间房里——不必回上一间去右键那一座",
                         "聊天栏列出收到的能量数值，对应物品全部被收走",
                         "成为牧师后再回到这一格",
-                        "拿走箱子里的食物，右键钻石块，看聊天栏报的数值"));
-                sections.add(section("§8③ 逐出 恢复人类", 1, (w, y, x, z, width) ->
-                        chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
-                                new ItemStack(Material.COAL, 4))),
-                        "验证牧师手持煤炭右键祭坛会被逐出教会",
+                        "拿走箱子里的食物，右键房间中间的钻石块，看聊天栏报的数值"));
+                sections.add(section("§8③ 逐出 恢复人类", 1, (w, y, x, z, width) -> {
+                    // Same room, same missing altar: the coal is in the chest and the thing to hold
+                    // it against was next door, so the one action this room is about could not be
+                    // performed at all.
+                    Shrines.priest(new Blocks(w), x + 5, y, z + DEPTH / 2);
+                    priestAltars.add(new Location(w, x + 5.5, y + 1, z + DEPTH / 2.0 + 0.5));
+                    chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.COAL, 4)));
+                }, "验证牧师手持煤炭右键祭坛会被逐出教会",
                         "牧师拿煤炭右键祭坛，等于自己退会：身份立刻清空、变回人类，"
-                                + "能量归 0。这是牧师唯一不需要别人帮忙的退出方式",
+                                + "能量归 0。这是牧师唯一不需要别人帮忙的退出方式。"
+                                + "祭坛在这间房里，煤炭在箱子里——两样都在，才试得成",
                         "右键后立刻恢复人类，牧师身份清空",
                         "确保自己还是牧师",
-                        "拿箱子里的煤炭右键钻石块"));
+                        "拿箱子里的煤炭右键房间中间的钻石块"));
                 sections.add(section("§b④ 法术 净化与治疗", 3, (w, y, x, z, width) -> {
                     spellBench(w, y, x, z, Material.FEATHER, Material.SUGAR, Material.FLINT,
                             Material.PAPER);
@@ -2502,18 +2590,37 @@ public final class Hall {
                                 + "远程捐赠按半价给你能量",
                         "先点「叫陪练过来」当靶子（守护天使要人类，陪练默认是人类）",
                         "依次用书 / 羊毛 / 碗打他，注意聊天栏的回报"));
-                sections.add(section("§8⑥ 护甲 只能裸装", 1, (w, y, x, z, width) -> {
+                sections.add(section("§8⑥ 护甲 四个部位 四个档", 1, (w, y, x, z, width) -> {
+                    // Four slots and four tiers, because "only air" is a rule with no exceptions
+                    // and a chest of three chestplates cannot show that: a player who tries those
+                    // three has tested one slot, and the two questions this rule answers - does the
+                    // slot matter, and does the material matter - are both still open.
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            new ItemStack(Material.LEATHER_HELMET, 1),
+                            new ItemStack(Material.IRON_HELMET, 1),
+                            new ItemStack(Material.DIAMOND_HELMET, 1),
+                            new ItemStack(Material.NETHERITE_HELMET, 1),
                             new ItemStack(Material.LEATHER_CHESTPLATE, 1),
                             new ItemStack(Material.IRON_CHESTPLATE, 1),
-                            new ItemStack(Material.DIAMOND_CHESTPLATE, 1)));
+                            new ItemStack(Material.DIAMOND_CHESTPLATE, 1),
+                            new ItemStack(Material.NETHERITE_CHESTPLATE, 1),
+                            new ItemStack(Material.LEATHER_LEGGINGS, 1),
+                            new ItemStack(Material.IRON_LEGGINGS, 1),
+                            new ItemStack(Material.DIAMOND_LEGGINGS, 1),
+                            new ItemStack(Material.NETHERITE_LEGGINGS, 1),
+                            new ItemStack(Material.LEATHER_BOOTS, 1),
+                            new ItemStack(Material.IRON_BOOTS, 1),
+                            new ItemStack(Material.DIAMOND_BOOTS, 1),
+                            new ItemStack(Material.NETHERITE_BOOTS, 1)));
                     powerButton(w, y, x + 7, z, "priest");
-                }, "验证牧师不能穿任何护甲",
-                        "牧师的护甲白名单里只有空气：不分材质，任何头盔、胸甲、护腿、靴子"
-                                + "在穿上后都会被立刻脱下并掉在地上。这不是「只禁高级护甲」，"
-                                + "皮革一样会被脱",
-                        "三件胸甲一件都留不住，都会被脱下来掉在地上",
-                        "从箱子里拿三件胸甲",
+                }, "验证牧师不能穿任何护甲：四个部位、四个材质各一件",
+                        "牧师的护甲白名单里只有空气：不分材质、不分部位，任何头盔、胸甲、护腿、"
+                                + "靴子在穿上后都会被立刻脱下并掉在地上。箱子里是 4 个部位 × 4 个"
+                                + "材质（皮革 / 铁 / 钻石 / 下界合金）共 16 件，一件都留不住——"
+                                + "这不是「只禁高级护甲」，皮革一样会被脱；也不是「只禁胸甲」，"
+                                + "帽子、护腿、鞋子一样会被脱",
+                        "16 件全部被脱下来掉在地上，身上一格都留不住",
+                        "从箱子里拿任意几件护甲（帽子、胸甲、护腿、鞋子都试试）",
                         "依次穿上，看每一件是不是都被立刻脱下"));
                 sections.add(section("§8⑦ 动物 与 点火", 3, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
@@ -2609,20 +2716,27 @@ public final class Hall {
                                 + "①normal 普通箭，不花能量；"
                                 + "②fire 火焰箭，100，命中后目标着火，落点还能点着可燃方块；"
                                 + "③triple 三连箭，100，一次射出三支；"
-                                + "④power 强化箭，1000，伤害额外 +200%，用完进入 15 秒冷却，"
-                                + "冷却中射不出去；"
+                                + "④power 强化箭，1000，伤害额外 +200%，用完进入 15 秒冷却——"
+                                + "冷却只挡 power 自己，换成别的箭种照样能射；"
                                 + "⑤grapple 抓钩箭，500 —— 要对着头顶那层石砖平台射，箭必须命中方块，"
-                                + "命中后你会被拽向命中点；离得太近（3 格内）或者箭什么都没打到就不会拉。"
+                                + "命中后你会被拽向命中点（一 tick 一格），到离命中点 3 格时停住；"
+                                + "连着射也照样拉：每一发都算一次新的拉动，后一发会接管前一发，"
+                                + "不会两发同时拽你（那就是一 tick 两格）。"
+                                + "落点离你不到 3 格、箭出生就撞在方块里、移动被拦住——这几种情况"
+                                + "拉不动你，那 500 点会原样退回聊天栏，不会出现「扣了不动」。"
                                 + "除 normal 以外，特殊箭只允许在 PvP 区域使用",
                         "左键一次换一种，聊天栏报出当前箭种；对着陪练射 power 箭伤害明显更高，"
-                                + "紧接着再射一箭会被 15 秒冷却挡下；fire 箭会让陪练身上着火；"
-                                + "triple 一箭射出三支；grapple 打中头顶那层石砖会把你整个人拽上去",
+                                + "紧接着再射一箭会被 15 秒冷却挡下（只挡 power，换 fire 射得出去）；"
+                                + "fire 箭会让陪练身上着火；"
+                                + "triple 一箭射出三支；grapple 打中头顶那层石砖会把你整个人拽上去，"
+                                + "紧接着再射一箭还会再拽一次（能量各扣 500，不会出现\"扣了不动\"）",
                         "点「切换箭矢模式」切到 grapple（聊天栏会报当前箭种）",
                         "站远一点，抬头对着那层石砖平台射一箭，看自己是不是被拽过去",
                         "再切回别的箭种，对着陪练射一箭看伤害",
                         "换 fire 再射一箭，看陪练身上着火",
                         "换 triple 射一箭，数一下是不是三支",
-                        "切到 power 连射两次，第二次会因为冷却射不出去"
+                        "切到 power 连射两次：第二次被 15 秒冷却挡下，聊天栏报剩余秒数",
+                        "趁冷却没完切到 fire 再射一箭：照常射得出去，说明冷却只管 power"
                                 + "（注意：火只点得着人身，点不着方块——大厅里是禁止点燃的）"));
                 sections.add(section("§6④ 悬赏", 1, (w, y, x, z, width) -> {
                     switchpoint(w, y, x + 4, z + 3, Trigger.of(Kind.BOUNTY),
@@ -2638,15 +2752,27 @@ public final class Hall {
                         "名单不满时会自动补一个（全服公告）"));
                 sections.add(section("§7⑤ 护甲限制", 1, (w, y, x, z, width) ->
                         chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                                // The four leather pieces are the half that was missing: this is an
+                                // allow-list, and a chest of three chestplates showed only what the
+                                // rule refuses. The other half - that leather in all four slots is
+                                // the thing it permits - is what a hunter is supposed to be able to
+                                // wear, and it was not on the wall.
+                                new ItemStack(Material.LEATHER_HELMET, 1),
                                 new ItemStack(Material.LEATHER_CHESTPLATE, 1),
-                                new ItemStack(Material.IRON_CHESTPLATE, 1),
-                                new ItemStack(Material.DIAMOND_CHESTPLATE, 1))),
-                        "验证猎巫人只能穿皮革护甲",
+                                new ItemStack(Material.LEATHER_LEGGINGS, 1),
+                                new ItemStack(Material.LEATHER_BOOTS, 1),
+                                new ItemStack(Material.IRON_HELMET, 1),
+                                new ItemStack(Material.GOLDEN_LEGGINGS, 1),
+                                new ItemStack(Material.DIAMOND_BOOTS, 1),
+                                new ItemStack(Material.NETHERITE_CHESTPLATE, 1))),
+                        "验证猎巫人只能穿皮革护甲：四个部位都试",
                         "护甲白名单只有空气和皮革：铁、金、钻、锁链、铜、下界合金的头盔、胸甲、"
-                                + "护腿、靴子都不能穿，穿上就被脱下来掉在地上",
-                        "穿上皮革没事；穿铁或钻石的会被立刻脱下并掉落",
-                        "从箱子里拿三件胸甲",
-                        "依次穿上，看哪两件被脱下来"));
+                                + "护腿、靴子都不能穿，穿上就被脱下来掉在地上。箱子里前四件是皮革"
+                                + "的帽子、胸甲、护腿、鞋子——四件都留得住；后四件是铁 / 金 / 钻 / "
+                                + "下界合金各一件，分别在四个不同部位上，会全部被脱下",
+                        "四件皮革全部留在身上；铁盔、金护腿、钻靴、下界合金胸甲全部被脱下",
+                        "先穿齐四件皮革，确认一件都没被脱",
+                        "再依次穿后四件，看每一件都被脱下来"));
                 sections.add(section("§7⑥ 武器限制", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.IRON_SWORD, 1),
@@ -2680,30 +2806,40 @@ public final class Hall {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.ENDER_PEARL, 16)));
                     powerButton(w, y, x + 5, z, "enderborn");
+                    // A blow to test the guard with. The guard reads what you are carrying rather
+                    // than what you swing, and "carrying" includes the hand that is not swinging -
+                    // which is the half this board exists to show.
+                    switchpoint(w, y, x + 8, z + 3,
+                            Trigger.with(Kind.TEST_HIT, "enderborn", "IRON_SWORD"),
+                            "§c挨一下铁剑", "§7副手拿珍珠也算护身");
                 }, "验证末影族珍珠的两种用法",
                         "右键＝不传送，改换 100 能量并消耗 1 颗珍珠；左键＝切换「珍珠是否真的传送」"
-                                + "这个开关（默认开着）。另外手持珍珠被攻击时，只要能量超过 500，"
-                                + "就减伤一半并扣 500 能量。"
+                                + "这个开关（默认开着）。另外带着珍珠被攻击时，只要能量超过 500，"
+                                + "就减伤一半并扣 500 能量；珍珠在主手或副手都算——右手拿剑、"
+                                + "左手（副手）拿珍珠，正是玩家真实的拿法，也算护身。"
                                 + "末影族的死亡代价很低：每死一次只扣 300 能量",
                         "右键能量 +100、珍珠少一颗；左键聊天栏报出开关状态；"
-                                + "开关关掉时右键不再传送、改为换能量",
+                                + "珍珠放副手时挨打，照样只掉一半血（能量同样扣 500）",
                         "先变成末影族，回到这一格",
                         "拿珍珠右键一次（加能量），再左键切换模式",
-                        "再右键一次，看行为随开关变了"));
+                        "点「挨一下铁剑」：主手拿珍珠时只掉一半血",
+                        "把珍珠换到副手（按 F），再点一次：照样只掉一半血"));
                 sections.add(section("§d③ 武器限制", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.DIAMOND_SWORD, 1),
                             new ItemStack(Material.DIAMOND_PICKAXE, 1),
+                            new ItemStack(Material.NETHERITE_SPEAR, 1),
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAR),
                             "§f放出陪练", "§7他会站在你面前给你打");
                     powerButton(w, y, x + 9, z, "enderborn");
                 }, "验证末影族的武器禁令只针对高级材质",
-                        "禁用清单是钻石 / 铜 / 下界合金的全套工具与剑（剑、镐、锹、斧、锄）："
-                                + "近战伤害直接判成 0。木、石、铁没被禁——这条禁令挑材质，不挑类型",
-                        "钻石剑和钻石镐打陪练都是 0 伤害；铁剑是正常伤害",
+                        "禁用清单是铜、钻石、下界合金三级的全套——剑、镐、锹、斧、锄、矛："
+                                + "近战伤害直接判成 0。钻石与下界合金算同一级，一件被禁，另一件也禁。"
+                                + "木、石、铁没被禁——这条禁令挑材质，不挑类型",
+                        "钻石剑、钻石镐、下界合金矛打陪练都是 0 伤害；铁剑是正常伤害",
                         "点「放出陪练」",
-                        "拿箱子里的钻石剑和钻石镐各打一下",
+                        "拿箱子里的钻石剑、钻石镐、下界合金矛各打一下",
                         "拿铁剑再打一下对照"));
                 sections.add(section("§5④ 死亡五次 恢复人类", 1, (w, y, x, z, width) -> {
                     switchpoint(w, y, x + SLOT / 2, z + 3, Trigger.of(Kind.SELF_KILL),
@@ -2828,29 +2964,40 @@ public final class Hall {
                         "拿箱子里的三种肉，对着地面或空中左键一次",
                         "等十几秒再看一眼，召唤物必须还活着",
                         "两只手的物品栏都不一样的话，换一种肉再来一次"));
-                sections.add(section("§6④ 护甲 与 钻石剑", 2, (w, y, x, z, width) -> {
+                sections.add(section("§6④ 护甲 与 武器禁令", 2, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
+                            // Four slots, not three: the room used to offer a helmet, a chestplate
+                            // and a pair of leggings, so a tester could not tell a rule about the
+                            // four slots from a rule about the three that happen to be in the
+                            // chest - and boots, the slot every armour set has and nobody thinks
+                            // about, were the one thing never tried.
                             new ItemStack(Material.GOLDEN_HELMET, 1),
-                            new ItemStack(Material.GOLDEN_CHESTPLATE, 1),
+                            new ItemStack(Material.GOLDEN_BOOTS, 1),
+                            new ItemStack(Material.DIAMOND_HELMET, 1),
                             new ItemStack(Material.DIAMOND_LEGGINGS, 1),
-                            new ItemStack(Material.DIAMOND_BOOTS, 1),
+                            new ItemStack(Material.NETHERITE_CHESTPLATE, 1),
+                            new ItemStack(Material.NETHERITE_BOOTS, 1),
                             new ItemStack(Material.LEATHER_CHESTPLATE, 1),
                             new ItemStack(Material.IRON_CHESTPLATE, 1),
                             new ItemStack(Material.DIAMOND_SWORD, 1),
+                            new ItemStack(Material.NETHERITE_AXE, 1),
                             new ItemStack(Material.IRON_SWORD, 1)));
                     switchpoint(w, y, x + 6, z + 3, Trigger.of(Kind.SPAWN_CHICKEN),
-                            "§a放出一只鸡", "§7拿它试钻石剑那条禁令");
+                            "§a放出一只鸡", "§7拿它试武器的禁令");
                     powerButton(w, y, x + 9, z, "angel");
-                }, "验证天使的护甲禁令，以及不能拿钻石剑砍动物",
-                        "护甲：金与钻石的头盔、胸甲、护腿、靴子四件都会被脱下来，"
-                                + "皮革、铁、锁链、铜、下界合金没有在禁用名单里（那条名单是硬编码的，"
-                                + "不走配置文件）。武器：拿钻石剑攻击动物会被直接拦下、伤害 0，"
-                                + "换别的武器就正常",
-                        "金/钻四件穿上就被脱；皮革和铁胸甲留得住；"
-                                + "拿钻石剑打鸡被拦，拿铁剑能打",
-                        "从箱子里拿四件金色/钻石护甲依次穿上，看它们是不是都被脱下",
+                }, "验证天使的护甲禁令，以及不能拿高级武器砍动物",
+                        "护甲：金、钻石、下界合金三级的护甲穿上就被脱——帽子、胸甲、护腿、鞋子"
+                                + "四个部位走的是同一条规则，箱子里这三级各放了两件、四个部位都有；"
+                                + "皮革、铁、锁链、铜、海龟壳留得住"
+                                + "（这条名单是硬编码的，不走配置文件）。"
+                                + "武器：拿钻石或下界合金的工具武器攻击动物会被拦下、伤害 0——"
+                                + "两个材质算同一级，剑、斧、镐、锹、锄、矛都算；换别的材质就正常",
+                        "金/钻/下界合金的护甲穿上就被脱；皮革和铁胸甲留得住；"
+                                + "钻石剑、下界合金斧打鸡被拦，铁剑能打",
+                        "从箱子里拿金 / 钻 / 下界合金的六件护甲（帽子、胸甲、护腿、鞋子都有）"
+                                + "依次穿上，看是不是都被脱下",
                         "再穿一次皮革胸甲和铁胸甲，看它们留不留",
-                        "点「放出一只鸡」，先用钻石剑打它，再用铁剑打它"));
+                        "点「放出一只鸡」，先用钻石剑、再用下界合金斧打它，最后用铁剑打"));
                 sections.add(section("§e⑤ 净化 用纸", 1, (w, y, x, z, width) -> {
                     chest(w, x + 2, y + 1, z + DEPTH - 2, BlockFace.NORTH, centred(
                             new ItemStack(Material.PAPER, 8)));

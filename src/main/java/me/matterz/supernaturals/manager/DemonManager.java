@@ -370,7 +370,7 @@ public class DemonManager extends ClassManager {
 			SuperNManager.sendMessage(snplayer, "You cannot shoot fireballs in non-PvP areas");
 			return false;
 		}
-		if (snplayer.getPower() < SNConfigHandler.demonPowerFireball) {
+		if (!SuperNManager.canPay(snplayer, SNConfigHandler.demonPowerFireball)) {
 			SuperNManager.sendMessage(snplayer, "Not enough power to cast fireball!");
 			return false;
 		}
@@ -402,7 +402,7 @@ public class DemonManager extends ClassManager {
 					+ " is already a demon.");
 			return false;
 		}
-		if (snplayer.getPower() < SNConfigHandler.demonConvertPower) {
+		if (!SuperNManager.canPay(snplayer, SNConfigHandler.demonConvertPower)) {
 			SuperNManager.sendMessage(snplayer, "Not enough power to convert!");
 			return false;
 		}
@@ -422,7 +422,7 @@ public class DemonManager extends ClassManager {
 
 	public boolean snare(Player player, Player target) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
-		if (snplayer.getPower() < SNConfigHandler.demonPowerSnare) {
+		if (!SuperNManager.canPay(snplayer, SNConfigHandler.demonPowerSnare)) {
 			SuperNManager.sendMessage(snplayer, "Not enough power to cast snare!");
 			return false;
 		}

@@ -3,7 +3,9 @@ package me.matterz.supernaturals.it.harness;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
+import me.matterz.supernaturals.manager.AngelManager;
 import me.matterz.supernaturals.manager.SuperNManager;
+import me.matterz.supernaturals.util.MaterialTiers;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -363,6 +365,12 @@ public final class HarnessPlugin extends JavaPlugin {
                 // first would leave every enderborn kill turning its victim, for ever, silently.
                 return "ok spread=" + SNConfigHandler.spreadChance
                         + " enderborn=" + SNConfigHandler.enderSpreadChance;
+            case "tier":
+                // What the plugin's material rules see when they look at an item. Every rule that
+                // picks a material by its quality asks MaterialTiers, so one item is enough to
+                // say how all of them will treat it: the tier it belongs to, the kind of thing it
+                // is, and whether a rule about its tier covers it.
+                return tier(rest);
             case "tp":
                 return teleport(rest);
             case "interact":
@@ -435,8 +443,6 @@ public final class HarnessPlugin extends JavaPlugin {
                 return fall(rest);
             case "hurt":
                 return hurt(rest);
-            case "mine":
-                return mine(rest);
             case "step":
                 return step(rest);
             case "leftclick":
@@ -447,6 +453,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return arrows();
             case "motion":
                 return motion(rest);
+            case "watch":
+                return watch(rest);
             case "grapple":
                 return grapple(rest);
             case "strike":
@@ -460,7 +468,7 @@ public final class HarnessPlugin extends JavaPlugin {
             case "food":
                 return "ok " + player(rest.trim()).getFoodLevel();
             case "power":
-                return "ok " + (int) SuperNManager.get(player(rest.trim())).getPower();
+                return power(rest);
             case "spar":
             case "dummies":
                 return dummies();
@@ -491,6 +499,8 @@ public final class HarnessPlugin extends JavaPlugin {
                 return race(rest);
             case "loot":
                 return loot(rest);
+            case "offhand":
+                return offhand(rest);
             case "hold":
                 return hold(rest);
             case "slay":
@@ -524,6 +534,10 @@ public final class HarnessPlugin extends JavaPlugin {
                 return kill(rest);
             case "respawn":
                 return respawn(rest);
+            case "use":
+                return use(rest);
+            case "mine":
+                return mine(rest);
             case "count":
                 return count(rest);
             case "fireticks":
@@ -610,6 +624,26 @@ public final class HarnessPlugin extends JavaPlugin {
             player.getInventory().addItem(new ItemStack(material, Math.min(stackSize, left)));
         }
         return "ok gave " + count + " " + material + " to " + player.getName();
+    }
+
+    /**
+     * How one item reads to the plugin's material rules: its tier, its kind, and whether the rules
+     * that speak about tiers cover it.
+     */
+    private String tier(String rest) {
+        String name = rest.trim();
+        Material material = Material.matchMaterial(name);
+        if (material == null) {
+            return "err unknown material: " + name;
+        }
+        return "ok " + material.name()
+                + " tier=" + MaterialTiers.tierOf(material)
+                + " kind=" + MaterialTiers.kindOf(material)
+                + " pairedWeapon=" + MaterialTiers.isPairedWeapon(material)
+                + " angelMayNotWear=" + AngelManager.forbiddenArmor(material)
+                + " toolOrWeapon=" + MaterialTiers.isToolOrWeapon(material)
+                + " ghoulImmune=" + MaterialTiers.isToolOrWeaponOfTier(material,
+                        SNConfigHandler.ghoulWeaponImmuneTiers);
     }
 
     private String perm(String rest) {
@@ -867,8 +901,10 @@ public final class HarnessPlugin extends JavaPlugin {
         if (item == null || item.isAir()) {
             return " (empty-handed)";
         }
+        // "Illegal" was the wrong word for this: nothing takes the item away and nothing refuses it.
+        // Every tool and weapon is obtainable and holdable; what a race's list changes is the swing.
         return HallGuard.bannedWeapons(race).contains(item)
-                ? " ILLEGAL for " + race + " - it deals no damage"
+                ? " no damage for " + race + " (holding it is fine)"
                 : " legal";
     }
 
@@ -1240,6 +1276,27 @@ public final class HarnessPlugin extends JavaPlugin {
         return "none";
     }
 
+    /**
+     * Right-clicks a block with what the player is holding, and says what the block became.
+     *
+     * <p>{@code mine} answers "did anything stop the break" by firing the event. The uses this
+     * exists to check - stripping a log, tilling soil, flattening grass into a path - are not
+     * events at all; they are what the server does after the click is allowed. So the only honest
+     * answer is the block afterwards.
+     */
+    private String use(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 4) {
+            return "err usage: use <name> <x> <y> <z>";
+        }
+        Player who = player(args[0]);
+        Block target = blockAt(rest);
+        Material before = target.getType();
+        String result = Nms.useOn(who, target);
+        return "ok result=" + result + " was=" + before + " now=" + target.getType()
+                + " holding=" + who.getInventory().getItemInMainHand().getType();
+    }
+
     /** Breaks a block as a player would, and reports whether anything stopped it. */
     private String mine(String rest) {
         String[] args = rest.split("\\s+");
@@ -1562,6 +1619,37 @@ public final class HarnessPlugin extends JavaPlugin {
     /** A number to two places, for a probe reply that has to stay readable. */
     private static String round(double value) {
         return String.valueOf(Math.round(value * 100.0) / 100.0);
+    }
+
+    /**
+     * Samples a player's place once a tick, for the probe.
+     *
+     * <p>"The pull moved him" and "the pull moved him twice as fast" are the same reading unless
+     * the samples are a tick apart: a console reply takes seconds to come back, and by then the
+     * ride is over and the only thing left to read is where he ended up. One line a tick is what
+     * a step of one block can actually be checked against - and what two pulls running at once
+     * would double.
+     */
+    private String watch(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        Player player = player(args[0]);
+        int ticks = 20;
+        if (args.length > 1) {
+            ticks = Math.min(200, Math.max(1, Integer.parseInt(args[1])));
+        }
+        for (int i = 1; i <= ticks; i++) {
+            final int after = i;
+            Bukkit.getScheduler().runTaskLater(SupernaturalsPlugin.instance, () -> {
+                var at = player.getLocation();
+                getLogger().info("[watch] +" + after + "t tick=" + Bukkit.getCurrentTick()
+                        + " x=" + round(at.getX())
+                        + " y=" + round(at.getY()) + " z=" + round(at.getZ())
+                        + " grappling="
+                        + SupernaturalsPlugin.instance.getHunterManager().isGrappling(player)
+                        + " power=" + (int) SuperNManager.get(player).getPower());
+            }, i);
+        }
+        return "ok watching " + player.getName() + " for " + ticks + " ticks";
     }
 
     /**
@@ -2012,6 +2100,48 @@ public final class HarnessPlugin extends JavaPlugin {
         return "ok took " + stacks + " stacks from " + block.getType();
     }
 
+    /**
+     * Reads a player's power, or sets it when a second number is given.
+     *
+     * <p>Setting it is what anything gated on a threshold needs: the enderborn's pearl guard only
+     * fires above 500, and the only way to get a stand-in above one from the console is a race's
+     * own board. Reading stays the one-argument form every other probe uses.
+     */
+    private String power(String rest) {
+        String[] args = rest.trim().split("\\s+");
+        SuperNPlayer snplayer = SuperNManager.get(player(args[0]));
+        if (args.length < 2) {
+            return "ok " + (int) snplayer.getPower();
+        }
+        snplayer.setPower(Double.parseDouble(args[1]));
+        return "ok set " + (int) snplayer.getPower();
+    }
+
+    /**
+     * Puts a material in the player's off hand, or empties it.
+     *
+     * <p>Some of what a race does is decided by what it is carrying rather than by what it swings,
+     * and a player carries a guard in the hand the weapon is not in. Without this the off hand can
+     * only be filled by a vanilla command whose slot name changes between versions, and the one
+     * question worth asking - "does the other hand count?" - has no way to be asked.
+     */
+    private String offhand(String rest) {
+        String[] args = rest.split("\\s+");
+        if (args.length != 2) {
+            return "err usage: offhand <name> <material>";
+        }
+        Player player = player(args[0]);
+        Material material = Material.matchMaterial(args[1]);
+        if (material == null) {
+            return "err not a material: " + args[1];
+        }
+        player.getInventory().setItemInOffHand(
+                material == Material.AIR ? null : new ItemStack(material, 1));
+        player.updateInventory();
+        return "ok offhand=" + player.getInventory().getItemInOffHand().getType()
+                + " main=" + player.getInventory().getItemInMainHand().getType();
+    }
+
     /** Puts a material in the player's main hand, which is what several races react to. */
     private String hold(String rest) {
         String[] args = rest.split("\\s+");
@@ -2024,6 +2154,15 @@ public final class HarnessPlugin extends JavaPlugin {
             return "err not a material: " + args[1];
         }
         PlayerInventory inventory = player.getInventory();
+        if (material == Material.AIR) {
+            // Emptying the hand is one of the cases worth probing - "no pearl in either hand" is
+            // the control for every guard rule - and the loop below cannot do it, because an empty
+            // slot holds no item to find. It answered "no AIR" and left the pearl where it was,
+            // which is a probe that lies about the thing it was asked to do.
+            inventory.setItem(inventory.getHeldItemSlot(), null);
+            player.updateInventory();
+            return "ok holding AIR (slot " + inventory.getHeldItemSlot() + ")";
+        }
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             ItemStack item = inventory.getItem(slot);
             if (item == null || item.getType() != material) {

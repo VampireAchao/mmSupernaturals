@@ -64,14 +64,35 @@ public class SNEntityMonitor implements Listener {
 		if (event.getEntity() instanceof Arrow) {
 			Arrow arrow = (Arrow) event.getEntity();
 			if (plugin.getHunterManager().getArrowMap().containsKey(arrow)) {
-				Player player = (Player) arrow.getShooter();
-				if (!SupernaturalsPlugin.hasPermissions(player, worldPermission)
-						&& SNConfigHandler.multiworld) {
+				// An arrow that is not somebody's is nobody's problem, and casting the answer to
+				// Player is how this used to turn a stray arrow into an exception out of an event
+				// handler.
+				if (!(arrow.getShooter() instanceof Player player)) {
 					return;
 				}
 				String arrowType = plugin.getHunterManager().getArrowMap().get(arrow);
+				if (arrowType == null) {
+					return;
+				}
+				if (!SupernaturalsPlugin.hasPermissions(player, worldPermission)
+						&& SNConfigHandler.multiworld) {
+					// A shot that was paid for and then dropped for a world rule is the same fault
+					// as a pull that never ran: the power went and nothing came of it.
+					if (arrowType.equalsIgnoreCase("grapple")) {
+						plugin.getHunterManager().refundGrapple(player,
+								plugin.getHunterManager().takeGrappleCost(arrow), false,
+								"this world is not one the ability works in");
+					}
+					// The arrow has landed; it was refused rather than handled, and leaving it in
+					// the map would keep it there for good.
+					plugin.getHunterManager().removeArrow(arrow);
+					return;
+				}
 				if (arrowType.equalsIgnoreCase("grapple")) {
-					plugin.getHunterManager().startGrappling(player, arrow.getLocation());
+					// The same arrow, the same pull, and what it cost: a hit is not a fresh
+					// decision about whether the shot was paid for.
+					plugin.getHunterManager().startGrappling(player, arrow.getLocation(),
+							plugin.getHunterManager().takeGrappleCost(arrow));
 				} else if (arrowType.equalsIgnoreCase("fire")) {
 					arrow.getLocation();
 					Block block = arrow.getWorld().getBlockAt(arrow.getLocation());

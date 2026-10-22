@@ -3,6 +3,7 @@ package me.matterz.supernaturals.manager;
 import me.matterz.supernaturals.SuperNPlayer;
 import me.matterz.supernaturals.SupernaturalsPlugin;
 import me.matterz.supernaturals.io.SNConfigHandler;
+import me.matterz.supernaturals.util.MaterialTiers;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -34,15 +35,18 @@ public class AngelManager extends ClassManager {
 		// This is the *attacker's* manager: the caller asks the class manager of the player who
 		// dealt the blow, and only ever for a player. Reading the victim off the event and casting
 		// it to Player threw a ClassCastException the moment the victim was anything else - which
-		// is precisely the case this rule exists for - so "angels cannot use diamond swords on
+		// is precisely the case this rule exists for - so "angels cannot use diamond weapons on
 		// animals" never actually refused anything.
 		if (!(event.getDamager() instanceof Player player)) {
 			return damage;
 		}
+		// The whole diamond tier, which by the plugin's own rule is the netherite tier as well, in
+		// every kind either of them makes: an angel who cannot cut a cow with a diamond sword
+		// cannot cut one with its upgrade, nor with the spear that sits beside it in the same tier.
 		if (event.getEntity() instanceof Animals
-				&& player.getItemInHand().getType().equals(Material.DIAMOND_SWORD)) {
+				&& MaterialTiers.isPairedWeapon(player.getItemInHand().getType())) {
 			SuperNManager.sendMessage(SuperNManager.get(player),
-					"Angels cannot use diamond swords on animals!");
+					"Angels cannot use diamond or netherite weapons on animals!");
 			event.setCancelled(true);
 			return 0;
 		}
@@ -55,7 +59,7 @@ public class AngelManager extends ClassManager {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 		SuperNPlayer sntarget = SuperNManager.get(target);
 		if (player.getItemInHand().getType().equals(Material.FEATHER)) {
-			if (snplayer.getPower() > SNConfigHandler.angelHealPowerCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.angelHealPowerCost)) {
 				// Healing adds to whatever the target has, so a target that is already full gets
 				// asked for more than its bar can hold. The server clamps that, but the plugin
 				// should not be the one asking for an impossible number.
@@ -70,7 +74,7 @@ public class AngelManager extends ClassManager {
 			}
 		}
 		if (player.getItemInHand().getType().equals(Material.PAPER)) {
-			if (snplayer.getPower() > SNConfigHandler.angelCurePowerCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.angelCurePowerCost)) {
 				if (sntarget.isSuper()) {
 					SuperNManager.cure(sntarget);
 					target.sendMessage(ChatColor.RED + "Cured by "
@@ -97,7 +101,7 @@ public class AngelManager extends ClassManager {
 			return false;
 		}
 		if (itemInHandMaterial.equals(Material.DANDELION)) {
-			if (snplayer.getPower() > SNConfigHandler.angelJumpPowerCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.angelJumpPowerCost)) {
 				jump(player, SNConfigHandler.angelJumpDeltaSpeed);
 			} else {
 				SuperNManager.sendMessage(snplayer, "Not enough power to jump!");
@@ -119,7 +123,7 @@ public class AngelManager extends ClassManager {
 				&& !itemInHandMaterial.equals(Material.PORKCHOP)) {
 			return false;
 		}
-		if (snplayer.getPower() <= SNConfigHandler.angelSummonPowerCost) {
+		if (!SuperNManager.canPay(snplayer, SNConfigHandler.angelSummonPowerCost)) {
 			SuperNManager.sendMessage(snplayer, "Not enough power to summon!");
 			return false;
 		}
@@ -238,7 +242,7 @@ public class AngelManager extends ClassManager {
 	public static boolean jump(Player player, double deltaSpeed) {
 		SuperNPlayer snplayer = SuperNManager.get(player);
 
-		if (snplayer.getPower() < SNConfigHandler.angelJumpPowerCost) {
+		if (!SuperNManager.canPay(snplayer, SNConfigHandler.angelJumpPowerCost)) {
 			SuperNManager.sendMessage(snplayer, "Not enough Power to jump.");
 			return false;
 		} else {
@@ -264,34 +268,39 @@ public class AngelManager extends ClassManager {
 		ItemStack leggings = inv.getLeggings();
 		ItemStack boots = inv.getBoots();
 
-		if (helmet != null) {
-			if (helmet.getType().equals(Material.DIAMOND_HELMET)
-					|| helmet.getType().equals(Material.GOLDEN_HELMET)) {
-				inv.setHelmet(null);
-				dropItem(player, helmet);
-			}
+		if (helmet != null && forbiddenArmor(helmet.getType())) {
+			inv.setHelmet(null);
+			dropItem(player, helmet);
 		}
-		if (chest != null) {
-			if (chest.getType().equals(Material.DIAMOND_CHESTPLATE)
-					|| chest.getType().equals(Material.GOLDEN_CHESTPLATE)) {
-				inv.setChestplate(null);
-				dropItem(player, chest);
-			}
+		if (chest != null && forbiddenArmor(chest.getType())) {
+			inv.setChestplate(null);
+			dropItem(player, chest);
 		}
-		if (leggings != null) {
-			if (leggings.getType().equals(Material.DIAMOND_LEGGINGS)
-					|| leggings.getType().equals(Material.GOLDEN_LEGGINGS)) {
-				inv.setLeggings(null);
-				dropItem(player, leggings);
-			}
+		if (leggings != null && forbiddenArmor(leggings.getType())) {
+			inv.setLeggings(null);
+			dropItem(player, leggings);
 		}
-		if (boots != null) {
-			if (boots.getType().equals(Material.DIAMOND_BOOTS)
-					|| boots.getType().equals(Material.GOLDEN_BOOTS)) {
-				inv.setBoots(null);
-				dropItem(player, boots);
-			}
+		if (boots != null && forbiddenArmor(boots.getType())) {
+			inv.setBoots(null);
+			dropItem(player, boots);
 		}
+	}
+
+	/**
+	 * Whether an angel may not wear this piece.
+	 *
+	 * <p>Three tiers, and the third is what was missing: gold and diamond were named here and
+	 * netherite was not, so a netherite chestplate - the armour the diamond one is upgraded into -
+	 * stayed on while the diamond one beside it was taken away. Naming tiers here means the next
+	 * material that belongs with them is a word in this list rather than four more conditions, and
+	 * the four slots cannot disagree with each other.
+	 *
+	 * <p>Public because it is asked rather than copied: a diagnostic that wants to say what an
+	 * angel will refuse should ask this method, not repeat the three names and drift from them the
+	 * next time this list changes.
+	 */
+	public static boolean forbiddenArmor(Material material) {
+		return MaterialTiers.isArmourOfTier(material, "GOLDEN", "DIAMOND", "NETHERITE");
 	}
 
 	public void waterAdvanceTime(Player player) {

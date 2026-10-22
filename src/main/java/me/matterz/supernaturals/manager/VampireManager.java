@@ -57,7 +57,7 @@ public class VampireManager extends ClassManager {
 		Player victim = (Player) event.getEntity();
 		SuperNPlayer snVictim = SuperNManager.get(victim);
 		if (event.getCause().equals(DamageCause.DROWNING)) {
-			if (snVictim.getPower() > SNConfigHandler.vampireDrowningCost) {
+			if (SuperNManager.canPay(snVictim, SNConfigHandler.vampireDrowningCost)) {
 				SuperNManager.alterPower(snVictim, -SNConfigHandler.vampireDrowningCost, "Water!");
 				event.setCancelled(true);
 				return 0;
@@ -286,7 +286,7 @@ public class VampireManager extends ClassManager {
 						"Your teleport location is in another world. Save a new one here.");
 				return false;
 			}
-			if (snplayer.getPower() > SNConfigHandler.vampireTeleportCost) {
+			if (SuperNManager.canPay(snplayer, SNConfigHandler.vampireTeleportCost)) {
 				SuperNManager.alterPower(snplayer, -SNConfigHandler.vampireTeleportCost, "Teleport!");
 				player.teleport(destination);
 				if (item.getAmount() == 1) {

@@ -117,9 +117,8 @@ public class EnderBornManager extends ClassManager {
 				Player pVictim = (Player) victim;
 				SuperNPlayer snVictim = SuperNManager.get(pVictim);
 
-				ItemStack item = pVictim.getItemInHand();
-				if (item.getType() == Material.ENDER_PEARL
-						&& snVictim.getPower() > SNConfigHandler.enderProtectPower) {
+				if (holdsPearl(pVictim)
+						&& SuperNManager.canPay(snVictim, SNConfigHandler.enderProtectPower)) {
 					damage -= damage
 							* snVictim.scale(1 - SNConfigHandler.enderDamageReceivedFactor);
 					SuperNManager.alterPower(snVictim, -SNConfigHandler.enderProtectPower, "Protected by Pearl!");
@@ -128,6 +127,22 @@ public class EnderBornManager extends ClassManager {
 			}
 		}
 		return damage;
+	}
+
+	/**
+	 * Whether an enderborn is carrying the pearl that guards him - in either hand.
+	 *
+	 * <p>The main hand only, once, which made the guard unusable while doing anything else: a sword
+	 * in the right hand and a pearl in the left is how a player actually carries one, and it bought
+	 * nothing. The pearl is a guard rather than a weapon, so which hand holds it says nothing about
+	 * whether it is there.
+	 */
+	private static boolean holdsPearl(Player player) {
+		if (player == null) {
+			return false;
+		}
+		return player.getInventory().getItemInMainHand().getType() == Material.ENDER_PEARL
+				|| player.getInventory().getItemInOffHand().getType() == Material.ENDER_PEARL;
 	}
 
 	@Override
