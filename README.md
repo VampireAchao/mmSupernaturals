@@ -47,7 +47,7 @@ What that means for you:
 
 ## Installing
 
-1. Download `mmSupernaturals-1.5.0.jar` from the
+1. Download `mmSupernaturals-1.5.1.jar` from the
    [Releases](https://github.com/VampireAchao/mmSupernaturals/releases) page.
 2. Drop it into your server's `plugins/` directory.
 3. You need **Paper 26.3** and **Java 25**. WorldGuard is an optional soft dependency; a
