@@ -50,3 +50,25 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" "mmSupernaturals-${VERSION}.jar" \
             --title "$VERSION" --generate-notes
+
+      # Every release page has to say whose plugin this is, in its first line - generated notes
+      # never will, because it is not something a commit can tell you. So the statement is put in
+      # front of them here, where nobody can forget it: the plugin continues a 2011 plugin whose
+      # author and repository are gone, and it is neither official nor endorsed.
+      - name: Say whose plugin this is
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/provenance.md <<'EOF'
+          > **This is a community fork, not the original author's release.** mmSupernaturals continues
+          > *Supernatural Players*, a Bukkit plugin published in 2011 by **Matterz**. The original
+          > repository, the author's GitHub account and its dev.bukkit.org page all return 404 today;
+          > this build is maintained by VampireAchao on top of [FaeyUmbrea's archived
+          > fork](https://github.com/FaeyUmbrea/mmSupernaturals). It is not affiliated with,
+          > authorised by, or endorsed by the original authors, who do not support it - please report
+          > issues here. The evidence for this is in the repository README.
+          EOF
+          gh release view "$GITHUB_REF_NAME" --json body -q .body > /tmp/generated.md
+          { cat /tmp/provenance.md; echo; cat /tmp/generated.md; } > /tmp/notes.md
+          gh release edit "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
+          head -3 /tmp/notes.md
