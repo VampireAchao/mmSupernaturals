@@ -62,8 +62,9 @@ What that means for you:
   report them in this repository's issues rather than to Matterz or mmiillkkaa.
 - **Maintained by one person in his spare time** ([VampireAchao](https://github.com/VampireAchao)).
   Issues and pull requests are welcome; there is no schedule and no warranty.
-- **Licence inherited, not relicensed.** The 2011–2012 continuation carried GPL-3.0
-  (`gpl-3.0.txt` is in this repository's history); this fork keeps it.
+- **Licence inherited, not relicensed.** `gpl-3.0.txt` sits at the root of this repository and has
+  been there since 2011, through every copy this lineage passed through. This fork keeps GPL-3.0;
+  it did not choose it.
 
 ### What has happened since the fork
 
