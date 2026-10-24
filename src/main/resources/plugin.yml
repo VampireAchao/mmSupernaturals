@@ -3,7 +3,8 @@ main: me.matterz.supernaturals.SupernaturalsPlugin
 version: ${project.version}
 api-version: "${plugin.api.version}"
 softdepend: [WorldGuard]
-author: Matterz, edited by mmiillkkaa
+author: Matterz (original, 2011); mmiillkkaa (2011-2012); VampireAchao (this community fork)
+description: A community fork of Matterz's Supernatural Players. Not the original author's release, and not endorsed by them.
 commands:
   sn:
     description: Supernatural commands

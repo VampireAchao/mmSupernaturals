@@ -10,27 +10,60 @@ Java 25 · Paper 26.3 (`api-version: 26.3`) · GPL-3.0
 
 ---
 
-## About this repository — please read
+## About this repository — read this first
 
-**This is a community fork. The original repository is gone.**
+**This plugin is not published by its original author.** It is a community fork, kept alive by a
+player on top of a fork that was already drifting around the internet. Nobody who wrote the
+original is involved, and nothing here carries their endorsement.
 
-mmSupernaturals began life around 2011 as *Supernatural Players*, a Bukkit plugin written by
-Matt "Matterz" Walker and later edited by mmiillkkaa. Both the original source repository and
-its dev.bukkit.org page have since disappeared from the internet — for years the project was,
-to all practical purposes, lost.
+mmSupernaturals descends from *Supernatural Players*, a Bukkit plugin first published in 2011 under
+the handle **Matterz**. That project no longer exists as anything maintained: its source repository
+(`github.com/Matterz/SupernaturalPlayers`), the account that held it, and its dev.bukkit.org page
+all answer 404 today. What is left of it are forks, and this is one of them.
 
-I used to play on servers running this plugin and I loved it. When I went looking for it again
-years later, all that was left were stale forks. So I forked the project and took over its
-maintenance myself, to keep the plugin working on modern Minecraft.
+I played on servers that ran this plugin and liked it. When I went looking for it years later all I
+could find were stale copies, so I took one up and have been keeping it working on modern Paper.
+
+### The lineage, and how it was checked
+
+| When | What it is |
+|---|---|
+| 2011 | *Supernatural Players* v2.5.2 by **Matterz** — the original; repository and author account both gone |
+| 2011–2012 | A continuation of it — commits by **Connor Anderson**; that repository is gone too, and its history survives only inside the next row |
+| 2025 | [FaeyUmbrea/mmSupernaturals](https://github.com/FaeyUmbrea/mmSupernaturals) — an archived re-upload of that continuation |
+| 2026– | This repository — a GitHub fork of the archived one |
+
+The checks behind that table, all re-run on 2026-10-24:
+
+- GitHub's API reports this repository as `fork: true`, with `parent` and `source` both
+  `FaeyUmbrea/mmSupernaturals`.
+- That repository is `archived: true` (last push 2025-04-09), was uploaded rather than forked
+  (`fork: false`), and says in its own description: "THIS IS A FORK, I AM NOT THE DEVELOPER OF THIS
+  BUKKIT PLUGIN. mmSupernaturals- A bukkit plugin based off of Matterz's Supernatural Players".
+- The root commit of this history (`602e8bd`, 2011-12-17) carries a `plugin.yml` reading
+  `name: SupernaturalPlayers`, `version: 2.5.2`, `author: Matterz`, and a README that calls the
+  project a continuation of Matterz's plugin. The code in that commit is the code this fork still
+  builds.
+- `github.com/Matterz/SupernaturalPlayers`, `github.com/Matterz` and
+  `dev.bukkit.org/projects/supernatural-players` all return 404. (There is a live
+  `dev.bukkit.org/projects/supernaturals` page, but it is a different project — it does not mention
+  Matterz or *Supernatural Players*, so it is not counted as evidence here.)
+
+Two things could not be checked, and are not claimed. Matterz's real name: only the handle survives,
+and an earlier revision of this page expanded it to a full name that cannot be substantiated, so it
+is the handle only now. And whether the 2011–2012 committer "Connor Anderson" is the same person as
+**mmiillkkaa**, who is credited on the Bukkit continuation thread and in `plugin.yml`.
 
 What that means for you:
 
-- This is **not** the original author's official repository — there isn't one anymore. Nothing
-  here is endorsed by the original authors.
-- It is maintained by a fan ([VampireAchao](https://github.com/VampireAchao)) in his spare
-  time. Issues and pull requests are very welcome.
-- The lineage is: Matterz's original (deleted) → [FaeyUmbrea's archived
-  fork](https://github.com/FaeyUmbrea/mmSupernaturals) → this fork.
+- **Not official, not endorsed.** There is no original author's repository left to be official
+  against, and nothing here has their blessing.
+- **Support stops here.** Bugs in this build are this fork's, not the original authors'. Please
+  report them in this repository's issues rather than to Matterz or mmiillkkaa.
+- **Maintained by one person in his spare time** ([VampireAchao](https://github.com/VampireAchao)).
+  Issues and pull requests are welcome; there is no schedule and no warranty.
+- **Licence inherited, not relicensed.** The 2011–2012 continuation carried GPL-3.0
+  (`gpl-3.0.txt` is in this repository's history); this fork keeps it.
 
 ### What has happened since the fork
 
@@ -213,10 +246,13 @@ step (`mvn verify -Pit`).
 
 ## Credits
 
-- **Matt "Matterz" Walker** — original author of *Supernatural Players* (Bukkit), © 2011
-- **mmiillkkaa** — editor of the plugin, credited in `plugin.yml`
-- **FaeyUmbrea** — kept an archived fork of the project alive after the original disappeared
-- **VampireAchao** — maintainer of this fork
+- **Matterz** — original author of *Supernatural Players* (Bukkit), 2011. The handle is all that
+  survives; the real name is unverified and deliberately not stated.
+- **mmiillkkaa** — credited on the Bukkit continuation thread and in `plugin.yml`; whether the
+  2011–2012 commits signed "Connor Anderson" are the same person is unverified.
+- **FaeyUmbrea** — kept an archived copy of the project alive after the original disappeared
+- **VampireAchao** — maintainer of this fork. Not an author of the plugin, and not affiliated with
+  any of the people above.
 
 ## License
 
