@@ -62,9 +62,8 @@ What that means for you:
   report them in this repository's issues rather than to Matterz or mmiillkkaa.
 - **Maintained by one person in his spare time** ([VampireAchao](https://github.com/VampireAchao)).
   Issues and pull requests are welcome; there is no schedule and no warranty.
-- **Licence inherited, not relicensed.** `gpl-3.0.txt` sits at the root of this repository and has
-  been there since 2011, through every copy this lineage passed through. This fork keeps GPL-3.0;
-  it did not choose it.
+- **Licence inherited, with a wrinkle.** `gpl-3.0.txt` came with the 2011–2012 continuation;
+  the 2011 original shipped GNU FDL 1.3 instead. See [NOTICE](NOTICE).
 
 ### What has happened since the fork
 
@@ -257,4 +256,12 @@ step (`mvn verify -Pit`).
 
 ## License
 
-GNU General Public License v3.0 — see [gpl-3.0.txt](gpl-3.0.txt).
+This fork is released under **GNU General Public License v3.0** — see [gpl-3.0.txt](gpl-3.0.txt). It
+inherited that licence from the 2011–2012 continuation rather than choosing it.
+
+That is not the whole story, and it matters if you plan to redistribute. The 2011 original
+(*Supernatural Players* by Matterz) carried **GNU FDL 1.3** — a copy is kept at
+[licenses/GNU-FDL-1.3.txt](licenses/GNU-FDL-1.3.txt) — and whether the continuation was entitled
+to relicense it under GPL-3.0 cannot be established, because both the author and that repository
+are gone. [NOTICE](NOTICE) lays out what is known, what is claimed, and how to reach the
+maintainer if you are a rights holder with a different view.
