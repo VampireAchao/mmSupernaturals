@@ -1,0 +1,122 @@
+name: Crash or error
+description: The server won't start, the console throws, the plugin breaks something, or a feature does nothing at all
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **You can write this in Chinese** — 用中文填写完全可以，不会因此被忽略。
+
+        Three things to check first, because they explain most reports:
+
+        1. **Paper 26.3 on Java 25.** This plugin is built against the Paper API and will **not load on plain Spigot** — that is by design, not a bug.
+        2. `config.yml` and `data.yml` are created on first start. After editing them, run `/sn reload` or restart.
+        3. The church and the banish point have to be placed by an op (`/sn setChurch`, `/sn setBanish`). Until they are, the features that use them fail silently.
+
+        If all of that holds, please fill this in completely — **the console output especially**. Without it there is little to go on.
+
+  - type: dropdown
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: From `/plugins`, or the jar filename.
+      options:
+        - 1.5.1
+        - 1.5.0
+        - 1.4.1
+        - Earlier (say which below)
+    validations:
+      required: true
+
+  - type: input
+    id: server
+    attributes:
+      label: Server and build
+      description: For example Paper 26.3 build 1024, or Purpur 26.3 build 2400.
+      placeholder: Paper 26.3 build 1024
+    validations:
+      required: true
+
+  - type: dropdown
+    id: java-version
+    attributes:
+      label: Java version
+      description: Output of `java -version`.
+      options:
+        - "25"
+        - "21"
+        - "17 or older"
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: server-software
+    attributes:
+      label: Server software
+      options:
+        - Paper
+        - Purpur
+        - Folia
+        - Spigot
+        - Something else (say which below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+      description: Name the command, the action and the race. "Doesn't work" cannot be acted on; "after /sn power the chat stays empty" can.
+      placeholder: |
+        Actual: a player killed by a vampire is not turned, and no message appears.
+        Expected: the conversion message, and a [Vampire] tag above the player.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Steps that reproduce it reliably. If it is intermittent, say what was going on at the time.
+      placeholder: |
+        1. /sn convert Vampire <player>
+        2. Stand outside during the day
+        3. No burning, no damage
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      description: Copied from `logs/latest.log`. If there is a stack trace, paste all of it, not just the first line.
+      render: shell
+      placeholder: |
+        [12:34:56 ERROR]: Could not pass event PlayerDeathEvent to mmSupernaturals v1.5.1
+        java.lang.NullPointerException: Cannot invoke "..." because "..." is null
+            at me.matterz.supernaturals...
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config and other plugins (optional)
+      description: If you suspect configuration or a conflict, paste the section of `config.yml` involved and the output of `/plugins` — the permissions plugin and WorldGuard versions matter most. **Remove server IPs and passwords first.**
+      render: yaml
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: The server is Paper (or Purpur), not plain Spigot
+          required: true
+        - label: The console output above is copied verbatim, not paraphrased
+          required: true
+        - label: I understand this is a community fork, not the original author's build, so the report belongs here
+          required: true

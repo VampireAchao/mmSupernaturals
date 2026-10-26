@@ -1,0 +1,112 @@
+name: A race behaves wrong
+description: A conversion, an ability or a counter disagrees with what the README says — no crash involved
+title: "[Race] "
+labels: ["gameplay"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **You can write this in Chinese** — 用中文填写完全可以，不会因此被忽略。
+
+        Reports like this are usually a changed config rather than a code bug, so please check:
+
+        - Power is clamped to **0–10000**, whatever the source. A `data.yml` holding a larger number is corrected as it is read, and the correction is named in the console log — that line means the plugin did it on purpose.
+        - A ghoul's default truce list holds **19 mobs**. A `config.yml` still carrying the original six-mob default (all zombies) is upgraded once; **a list you edited yourself is left alone**.
+        - Conversions happen on the right structure: gold-block altar, lapis altar, church altar, offering altar. Where those are is decided by `/sn setChurch` and friends.
+
+  - type: dropdown
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      options:
+        - 1.5.1
+        - 1.5.0
+        - 1.4.1
+        - Earlier (say which below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: race
+    attributes:
+      label: Race involved
+      options:
+        - Vampire
+        - Ghoul
+        - Werewolf
+        - Demon
+        - Priest
+        - WitchHunter
+        - Angel
+        - EnderBorn
+        - Not a specific race (power, conversion chance, permissions)
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Which part
+      description: For example turning, turning back, the grapple, the Wolfbane potion, the kill list, summoning offerings.
+      placeholder: Turning back (werewolf drinks Wolfbane)
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happens, and what the README says should happen
+      description: Quote the line from the README — it decides whether the doc or the code is wrong.
+      placeholder: |
+        Actual: the werewolf drinks Wolfbane, the message appears, but the race does not change and power is not cleared.
+        README: "Werewolf — killed by a wild wolf at night in, Wolfbane potion out".
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. /sn convert Werewolf <player>
+        2. Give the player a Wolfbane potion and let them drink it
+        3. Watch the race and the power value
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: config-touched
+    attributes:
+      label: Have you edited this race's config?
+      options:
+        - label: No, it is the default `config.yml`
+        - label: Yes (paste the changed part below)
+        - label: Not sure
+
+  - type: textarea
+    id: config
+    attributes:
+      label: The changed config (optional)
+      description: Only the section for this race. **Remove server IPs and passwords first.**
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output (optional)
+      description: Anything the console printed. Leave empty if it said nothing.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: The server is Paper 26.3 on Java 25
+          required: true
+        - label: The config above is what the server is actually running
+          required: true

@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: A question about installing or configuring
+    url: https://github.com/VampireAchao/mmSupernaturals/discussions/categories/q-a
+    about: Won't load, config makes no sense, what a command is supposed to do — questions belong in Discussions Q&A, where they can be followed up without closing a ticket. 中文提问也可以。
+
+  - name: Install steps and commands
+    url: https://github.com/VampireAchao/mmSupernaturals#installing
+    about: Read the Install and Commands sections first — most "the command does nothing" reports are a missing /sn setChurch.
+
+  - name: The original 2011 plugin, and what this build is
+    url: https://github.com/VampireAchao/mmSupernaturals/blob/master/NOTICE
+    about: If you are looking for the 2011 release, or want to know how this build relates to the original author, read NOTICE.

@@ -265,3 +265,19 @@ That is not the whole story, and it matters if you plan to redistribute. The 201
 to relicense it under GPL-3.0 cannot be established, because both the author and that repository
 are gone. [NOTICE](NOTICE) lays out what is known, what is claimed, and how to reach the
 maintainer if you are a rights holder with a different view.
+## Getting help
+
+Two doors, and picking the right one saves a round trip:
+
+- **Something is broken** — [open an issue](https://github.com/VampireAchao/mmSupernaturals/issues/new/choose).
+  There are two forms: *Report a crash* for stack traces, startup failures and features that do
+  nothing, and *A race behaves wrong* for conversions, abilities and counters that disagree with
+  the tables above. Both ask for the server version and the console output, because almost every
+  report turns out to be a version mismatch.
+- **A question** — [Discussions, Q&A](https://github.com/VampireAchao/mmSupernaturals/discussions/categories/q-a).
+  Installing it, understanding `config.yml`, what a command is supposed to do: that is a
+  conversation, not a bug, and it belongs somewhere it can be answered without closing a ticket.
+
+Worth reading before either: [Installing](#installing) and [Setting up](#setting-up). The single
+most common problem is a server that is not Paper 26.3 on Java 25; the second is a church or
+banish point that was never placed with `/sn setChurch` and `/sn setBanish`.
