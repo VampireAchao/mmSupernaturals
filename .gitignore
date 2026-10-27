@@ -1,5 +1,10 @@
 target/
 /server/
+# No jar belongs in this repository - not the plugin's build output, and above all not a
+# server core. The test harness downloads Paper into target/ at run time and it stays there.
+*.jar
+# Skins for the test hall are supplied per checkout - see harness-skins.properties.example
+harness-skins.properties
 .idea/*
 !.idea/runConfigurations/
 *.iml

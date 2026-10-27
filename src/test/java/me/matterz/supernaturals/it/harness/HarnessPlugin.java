@@ -101,6 +101,11 @@ public final class HarnessPlugin extends JavaPlugin {
         // generating its defaults at all, leaving every configured material null.
         SNConfigHandler.debugMode = true;
 
+        // The stand-ins' skins are drawn here and fetched by the client from a loopback port, so
+        // the server is up before the first room asks for a face. Failing to bind is survivable:
+        // the profiles go out without a texture and everyone is a Steve.
+        SkinServer.start();
+
         if (Boolean.getBoolean("harness.hall")) {
             buildHall();
         }
@@ -282,6 +287,7 @@ public final class HarnessPlugin extends JavaPlugin {
         if (socket != null) {
             socket.close();
         }
+        SkinServer.stop();
         for (Map.Entry<String, Object> actor : new ArrayList<>(actors.entrySet())) {
             try {
                 Nms.disconnect(actor.getValue());

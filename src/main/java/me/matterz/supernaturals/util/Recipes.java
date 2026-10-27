@@ -22,10 +22,9 @@ package me.matterz.supernaturals.util;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.SortedSet;
-import java.util.TreeSet;
 
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -70,17 +69,19 @@ public class Recipes {
 		return TextUtil.implode(lines, ", ");
 	}
 
-	// http://stackoverflow.com/questions/2864840/treemap-sort-by-value
-	public static <K, V extends Comparable<? super V>> SortedSet<Map.Entry<K, V>> entriesSortedByValues(Map<K, V> map) {
-		SortedSet<Map.Entry<K, V>> sortedEntries = new TreeSet<Map.Entry<K, V>>(new Comparator<Map.Entry<K, V>>() {
-			@Override
-			public int compare(Map.Entry<K, V> e1, Map.Entry<K, V> e2) {
-				int res = e1.getValue().compareTo(e2.getValue());
-				return res != 0 ? res : 1; // Special fix to preserve
-											// items with equal values
-			}
-		});
-		sortedEntries.addAll(map.entrySet());
-		return sortedEntries;
+	/**
+	 * The entries of that map, smallest value first, ties in a fixed order.
+	 *
+	 * <p>A list rather than a sorted set: a set has to call equal values "the same entry" and
+	 * drop one of them, and dodging that needs a comparator that lies about equality. A list
+	 * has no such trap to step around. Written here rather than lifted out of an answer on a
+	 * Q&A site, so that the licence on this file is the only licence in it.
+	 */
+	public static <K, V extends Comparable<? super V>> List<Map.Entry<K, V>> entriesSortedByValues(
+			Map<K, V> map) {
+		List<Map.Entry<K, V>> entries = new ArrayList<Map.Entry<K, V>>(map.entrySet());
+		entries.sort(Comparator.<Map.Entry<K, V>, V>comparing(Entry::getValue)
+				.thenComparing(entry -> String.valueOf(entry.getKey())));
+		return entries;
 	}
 }

@@ -4,7 +4,7 @@ version: ${project.version}
 api-version: "${plugin.api.version}"
 softdepend: [WorldGuard]
 author: Matterz (original, 2011); mmiillkkaa (2011-2012); VampireAchao (this community fork)
-description: A community fork of Matterz's Supernatural Players. Not the original author's release, and not endorsed by them.
+description: A community fork of Matterz's Supernatural Players. Not the original author's release, not endorsed by them, and not an official Minecraft product.
 commands:
   sn:
     description: Supernatural commands

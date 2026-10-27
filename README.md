@@ -8,6 +8,8 @@ turning people, and its own counters. A player is an ordinary person until somet
 
 Java 25 · Paper 26.3 (`api-version: 26.3`) · GPL-3.0
 
+*Not an official Minecraft product. Not approved by or associated with Mojang, Microsoft, or NetEase.*
+
 ---
 
 ## About this repository — read this first
@@ -230,6 +232,12 @@ mvn verify -Pit   # unit + scenario tests: boots a real Paper server and drives 
                   # through the test hall (slow — that is why they sit behind a profile)
 ```
 
+The stand-ins in the hall wear skins this project draws for them: two flat colours and a trim
+stripe per race, painted at run time and served from a loopback port, so nothing here is somebody
+else's artwork. Want different faces? Copy `harness-skins.properties.example` to
+`harness-skins.properties` — ignored by git — and point it at a texture you made and host; the
+example says how. Without it everything runs as shipped.
+
 ### Releasing
 
 A release is a tag. Set the version in `pom.xml`, commit, and push a tag that matches it:
@@ -254,10 +262,37 @@ step (`mvn verify -Pit`).
 - **VampireAchao** — maintainer of this fork. Not an author of the plugin, and not affiliated with
   any of the people above.
 
+## Trademarks and non-affiliation
+
+Minecraft is a trademark of Mojang Synergies AB, and Mojang Studios is a subsidiary of Microsoft. In
+mainland China, Minecraft is published and operated by **NetEase** (网易) under an exclusive licence.
+None of those three has anything to do with this repository, and none of them supports it.
+
+The line under the title above is the wording Mojang's own usage guidelines ask for, reproduced
+rather than paraphrased. What it does and does not cover is worth spelling out, because "unofficial
+plugin" and "pirated server" get mistaken for each other constantly:
+
+| | |
+|---|---|
+| **In this repository** | 51 source files of plugin code, its `plugin.yml`, a test harness, and the cover art above — which is original work in a blocky style, not a Mojang asset |
+| **Not in this repository** | No Minecraft client or server jar, no server core (Paper, Paperclip, Spigot, Bukkit), no patched game jar, and no Mojang textures, sounds, language files or fonts. Not in the working tree, and not anywhere in the history back to 2011 — see [NOTICE](NOTICE) |
+| **You supply yourself** | A Paper server, and a copy of Minecraft you are licensed to run. The test harness downloads Paper into `target/` when it runs; that directory is ignored and never committed |
+
+The plugin compiles against the Paper API as a `provided` dependency, so the published jar is about
+190 KB of this project's own classes and nothing else — no game code is bundled or shaded into it.
+
+What none of this gives you is a right to *run* a server. Running one publicly, and especially
+charging for it, is a separate question, governed by the [Minecraft EULA](https://www.minecraft.net/eula)
+and by local law — in mainland China by NetEase's exclusive rights, which have been enforced against
+unlicensed servers both civilly and criminally. This project is a plugin. It takes no position on
+your server and offers you nothing to stand on if a rights holder comes asking.
+
 ## License
 
-This fork is released under **GNU General Public License v3.0** — see [gpl-3.0.txt](gpl-3.0.txt). It
-inherited that licence from the 2011–2012 continuation rather than choosing it.
+This fork is released under **GNU General Public License v3.0**. The full text is in
+[LICENSE](LICENSE); `gpl-3.0.txt` is the same file byte for byte, kept under the name it arrived with
+so that the provenance trail in [NOTICE](NOTICE) still points somewhere. It inherited that licence
+from the 2011–2012 continuation rather than choosing it.
 
 That is not the whole story, and it matters if you plan to redistribute. The 2011 original
 (*Supernatural Players* by Matterz) carried **GNU FDL 1.3** — a copy is kept at
@@ -265,6 +300,7 @@ That is not the whole story, and it matters if you plan to redistribute. The 201
 to relicense it under GPL-3.0 cannot be established, because both the author and that repository
 are gone. [NOTICE](NOTICE) lays out what is known, what is claimed, and how to reach the
 maintainer if you are a rights holder with a different view.
+
 ## Getting help
 
 Two doors, and picking the right one saves a round trip:

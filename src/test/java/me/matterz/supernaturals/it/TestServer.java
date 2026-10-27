@@ -289,8 +289,12 @@ public final class TestServer implements AutoCloseable {
     }
 
     private static List<String> command() {
+        // The project directory goes into the server JVM as well as this one: the harness lives
+        // inside the server, and a checkout-supplied skin file has to be looked for in the
+        // project rather than in the server directory - which reset() empties on every run.
         List<String> command = new ArrayList<>(List.of(
-                javaBinary(), "-Xms1G", "-Xmx1G", "-Dharness.port=" + CONTROL_PORT));
+                javaBinary(), "-Xms1G", "-Xmx1G", "-Dharness.port=" + CONTROL_PORT,
+                "-Dit.projectDir=" + projectDirectory().toAbsolutePath()));
         if (Boolean.getBoolean("it.interactive")) {
             // A hand-run server gets the test hall. The scenarios place what they need at
             // known coordinates and would only be in its way.
