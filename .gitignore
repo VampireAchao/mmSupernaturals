@@ -1,5 +1,8 @@
 target/
 /server/
+# No jar belongs in this repository - not the plugin's build output, and above all not a
+# server core. The test harness downloads Paper into target/ at run time and it stays there.
+*.jar
 .idea/*
 !.idea/runConfigurations/
 *.iml

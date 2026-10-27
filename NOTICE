@@ -26,8 +26,18 @@ records what each layer of the code is licensed under, because that is not one a
 
 3. This fork.
 
-   It inherits that tree and keeps GPL-3.0 as its licence (gpl-3.0.txt). Changes made in
-   this repository are licensed GPL-3.0 by their authors.
+   It inherits that tree and keeps GPL-3.0 as its licence. The full text is at LICENSE - the
+   same file as gpl-3.0.txt, under the name GitHub reads - so changes made in this
+   repository are licensed GPL-3.0 by their authors.
+
+4. What this repository does not carry.
+
+   No Minecraft client or server jar, no server core (Paper, Paperclip, Spigot, Bukkit), no
+   patched game jar, and no Mojang assets are committed here - not in the working tree, and
+   not in any commit since 2011. The integration tests download a Paper server into
+   target/it/server/paper.jar when they run, and target/ is ignored. The published jar
+   contains this project's own classes and nothing else; paper-api is a `provided`
+   dependency and is not bundled or shaded.
 
 What this notice does and does not claim
 ----------------------------------------
@@ -35,6 +45,9 @@ What this notice does and does not claim
 It does not claim that the whole tree is unambiguously GPL-3.0. For the 2011 portions the
 only licence on record is FDL 1.3, and the FSF does not consider FDL and GPL compatible,
 so the relicensing in step 2 may not reach that code.
+
+It does not claim any connection to Mojang, Microsoft or NetEase, and it does not grant a
+right to operate a Minecraft server. See "Trademarks and non-affiliation" in the README.
 
 It does claim that this project is distributed in good faith: attribution is kept, the
 source is available, the older licence text is preserved, and nothing here is presented as
