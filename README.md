@@ -232,10 +232,11 @@ mvn verify -Pit   # unit + scenario tests: boots a real Paper server and drives 
                   # through the test hall (slow — that is why they sit behind a profile)
 ```
 
-The stand-ins in the hall wear the default skin unless you give them better ones. Copy
-`harness-skins.properties.example` to `harness-skins.properties` — ignored by git — and fill it in
-from a profile you control; the example says how. Without it everything still runs, everybody is
-Steve, and the one case that checks a skin reached a profile skips itself rather than failing.
+The stand-ins in the hall wear skins this project draws for them: two flat colours and a trim
+stripe per race, painted at run time and served from a loopback port, so nothing here is somebody
+else's artwork. Want different faces? Copy `harness-skins.properties.example` to
+`harness-skins.properties` — ignored by git — and point it at a texture you made and host; the
+example says how. Without it everything runs as shipped.
 
 ### Releasing
 

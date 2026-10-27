@@ -146,22 +146,27 @@ final class Nms {
      * to hit has nobody", and the second is much worse than a plain face. The warning is what
      * makes a quiet failure visible on a hand-run server; {@code mmp skin <name>} is how to ask
      * on purpose.
+     *
+     * <p>A skin that cannot produce a value at all - no supplied texture and no server to serve
+     * the drawn one - is the same case as no skin: the map goes out empty and the client draws
+     * its own default.
      */
     private static Object propertiesWearing(Skins.Skin skin) {
         try {
             Object multimap = load("com.google.common.collect.HashMultimap")
                     .getMethod("create")
                     .invoke(null);
-            if (skin != null) {
+            String value = skin == null ? null : skin.value();
+            if (value != null) {
                 Class<?> propertyClass = load("com.mojang.authlib.properties.Property");
                 // A texture with no signature is one a client may refuse; the hall sets
                 // enforce-secure-profile=false, which is what makes one usable - so the
                 // three-argument form is only asked for when there is a signature to give it.
                 Object property = skin.signature() == null
                         ? propertyClass.getConstructor(String.class, String.class)
-                                .newInstance("textures", skin.value())
+                                .newInstance("textures", value)
                         : propertyClass.getConstructor(String.class, String.class, String.class)
-                                .newInstance("textures", skin.value(), skin.signature());
+                                .newInstance("textures", value, skin.signature());
                 put(multimap, "textures", property);
             }
             return load("com.mojang.authlib.properties.PropertyMap")

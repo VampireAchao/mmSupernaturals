@@ -1,29 +1,31 @@
-# The skins the hall's stand-in players wear.
+# Skins for the hall's stand-in players - optional.
 #
-# Copy this file to harness-skins.properties, in the project directory, and fill in the
-# entries you want. That file is git-ignored: skins belong to whoever supplied them, and
-# this repository does not carry other people's.
+# The hall does not need this file. It draws its own skins: two flat colours and a trim stripe
+# per race, painted by SkinArt and served from a loopback port, so a stand-in reads as the race
+# it is demonstrating without borrowing anybody's artwork. With no file here, that is what
+# everybody wears.
 #
-# Without it every stand-in draws in the default Steve or Alex skin, the build works, and
-# the test that checks a skin arrives on the profile skips itself. With it, a stand-in in
-# the vampire room wears what you put under `vampire`.
+# Copy this file to harness-skins.properties, in the project directory, only if you want
+# different faces. It is git-ignored: a skin belongs to whoever made it, and this repository
+# carries nobody's.
 #
 # For each name:
 #   <name>.value      the base64 `textures` property of a profile
 #   <name>.signature  its signature - or leave it empty for an unsigned texture, which the
 #                     hall accepts because it sets enforce-secure-profile=false
 #
-# Both come from a profile you control:
-#   api.minecraftservices.com/minecraft/profile/lookup/name/<name>     -> the uuid
-#   sessionserver.mojang.com/session/minecraft/profile/<uuid>?unsigned=false
-#                                                                     -> value and signature
+# The value is a base64-encoded JSON blob of the shape a client expects:
+#   {"textures":{"SKIN":{"url":"http://wherever-you-serve-it/<name>.png"}}}
+# and the URL has to be reachable by the client, not by the server - the client is what fetches
+# a skin. A file: URL will not do.
 #
-# The texture must be a player texture. A mob texture put on a player draws as rubbish;
-# that is what the mob-shaped rooms were for, and if you want those back, supply a player
-# texture that looks like the mob rather than the mob account's own.
+# Use a texture you made, or one you have permission to use. Do not paste somebody else's: this
+# file is why the eleven that used to be in Skins.java could be taken out, and putting eleven
+# others back in would only move the problem to a machine nobody can inspect.
 #
-# Models are not set here: a slim or classic body is part of the texture's own metadata,
-# and a profile that says slim on an arm-sized model is a profile that draws wrong.
+# Models are not set here: a slim or classic body is part of the texture's own metadata, and a
+# profile that says slim on an arm-sized model is a profile that draws wrong. The drawn skins
+# are classic.
 
 vampire.value=
 vampire.signature=

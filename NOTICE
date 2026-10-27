@@ -44,9 +44,11 @@ records what each layer of the code is licensed under, because that is not one a
    real accounts' signed skin textures, read from Mojang's profile and session APIs, so that
    the harness's stand-in players would wear the race they demonstrate. They were other
    people's skins, copied into a public repository to decorate a test server, and they have
-   been removed. The harness now reads them from harness-skins.properties, which is ignored
-   and never committed; harness-skins.properties.example shows the shape. With no such file
-   every stand-in draws in the default skin.
+   been removed. What replaced them is not another borrowed set: each race is now drawn from
+   two flat colours and a trim stripe by SkinArt.java, which this project owns, and served to
+   the client from a loopback port by SkinServer.java. Nothing is downloaded, nothing is
+   signed, and harness-skins.properties - ignored, never committed - exists only to let a
+   checkout put its own texture on instead.
 
    Those eleven values are still in this repository's history, in every commit before the one
    that removed them. Taking them out of a published history means rewriting every commit and
