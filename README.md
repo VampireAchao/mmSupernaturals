@@ -232,6 +232,11 @@ mvn verify -Pit   # unit + scenario tests: boots a real Paper server and drives 
                   # through the test hall (slow — that is why they sit behind a profile)
 ```
 
+The stand-ins in the hall wear the default skin unless you give them better ones. Copy
+`harness-skins.properties.example` to `harness-skins.properties` — ignored by git — and fill it in
+from a profile you control; the example says how. Without it everything still runs, everybody is
+Steve, and the one case that checks a skin reached a profile skips itself rather than failing.
+
 ### Releasing
 
 A release is a tag. Set the version in `pom.xml`, commit, and push a tag that matches it:

@@ -1,5 +1,9 @@
 package me.matterz.supernaturals.it;
 
+import me.matterz.supernaturals.it.harness.Skins;
+
+import java.nio.file.Files;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -7,6 +11,7 @@ import org.junit.jupiter.api.TestInstance;
 
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The skins the hall's stand-ins wear.
@@ -35,6 +40,12 @@ class SkinsIT extends ServerTest {
     @Test
     @DisplayName("a stand-in is built wearing the skin of the race he is playing")
     void wearsTheRace() {
+        // Skins are supplied per checkout now, not committed - this repository carries no
+        // account's texture any more. A checkout without the file has nothing to assert here,
+        // and skipping says that out loud where an assertion failure would only say "broken".
+        assumeTrue(Files.isReadable(Skins.file()),
+                "no skins in this checkout: copy harness-skins.properties.example to "
+                        + Skins.file() + " and fill it in");
         String vampire = server().probe("ghost " + VAMPIRE + " vampire");
         String werewolf = server().probe("ghost " + WEREWOLF + " werewolf");
 

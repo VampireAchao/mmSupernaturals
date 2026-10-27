@@ -1,0 +1,62 @@
+# The skins the hall's stand-in players wear.
+#
+# Copy this file to harness-skins.properties, in the project directory, and fill in the
+# entries you want. That file is git-ignored: skins belong to whoever supplied them, and
+# this repository does not carry other people's.
+#
+# Without it every stand-in draws in the default Steve or Alex skin, the build works, and
+# the test that checks a skin arrives on the profile skips itself. With it, a stand-in in
+# the vampire room wears what you put under `vampire`.
+#
+# For each name:
+#   <name>.value      the base64 `textures` property of a profile
+#   <name>.signature  its signature - or leave it empty for an unsigned texture, which the
+#                     hall accepts because it sets enforce-secure-profile=false
+#
+# Both come from a profile you control:
+#   api.minecraftservices.com/minecraft/profile/lookup/name/<name>     -> the uuid
+#   sessionserver.mojang.com/session/minecraft/profile/<uuid>?unsigned=false
+#                                                                     -> value and signature
+#
+# The texture must be a player texture. A mob texture put on a player draws as rubbish;
+# that is what the mob-shaped rooms were for, and if you want those back, supply a player
+# texture that looks like the mob rather than the mob account's own.
+#
+# Models are not set here: a slim or classic body is part of the texture's own metadata,
+# and a profile that says slim on an arm-sized model is a profile that draws wrong.
+
+vampire.value=
+vampire.signature=
+
+ghoul.value=
+ghoul.signature=
+
+werewolf.value=
+werewolf.signature=
+
+demon.value=
+demon.signature=
+
+enderborn.value=
+enderborn.signature=
+
+priest.value=
+priest.signature=
+
+witchhunter.value=
+witchhunter.signature=
+
+angel.value=
+angel.signature=
+
+# The sparring master, and the sparring partner himself.
+master.value=
+master.signature=
+
+# The recorder / observer / examiner in each room.
+scribe.value=
+scribe.signature=
+
+# The target in each room: the one that gets killed, over and over.
+human.value=
+human.signature=

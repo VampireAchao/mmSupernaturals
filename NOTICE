@@ -39,6 +39,21 @@ records what each layer of the code is licensed under, because that is not one a
    contains this project's own classes and nothing else; paper-api is a `provided`
    dependency and is not bundled or shaded.
 
+   One piece of third-party data used to be embedded, in test code only, and is not any
+   more. Skins.java, under src/test/java/me/matterz/supernaturals/it/harness/, held eleven
+   real accounts' signed skin textures, read from Mojang's profile and session APIs, so that
+   the harness's stand-in players would wear the race they demonstrate. They were other
+   people's skins, copied into a public repository to decorate a test server, and they have
+   been removed. The harness now reads them from harness-skins.properties, which is ignored
+   and never committed; harness-skins.properties.example shows the shape. With no such file
+   every stand-in draws in the default skin.
+
+   Those eleven values are still in this repository's history, in every commit before the one
+   that removed them. Taking them out of a published history means rewriting every commit and
+   every release tag, which this project will not do for tidiness alone. They were public
+   profile data to begin with; if you are one of the eleven and want them gone, open an issue
+   and they will be gone.
+
 What this notice does and does not claim
 ----------------------------------------
 
